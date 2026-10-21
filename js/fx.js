@@ -33,7 +33,8 @@ function coneDir(dir, spread) {
 
 const FX = {
   flashA: 0, flashColor: '#ffffff',
-  parts: [], swooshes: [], lines: [], bolts: [], rings: [], glints: [], gibList: [], texts: [], lights: [],
+  parts: [], swooshes: [], lines: [], bolts: [], rings: [], glints: [], gibList: [], texts: [], lights: [], decals: [], ghosts: [],
+  MAX_DECALS: 30,
   MAX_PARTS: 3000, group: null, glow: null, solid: null, gibMats: new Map(), gibFeet: null,
 
   init(scene) {
@@ -44,7 +45,17 @@ const FX = {
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.MAX_PARTS * 3), 3));
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.MAX_PARTS * 4), 4));
       geo.setDrawRange(0, 0);
-      const mat = new THREE.PointsMaterial({ size, vertexColors: true, transparent: true, depthWrite: !additive, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, fog: !additive });
+      // no depth writes, so a fading point never cuts a square out of what's behind it
+      const mat = new THREE.PointsMaterial({ size, vertexColors: true, transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, fog: !additive });
+      // points fade out within 2 m of the camera instead of filling the view
+      mat.onBeforeCompile = (sh) => {
+        sh.vertexShader = sh.vertexShader
+          .replace('#include <common>', '#include <common>\nvarying float vNear;')
+          .replace('#include <fog_vertex>', '#include <fog_vertex>\nvNear = smoothstep( 0.8, 2.0, - mvPosition.z );');
+        sh.fragmentShader = sh.fragmentShader
+          .replace('#include <common>', '#include <common>\nvarying float vNear;')
+          .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= vNear;');
+      };
       const pts = new THREE.Points(geo, mat);
       pts.frustumCulled = false;
       scene.add(pts);
@@ -56,17 +67,17 @@ const FX = {
   },
   clear() {
     this.parts.length = 0;
-    for (const list of [this.swooshes, this.lines, this.bolts, this.rings, this.glints, this.gibList]) {
+    for (const list of [this.swooshes, this.lines, this.bolts, this.rings, this.glints, this.gibList, this.decals]) {
       for (const o of list) this.drop(o);
       list.length = 0;
     }
-    this.texts.length = 0; this.lights.length = 0;
+    this.texts.length = 0; this.lights.length = 0; this.ghosts.length = 0;
     this.flashA = 0;
   },
   // removes every effect without disposing its material; returns the materials
   detachAll() {
     const mats = [];
-    for (const list of [this.swooshes, this.lines, this.bolts, this.rings, this.glints]) {
+    for (const list of [this.swooshes, this.lines, this.bolts, this.rings, this.glints, this.decals]) {
       for (const o of list) { if (o.mesh) { this.group.remove(o.mesh); mats.push(o.mesh.material); } }
       list.length = 0;
     }
@@ -109,6 +120,13 @@ const FX = {
     for (let i = this.n(count); i > 0; i--) {
       const d = coneDir(o.dir || { x: 0, y: 1, z: 0 }, o.spread || 3), s = rand(0.3, 1) * (o.smax || 3);
       this.add({ x: pos.x + rand(-0.2, 0.2), y: pos.y + 0.05, z: pos.z + rand(-0.2, 0.2), vx: d.x * s, vy: Math.abs(d.y) * s * 0.4 + (o.rise || 0.6), vz: d.z * s, g: -0.5, drag: 3, t: 0, dur: rand(0.4, 0.9) * (o.life || 1), c0: c, c1: c, c2: c, glow: false, fade: true });
+    }
+  },
+  // glowing cinders that drift up from a fire or an explosion
+  embers(pos, count) {
+    for (let i = this.n(count); i > 0; i--) {
+      this.add({ x: pos.x + rand(-0.3, 0.3), y: pos.y, z: pos.z + rand(-0.3, 0.3), vx: rand(-1.4, 1.4), vy: rand(1.8, 5.5), vz: rand(-1.4, 1.4), g: -1, drag: 1.2, t: 0, dur: rand(0.5, 1.3),
+        c0: hexLinear('#fff4d0'), c1: hexLinear('#ffb040'), c2: hexLinear('#a03010'), glow: true });
     }
   },
   oil(pos, count, dir, speed = 10) {
@@ -192,6 +210,25 @@ const FX = {
     return g;
   },
   light(pos, color, intensity, distance, dur = 0.2) { this.lights.push({ x: pos.x, y: pos.y, z: pos.z, color, intensity, distance, t: 0, dur }); },
+  // A mark on the ground where it lies under pos: 'gouge' (o.len metres along o.yaw), 'crack' (o.len across)
+  // or 'scorch' (o.r radius). Marks start glowing hot, cool, and fade over their last second.
+  decal(kind, pos, o = {}) {
+    const g = World.groundAt(pos.x, pos.z, pos.y + 0.5);
+    if (g === -Infinity || pos.y - g > 1) return;
+    if (this.decals.length >= this.MAX_DECALS) this.drop(this.decals.shift());
+    const d = Object.assign({ t: 0, dur: 6 }, o);
+    const m = new THREE.Mesh(this.decalGeo || (this.decalGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)), Gfx.decalMaterial(kind, { x: pos.x, y: g, z: pos.z }));
+    m.position.set(pos.x, g + 0.012, pos.z);
+    if (kind === 'gouge') { m.scale.set(0.7, 1, Math.abs(d.len || 2)); m.rotation.y = d.yaw || 0; }
+    else { const s = kind === 'scorch' ? (d.r || 1.5) * 2 : (d.len || 2.5); m.scale.set(s, 1, s); m.rotation.y = rand(0, TAU); }
+    m.renderOrder = -1;
+    d.mesh = m; d.ownMat = true;
+    this.group.add(m);
+    this.decals.push(d);
+    return d;
+  },
+  // an afterimage of the player's current pose; render.js takes the snapshot
+  ghost(color, dur, alpha) { if (this.ghosts.length < 24) this.ghosts.push({ color, dur, alpha, t: 0, slot: null }); },
   flash(color = '#ffffff', a = 0.5) {
     if (!S.visuals.flashes) return;
     this.flashColor = color;
@@ -259,6 +296,19 @@ const FX = {
     this.texts = this.texts.filter((t) => t.t < t.dur);
     for (const l of this.lights) l.t += dt;
     this.lights = this.lights.filter((l) => l.t < l.dur);
+    for (const g of this.ghosts) g.t += dt;
+    this.ghosts = this.ghosts.filter((g) => g.t < g.dur);
+    let kd = 0;
+    for (const d of this.decals) {
+      d.t += dt;
+      if (d.t >= d.dur) { this.drop(d); continue; }
+      // hot at first, cooling over a second and a half
+      const hot = Math.max(0, 1 - d.t / 1.5);
+      d.mesh.material.emissive.setRGB(1 * hot * hot, 0.3 * hot * hot, 0.08 * hot * hot);
+      d.mesh.material.opacity = Math.min(1, d.dur - d.t);
+      this.decals[kd++] = d;
+    }
+    this.decals.length = kd;
     let k = 0;
     for (const g of this.gibList) {
       g.t += dt;
@@ -307,7 +357,7 @@ const FX = {
       }, n);
     }
     for (const R of this.rings) {
-      const k = R.t / R.dur, r = lerp(R.r0, R.r1, easeOutCubic(k));
+      const k = R.t / R.dur, r = lerp(R.r0, R.r1, R.ease === false ? k : easeOutCubic(k));
       R.mesh.position.set(R.x, R.y, R.z);
       R.mesh.scale.set(r, r, r);
       if (!R.flat) R.mesh.quaternion.copy(cam.quaternion);

@@ -60,20 +60,29 @@ const Gfx = {
   // The scene has no ambient light. The level gets its light from the bake (a per-vertex 'baked'
   // attribute); characters get the baked light where they stand through uFeet, as Half-Life 1 did.
   // Both still receive the dynamic light pool on top. Parts of one character share one feet uniform.
-  litMaterial(opts, mode, feetUniform = null) {
+  // A cool rim on characters keeps dark armour readable against a night street.
+  rim: { value: new THREE.Color('#2e3a58') },
+  // bullet time drains the colour from lit surfaces; glowing parts and effects stay bright
+  desat: { value: 0 },
+  litMaterial(opts, mode, feetUniform = null, rim = true) {
     const m = new THREE.MeshLambertMaterial(opts);
     m.defines = mode === 'baked' ? { USE_BAKED: '' } : { USE_FEET: '' };
+    if (!rim) m.defines.NO_RIM = '';
     const feet = mode === 'baked' ? null : feetUniform || { value: new THREE.Color(0.25, 0.22, 0.3) };
     m.userData.feet = feet;
     m.onBeforeCompile = (sh) => {
-      if (feet) sh.uniforms.uFeet = feet;
-      // characters: a 'glow' vertex attribute marks fullbright parts (eyes, cores); meshes without it read 0
+      if (feet) { sh.uniforms.uFeet = feet; sh.uniforms.uRim = this.rim; }
+      sh.uniforms.uDesat = this.desat;
+      // characters: a 'glow' vertex attribute marks fullbright parts (eyes, cores) and 'plain' parts skip the
+      // texture (clean lights); meshes without them read 0
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\n#ifdef USE_BAKED\nattribute vec3 baked;\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nattribute float glow;\nvarying float vGlow;\n#endif')
-        .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_BAKED\nvBaked = baked;\n#endif\n#ifdef USE_FEET\nvGlow = glow;\n#endif');
+        .replace('#include <common>', '#include <common>\n#ifdef USE_BAKED\nattribute vec3 baked;\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nattribute float glow;\nattribute float plain;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
+        .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_BAKED\nvBaked = baked;\n#endif\n#ifdef USE_FEET\nvGlow = glow;\nvPlain = plain;\n#endif');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\n#ifdef USE_BAKED\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nuniform vec3 uFeet;\nvarying float vGlow;\n#endif')
-        .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n#ifdef USE_BAKED\nreflectedLight.indirectDiffuse += vBaked * diffuseColor.rgb;\n#endif\n#ifdef USE_FEET\nreflectedLight.indirectDiffuse += mix( uFeet, vec3( 1.0 ), vGlow ) * diffuseColor.rgb;\n#endif');
+        .replace('#include <common>', '#include <common>\nuniform float uDesat;\n#ifdef USE_BAKED\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nuniform vec3 uFeet;\nuniform vec3 uRim;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
+        .replace('#include <map_fragment>', '#ifdef USE_FEET\n#ifdef USE_MAP\ndiffuseColor *= mix( texture2D( map, vMapUv ), vec4( 1.0 ), vPlain );\n#endif\n#else\n#include <map_fragment>\n#endif')
+        .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n#ifdef USE_BAKED\nreflectedLight.indirectDiffuse += vBaked * diffuseColor.rgb;\n#endif\n#ifdef USE_FEET\nreflectedLight.indirectDiffuse += mix( uFeet, vec3( 1.0 ), vGlow ) * diffuseColor.rgb;\n#ifndef NO_RIM\nfloat rim = 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) );\nreflectedLight.indirectDiffuse += uRim * rim * rim * rim * ( 1.0 - vGlow );\n#endif\n#endif')
+        .replace('#include <opaque_fragment>', '#include <opaque_fragment>\n#ifdef USE_FEET\nfloat dsk = uDesat * ( 1.0 - vGlow );\n#else\nfloat dsk = uDesat;\n#endif\ngl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( dot( gl_FragColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ) * vec3( 0.62, 0.68, 0.95 ), dsk );');
     };
     return m;
   },
@@ -160,6 +169,72 @@ const Gfx = {
     t.minFilter = THREE.LinearMipmapLinearFilter;
     this.texCache.set(key, t);
     return t;
+  },
+  // Characters' surface: blocky grey noise multiplied into each part's colour, for the voxel look of the
+  // concept art. 64 px covers Rig.TEX_M metres, so a 2x2 block is about 4 cm.
+  charTexture() {
+    let t = this.texCache.get('char');
+    if (t) return t;
+    const c = makeCanvas(64, 64), g = c.ctx, R = mulberry32(1337);
+    for (let y = 0; y < 64; y += 2) {
+      for (let x = 0; x < 64; x += 2) {
+        const v = Math.round(255 * (0.72 + R() * 0.28 - (R() < 0.08 ? 0.12 : 0)));
+        g.fillStyle = `rgb(${v},${v},${v})`;
+        g.fillRect(x, y, 2, 2);
+      }
+    }
+    // plate seams
+    g.fillStyle = 'rgb(150,150,150)';
+    g.fillRect(0, 31, 64, 1); g.fillRect(31, 0, 1, 64);
+    t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.magFilter = THREE.NearestFilter;
+    this.texCache.set('char', t);
+    return t;
+  },
+  // Ground marks as white masks the material tints: a furrow running down the texture (with a fainter
+  // churned rim), cracks out from the middle, or a soft round scorch.
+  decalTexture(kind) {
+    const key = 'decal:' + kind;
+    let t = this.texCache.get(key);
+    if (t) return t;
+    const N = 64, c = makeCanvas(N, N), g = c.ctx, R = mulberry32(kind.length * 977 + 13);
+    if (kind === 'scorch') {
+      for (let y = 0; y < N; y += 2) {
+        for (let x = 0; x < N; x += 2) {
+          const a = clamp(1 - Math.hypot(x - 31, y - 31) / 31 + (R() - 0.5) * 0.3, 0, 1);
+          if (a > 0) { g.fillStyle = `rgba(255,255,255,${(a * 0.9).toFixed(2)})`; g.fillRect(x, y, 2, 2); }
+        }
+      }
+    } else if (kind === 'crack') {
+      g.fillStyle = 'rgba(255,255,255,0.95)';
+      for (let i = 0; i < 7; i++) {
+        let a = (i / 7) * TAU + R() * 0.5, x = 31, y = 31;
+        const L = 12 + R() * 16;
+        for (let s = 0; s < L; s += 2) { a += (R() - 0.5) * 0.8; x += Math.cos(a) * 2; y += Math.sin(a) * 2; g.fillRect(Math.round(x), Math.round(y), 2, 2); }
+      }
+      for (let i = 0; i < 14; i++) g.fillRect(Math.round(31 + (R() - 0.5) * 10), Math.round(31 + (R() - 0.5) * 10), 2, 2);
+    } else {
+      for (let y = 0; y < N; y += 2) {
+        const w = 2 * Math.round(3 + R() * 2 + Math.sin((y / N) * Math.PI) * 4), x0 = 32 - w / 2;
+        g.fillStyle = 'rgba(255,255,255,0.95)'; g.fillRect(x0, y, w, 2);
+        g.fillStyle = 'rgba(150,150,150,0.6)'; g.fillRect(x0 - 2, y, 2, 2); g.fillRect(x0 + w, y, 2, 2);
+      }
+    }
+    t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = THREE.NearestFilter;
+    this.texCache.set(key, t);
+    return t;
+  },
+  // A mark's material: lit by the street where it lies, like a character, and glowing hot at first.
+  // Gouges and cracks are pale scars of broken surface; a scorch is soot.
+  decalMaterial(kind, at) {
+    const L = World.def ? World.lightAt(at.x, at.y + 0.3, at.z) : [0.3, 0.26, 0.34];
+    const m = this.litMaterial({ map: this.decalTexture(kind), color: kind === 'scorch' ? '#140e0e' : '#9a8c92', transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 },
+      'feet', { value: new THREE.Color(L[0], L[1], L[2]) }, false);
+    return m;
   },
   // a four-pointed star for glints, white so it can be tinted
   starTexture() {
@@ -280,35 +355,5 @@ const Gfx = {
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
     geo.setIndex(idx);
     return geo;
-  },
-
-  // ---------- player stand-in ----------
-  // Until the player model is designed: a 1.8 m figure in the 2D palette, so the camera has something to frame.
-  standIn() {
-    const g = new THREE.Group();
-    g.userData.feet = { value: new THREE.Color(0.25, 0.22, 0.3) };
-    const mat = (color) => this.litMaterial({ color, transparent: true }, 'feet', g.userData.feet);
-    const mats = [];
-    const part = (w, h, d, x, y, z, color, basic) => {
-      const m = basic ? new THREE.MeshBasicMaterial({ color, transparent: true }) : mat(color);
-      mats.push(m);
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
-      mesh.position.set(x, y, z);
-      g.add(mesh);
-      return mesh;
-    };
-    part(0.16, 0.85, 0.2, -0.12, 0.43, 0, PCOL.dark); part(0.16, 0.85, 0.2, 0.12, 0.43, 0, PCOL.dark);
-    part(0.18, 0.1, 0.28, -0.12, 0.05, -0.04, PCOL.boot); part(0.18, 0.1, 0.28, 0.12, 0.05, -0.04, PCOL.boot);
-    part(0.46, 0.62, 0.26, 0, 1.17, 0, PCOL.mid);
-    part(0.12, 0.6, 0.14, -0.31, 1.15, 0, PCOL.light); part(0.12, 0.6, 0.14, 0.31, 1.15, 0, PCOL.light);
-    part(0.26, 0.28, 0.26, 0, 1.64, 0, PCOL.hi);
-    part(0.2, 0.06, 0.04, 0, 1.66, -0.14, PCOL.visor, true);
-    part(0.06, 0.06, 0.06, 0, 1.2, -0.14, PCOL.core, true);
-    part(0.3, 0.1, 0.3, 0, 1.47, 0.02, PCOL.scarf); part(0.1, 0.36, 0.04, 0.08, 1.3, 0.16, PCOL.scarfD);
-    const blade = part(0.03, 0.9, 0.06, 0.32, 0.55, -0.2, PCOL.blade);
-    blade.rotation.x = -0.35;
-    part(0.05, 0.22, 0.05, 0.32, 0.92, -0.08, PCOL.handle);
-    g.userData.mats = mats;
-    return g;
   },
 };

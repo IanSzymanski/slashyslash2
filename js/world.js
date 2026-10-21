@@ -288,6 +288,9 @@ const STREET = (() => {
   const ground = [70, 270, 470, 700, 900, 1060, 1250, 1450, 1650, 1850, 2050, 2280].map((x, i) => ({ x: X(x), y: 0, z: zs[i] }));
   const high = [[180, 335, -11], [460, 205, -11], [730, 320, 0], [920, 335, -11], [1220, 175, -11], [1470, 300, -6.5], [1650, 255, -11], [2040, 205, -11], [735, 250, 0], [1490, 225, 0], [1830, 270, 0]]
     .map(([x, y, z]) => ({ x: X(x), y: H(y), z }));
+  // the 2D barrel spots: five on the street, one on the overpass, one on a roof
+  const barrelSpots = [[240, G, -3], [700, 320, 0], [1020, G, 4], [1480, G, 2], [1990, G, -4], [1250, 175, -11], [2230, G, 3]]
+    .map(([x, y, z]) => ({ x: X(x), y: H(y), z }));
 
   // static lights for the bake, and the glowing shapes that show where they come from
   const lights = [], emitters = [];
@@ -312,6 +315,6 @@ const STREET = (() => {
     ambient: [0.022, 0.018, 0.032], sky: [0.05, 0.04, 0.075],
     bounds: { minX: L, maxX: R, minZ: -15, maxZ: FRONT },
     playerStart: { x: X(1200), y: 0, z: 0, yaw: -Math.PI / 2 },
-    spawn: { ground, high }, perches, barrelSpots: [],
+    spawn: { ground, high }, perches, barrelSpots,
   };
 })();

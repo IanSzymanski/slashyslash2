@@ -1,11 +1,14 @@
 'use strict';
-// Enemies, pickups, and hit and kill handling. Phase 1 ports the scrapper; the other seven types come in Phase 3.
-// Behaviour and timings follow the 2D enemies.js; distances and speeds are converted at PX = 1/11.
+// Enemies, pickups, and hit and kill handling: the scrapper, plus the gunner and grenadier that Phase 2's
+// moves answer (bolts to send back, grenades to kick home). The other five types come in Phase 3.
+// Behaviour and timings follow the 2D enemies.js and specialists.js; distances and speeds are converted at PX = 1/11.
 
 const ENEMY_DEFS = {
   scrapper: { hp: 44, r: 0.45, h: 1.64, speed: 7.45, score: 100, mass: 1, dmg: 12, model: 'scrapper', debris: ['#6b4a3a', '#3e2a24', '#8e6a52', '#8a8a90'] },
+  gunner: { hp: 32, r: 0.45, h: 1.73, speed: 5.6, score: 130, mass: 1, dmg: 10, model: 'gunner', debris: ['#4a5a3a', '#3e4a32', '#2a2a30', '#6a7a52'] },
+  grenadier: { hp: 50, r: 0.5, h: 1.64, speed: 5.0, score: 200, mass: 1.2, dmg: 12, model: 'grenadier', debris: ['#3a5a5a', '#2a3a3a', '#4af0ff', '#6a8a7a'] },
 };
-const ENEMY_BASE_STATE = { scrapper: 'chase' };
+const ENEMY_BASE_STATE = { scrapper: 'chase', gunner: 'move', grenadier: 'move' };
 const WINDUP_STATES = new Set(['windup', 'aim', 'tele', 'punchWind', 'slamWind', 'bashWind', 'lungeWind', 'throwWind']);
 // The melee glint flashes this long before a hit lands, so a reaction to it lands inside the parry window.
 const GLINT_LEAD = 0.28;
@@ -36,7 +39,9 @@ class Enemy {
     this.spawning = true; this.spawnT = 0.75; this.dead = false; this.t = rand(0, 10);
     this.tethered = false; this.cutMark = 0; this.poise = 0; this.windMul = 1;
     this.speedVar = rand(0.88, 1.12); this.walk = 0; this.struck = false; this.fade = 1;
-    this.model = null;
+    this.model = null; this.side = chance(0.5) ? 1 : -1; this.seek = null; this.blockedT = 0; this.grenade = null; this.plan = null;
+    this.aimDir = { x: fwdX(this.yaw), y: 0, z: fwdZ(this.yaw) };
+    if (type === 'grenadier') this.cd = rand(1.5, 2.5);
   }
   center() { return { x: this.pos.x, y: this.pos.y + this.h / 2, z: this.pos.z }; }
   setState(s) { this.state = s; this.st = 0; this.glinted = false; }
@@ -141,6 +146,62 @@ class Enemy {
     const hs = Math.hypot(this.vel.x, this.vel.z);
     if (hs > 0.9 && this.onGround) this.walk += hs * dt * 1.43;
   }
+  // Walk toward a direction on the ground (unit mx, mz) at spd, turning to face fx, fz when given.
+  steer(dt, mx, mz, spd) {
+    const [nx, nz] = approach2(this.vel.x, this.vel.z, mx * spd, mz * spd, 63.6 * dt);
+    this.vel.x = nx; this.vel.z = nz;
+    const hs = Math.hypot(nx, nz);
+    if (hs > 0.9 && this.onGround) this.walk += hs * dt * 1.43;
+  }
+  brake(dt, rate = 81.8) {
+    const [nx, nz] = approach2(this.vel.x, this.vel.z, 0, 0, rate * dt);
+    this.vel.x = nx; this.vel.z = nz;
+  }
+  // Ranged types hold a band of distance: back off when close, close in when far, drift sideways between.
+  // A wall in the way of backing off turns it into a sidestep.
+  keepRange(dt, near, far, spd) {
+    const p = Game.player, dx = p.pos.x - this.pos.x, dz = p.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1e-3;
+    const ux = dx / d, uz = dz / d, knee = { x: this.pos.x, y: this.pos.y + 0.5, z: this.pos.z };
+    if (this.seek) {
+      const sx = this.seek.x - this.pos.x, sz = this.seek.z - this.pos.z, sd = Math.hypot(sx, sz);
+      if (sd < 0.6 || this.st > 2.5) this.seek = null;
+      else {
+        let mx = sx / sd, mz = sz / sd;
+        if (World.raycast(knee, { x: mx, y: 0, z: mz }, Math.min(sd, 2))) { const f = Nav.dir(this.pos.x, this.pos.z); if (f) { mx = f.x; mz = f.z; } }
+        this.steer(dt, mx, mz, spd);
+        return;
+      }
+    }
+    if (d > far) { this.groundChase(dt, spd, far - 1); return; }
+    let mx = -uz * this.side * 0.5, mz = ux * this.side * 0.5;
+    if (d < near) { mx = -ux; mz = -uz; }
+    if (World.raycast(knee, { x: mx, y: 0, z: mz }, 1.2)) {
+      this.side = -this.side;
+      mx = -uz * this.side; mz = ux * this.side;
+    }
+    this.steer(dt, mx, mz, spd * (d < near ? 1 : 0.55));
+    this.turnToward(p.pos.x, p.pos.z, 9, dt);
+  }
+  // A clear line from a point to the player's chest.
+  clearShot(from) {
+    const c = Game.player.chest(), dx = c.x - from.x, dy = c.y - from.y, dz = c.z - from.z, d = Math.hypot(dx, dy, dz) || 1;
+    return !World.raycast(from, { x: dx / d, y: dy / d, z: dz / d }, d - 0.3);
+  }
+  // A spot on the street near the player with a clear shot, nearest this enemy first.
+  findFiringSpot(height) {
+    const p = Game.player, g = World.def.groundY;
+    let best = null, bd = Infinity;
+    for (const r of [8, 11, 14]) {
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * TAU, x = p.pos.x + Math.cos(a) * r, z = p.pos.z + Math.sin(a) * r;
+        if (World.groundAt(x, z, g + 0.01) !== g || !World.boxFree(x, g, z, this.r, this.h)) continue;
+        if (!this.clearShot({ x, y: g + height, z })) continue;
+        const d = Math.hypot(x - this.pos.x, z - this.pos.z);
+        if (d < bd) { bd = d; best = { x, z }; }
+      }
+    }
+    return best;
+  }
   // A box in front of the enemy: reach forward, halfW to each side, y0..y1 above its feet.
   meleeCheck(reach, halfW, y0, y1, dmg, knock) {
     if (this.struck) return;
@@ -200,6 +261,115 @@ class Enemy {
     }
   }
 }
+
+// ---------- gunner: holds its distance, lays a laser on you, fires a bolt you can slash back ----------
+// the rifle pivots at the right shoulder; its muzzle sits 1.35 m along the aim (as the model holds it)
+Enemy.prototype.shoulder = function () {
+  const Y = this.yaw;
+  return { x: this.pos.x + Math.cos(Y) * 0.26, y: this.pos.y + 1.42, z: this.pos.z - Math.sin(Y) * 0.26 };
+};
+Enemy.prototype.muzzle = function () {
+  const s = this.shoulder(), a = this.aimDir;
+  return { x: s.x + a.x * 1.35, y: s.y + a.y * 1.35, z: s.z + a.z * 1.35 };
+};
+Enemy.prototype.gunner = function (dt) {
+  const p = Game.player, d = distXZ(p.pos, this.pos);
+  switch (this.state) {
+    case 'move': {
+      this.keepRange(dt, 9, 16.8, this.scaleSpeed());
+      // between shots the rifle follows you, so the clear-shot test looks from where it will fire
+      const c = p.chest(), s = this.shoulder(), l = dist3(c, s) || 1;
+      this.aimDir = { x: (c.x - s.x) / l, y: (c.y - s.y) / l, z: (c.z - s.z) / l };
+      const clear = this.clearShot(this.muzzle());
+      if (this.cd <= 0 && d < 25.5 && !p.dead && this.onGround && clear) {
+        this.setState('aim');
+        this.blockedT = 0; this.seek = null;
+        this.windMul = Camera.offView(this.center()) ? OFFVIEW_WIND : 1;
+        Sound.play('enemyWindup', { pm: 0.7 }, this.center());
+      } else if (this.cd <= 0 && d < 25.5 && !p.dead && !clear) {
+        // blocked by a car or a ledge: find a spot with a clear shot
+        this.blockedT += dt;
+        if (this.blockedT > 1.5 && !this.seek) { this.blockedT = 0; this.seek = this.findFiringSpot(1.42); this.st = 0; }
+      }
+      break;
+    }
+    case 'aim': {
+      this.brake(dt);
+      const dur = this.tele(0.75);
+      // tracks you, then locks for the last 0.2 s: the laser turns white
+      if (this.st < dur - 0.2) {
+        const c = p.chest(), s = this.shoulder(), dx = c.x - s.x, dy = c.y - s.y, dz = c.z - s.z, l = Math.hypot(dx, dy, dz) || 1;
+        this.aimDir = { x: dx / l, y: dy / l, z: dz / l };
+        this.turnToward(p.pos.x, p.pos.z, 12, dt);
+      }
+      if (this.st >= dur) {
+        const a = this.aimDir, m = this.muzzle();
+        Game.projectiles.push(new Bolt({ x: m.x + a.x * 0.36, y: m.y + a.y * 0.36, z: m.z + a.z * 0.36 }, a, 22.3 * S.enemies.speed, this.dmg()));
+        Sound.play('enemyShoot', {}, m);
+        FX.sparks(m, 5, a, 0.6, 5.5, 14.5, { c0: '#fff4d0', c1: '#ffb040', c2: '#a04010' });
+        FX.light(m, '#ffb040', 3, 3, 0.1);
+        this.vel.x = -fwdX(this.yaw) * 3.6; this.vel.z = -fwdZ(this.yaw) * 3.6;
+        this.setState('cool');
+      }
+      break;
+    }
+    case 'cool':
+      this.brake(dt, 54.5);
+      if (this.st > 0.45) { this.setState('move'); this.cd = rand(1.4, 2.5); this.windMul = 1; }
+      break;
+  }
+};
+// the laser's state for render.js: 0 off, 1 tracking, 2 locked
+Enemy.prototype.laser = function () {
+  if (this.type !== 'gunner' || this.state !== 'aim') return 0;
+  return this.st >= this.tele(0.75) - 0.2 ? 2 : 1;
+};
+
+// ---------- grenadier: lobs a small pulse grenade with its landing marked; tether it and kick it back ----------
+// the charge cell in the gauntlet at the top of the wind-up, behind the right shoulder
+Enemy.prototype.orbPos = function () {
+  const Y = this.yaw;
+  return { x: this.pos.x - fwdX(Y) * 0.3 + Math.cos(Y) * 0.45, y: this.pos.y + 1.68, z: this.pos.z - fwdZ(Y) * 0.3 - Math.sin(Y) * 0.45 };
+};
+Enemy.prototype.grenadier = function (dt) {
+  const p = Game.player, d = distXZ(p.pos, this.pos);
+  if (this.grenade && this.grenade.dead) this.grenade = null;
+  switch (this.state) {
+    case 'move':
+      this.keepRange(dt, 10, 20, this.scaleSpeed());
+      if (this.cd <= 0 && d < 27.3 && !p.dead && this.onGround && !this.grenade) {
+        this.setState('throwWind');
+        this.windMul = Camera.offView(this.center()) ? OFFVIEW_WIND : 1;
+        Sound.play('enemyWindup', { pm: 0.6 }, this.center());
+      }
+      break;
+    case 'throwWind': {
+      this.brake(dt);
+      this.turnToward(p.pos.x, p.pos.z, 9, dt);
+      // the arc tracks you through the wind-up: aimed where you stand, a little above your feet
+      const o = this.orbPos(), tx = p.pos.x, ty = p.pos.y + 0.55, tz = p.pos.z;
+      const T = clamp(Math.hypot(tx - o.x, ty - o.y, tz - o.z) / 15.5, 0.8, 1.4);
+      this.plan = { o, T, v: { x: (tx - o.x) / T, y: (ty - o.y) / T + 0.5 * GRENADIER_G * T, z: (tz - o.z) / T } };
+      if (Math.random() < 0.5) FX.elec(o, 0.45 + this.st * 0.55, 1, { outer: '#2ab8d8', core: '#ffffff' });
+      if (this.st >= this.tele(1.0)) {
+        this.grenade = new PulseGrenade(o, this.plan.v, this, { g: GRENADIER_G, R: 3.6, dmg: 12, disable: 0, size: 0.75 });
+        Game.projectiles.push(this.grenade);
+        Sound.play('throw', {}, o);
+        this.plan = null;
+        this.setState('cool');
+      }
+      break;
+    }
+    case 'cool':
+      this.brake(dt);
+      if (this.st > 0.6) { this.setState('move'); this.cd = rand(3.5, 5.5); this.windMul = 1; }
+      break;
+  }
+};
+// a grenade kicked back onto its own thrower
+Enemy.prototype.pulseHit = function () {
+  hurtEnemy(this, 90, { cause: 'barrel', heavy: true, kv: { x: 0, y: 20, z: 0 }, dir: { x: 0, y: 1, z: 0 }, crit: true });
+};
 
 // Keep grounded enemies from stacking: the 2D push, around in a circle instead of along a line.
 function separateEnemies(dt) {

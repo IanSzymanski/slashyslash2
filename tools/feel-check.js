@@ -24,13 +24,13 @@ function simulate(seconds, start, script) {
   const trace = [];
   for (let i = 0; i < Math.round(seconds / DT); i++) {
     const t = i * DT;
-    const I = Object.assign({ mx: 0, mz: 0, jump: false, jumpHeld: false, jumpReleased: false, crouch: false, crouchPressed: false, dash: false }, script(t, c));
+    const I = Object.assign({ mx: 0, mz: 0, jump: false, jumpHeld: false, jumpReleased: false, crouch: false, crouchPressed: false, dash: false, aim: null }, script(t, c));
     Controller.timers(c, DT);
     Controller.buffer(c, I);
     if (I.dash) Controller.tryDash(c, I.mx, I.mz);
     if (c.dashT > 0) Controller.moveDash(c, DT); else if (!c.mantle) Controller.moveNormal(c, DT, I);
     Controller.integrate(c, DT, I);
-    trace.push({ t, x: c.pos.x, y: c.pos.y, z: c.pos.z, v: Math.hypot(c.vel.x, c.vel.z), vy: c.vel.y, g: c.onGround, slide: c.sliding, mantle: !!c.mantle });
+    trace.push({ t, x: c.pos.x, y: c.pos.y, z: c.pos.z, v: Math.hypot(c.vel.x, c.vel.z), vy: c.vel.y, g: c.onGround, slide: c.sliding, mantle: !!c.mantle, wall: c.wallSliding });
   }
   return trace;
 }
@@ -73,6 +73,33 @@ rows.push(['Dash', `${fmt(dashEnd.x - start.x)} m in 0.14 s`, `${fmt(tr[tr.lengt
 tr = simulate(3, start, (t) => ({ mx: 1, crouch: t > 1.2 - DT / 2, crouchPressed: Math.abs(t - 1.2) < DT / 2 }));
 const s0 = tr.find((s) => s.slide), s1 = tr.slice(tr.indexOf(s0)).find((s) => !s.slide);
 rows.push(['Slide', `${fmt(s1.x - s0.x)} m`, `${fmt(s1.t - s0.t)} s`]);
+
+// bullet jump out of a slide, aiming 30 degrees up along the street
+let bj = null;
+tr = simulate(3, start, (t, c) => {
+  const slideAt = 1.2, jumpAt = 1.3;
+  if (bj === null && Math.abs(t - jumpAt) < DT / 2) bj = { x: c.pos.x };
+  return { mx: 1, crouch: t > slideAt - DT / 2 && t < jumpAt + DT / 2, crouchPressed: Math.abs(t - slideAt) < DT / 2, jump: Math.abs(t - jumpAt) < DT / 2, jumpHeld: t >= jumpAt, aim: { x: 0.866, y: 0.5, z: 0 } };
+});
+const bjI = tr.findIndex((s) => s.t > 1.3 && !s.g), bjL = tr.slice(bjI).find((s) => s.g);
+const bjApex = Math.max(...tr.slice(bjI).map((s) => s.y));
+rows.push(['Bullet jump (aim 30 deg up)', `${fmt(bjL.x - bj.x)} m`, `apex ${fmt(bjApex)} m, air ${fmt(bjL.t - 1.3)} s`]);
+check(bjL.x - bj.x > 10, 'bullet jump carries less than 10 m');
+
+// wall kick: jump beside a building's front wall, slide down it pushing in, then kick off
+const bld = STREET.boxes.find((b) => b.kind === 'building' && b.max.y > 12);
+const wz = bld.max.z + MOVE.R + 0.05, wx = (bld.min.x + bld.max.x) / 2;
+let kickT = null, slideV = 0;
+tr = simulate(2.2, { x: wx, y: 0, z: wz }, (t, c) => {
+  if (c.wallSliding) slideV = Math.min(slideV, c.vel.y);
+  if (kickT === null && c.wallSliding && t > 0.7) kickT = t;
+  return { mz: kickT === null ? -1 : 0, jump: t < DT || (kickT !== null && Math.abs(t - kickT) < DT / 2), jumpHeld: true };
+});
+const kI = tr.findIndex((s) => kickT !== null && s.t >= kickT);
+const kickApex = kI >= 0 ? Math.max(...tr.slice(kI).map((s) => s.y)) - tr[kI].y : 0;
+const kickOut = kI >= 0 ? Math.max(...tr.slice(kI).map((s) => s.z)) - wz : 0;
+rows.push(['Wall kick', kickT === null ? 'no wall slide' : `+${fmt(kickApex)} m up, ${fmt(kickOut)} m out`, `wall slide at ${fmt(-slideV)} m/s`]);
+check(kickT !== null && kickApex > 2.5, 'could not slide down and kick off a wall');
 
 // step-up: walk into a wrecked car and over it (body 0.91 m, roof 1.55 m)
 const car = STREET.boxes.find((b) => b.kind === 'car' && b.min.y > 0);
