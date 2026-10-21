@@ -1,0 +1,16 @@
+{
+  "name": "slashyslash-3d",
+  "private": true,
+  "description": "Third-person 3D version of SlashySlash. Runs from index.html; npm is only for the tools.",
+  "scripts": {
+    "vendor": "node tools/vendor-three.js",
+    "build": "node tools/build.js",
+    "smoke": "node tools/smoke-test.js",
+    "sync": "node tools/sync-2d.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright": "1.56.1",
+    "three": "0.186.1"
+  }
+}
