@@ -44,7 +44,17 @@ const FX = {
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.MAX_PARTS * 3), 3));
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.MAX_PARTS * 4), 4));
       geo.setDrawRange(0, 0);
-      const mat = new THREE.PointsMaterial({ size, vertexColors: true, transparent: true, depthWrite: !additive, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, fog: !additive });
+      // no depth writes, so a fading point never cuts a square out of what's behind it
+      const mat = new THREE.PointsMaterial({ size, vertexColors: true, transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, fog: !additive });
+      // points fade out within 2 m of the camera instead of filling the view
+      mat.onBeforeCompile = (sh) => {
+        sh.vertexShader = sh.vertexShader
+          .replace('#include <common>', '#include <common>\nvarying float vNear;')
+          .replace('#include <fog_vertex>', '#include <fog_vertex>\nvNear = smoothstep( 0.8, 2.0, - mvPosition.z );');
+        sh.fragmentShader = sh.fragmentShader
+          .replace('#include <common>', '#include <common>\nvarying float vNear;')
+          .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= vNear;');
+      };
       const pts = new THREE.Points(geo, mat);
       pts.frustumCulled = false;
       scene.add(pts);

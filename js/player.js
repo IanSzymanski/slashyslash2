@@ -153,6 +153,12 @@ class Player {
     this.updateFacing(dt);
     const hs = Controller.hspeed(this);
     if (this.onGround && hs > 1.4) this.runPhase += hs * dt * 1.155;
+    // a slide throws sparks back off the leading boot and a little grit, as in 2D
+    if (this.sliding && hs > 0.5) {
+      const p = this.pos, dx = this.vel.x / hs, dz = this.vel.z / hs;
+      if (Math.random() < 0.6) FX.sparks({ x: p.x + dx * 0.36, y: p.y + 0.06, z: p.z + dz * 0.36 }, 1, { x: -dx, y: 0.36, z: -dz }, 0.6, 3.6, 10.9, { life: 0.6, g: 18 });
+      if (Math.random() < 0.3) FX.dust(p, 1, { smax: 2.3 });
+    }
     const busy = this.attack || this.sheathe || this.iaido || this.atkPend || this.dashT > 0 || this.hurtT > 0;
     this.idleT = this.onGround && hs < 0.5 && !busy ? this.idleT + dt : 0;
     this.updateScarf(dt);
@@ -186,7 +192,11 @@ class Player {
       Sound.play('djump');
       FX.ring({ x: p.x, y: p.y + 0.05, z: p.z }, 0.2, 1.1, 0.22, { c: '#ff3a52' });
       FX.sparks(p, 6, { x: 0, y: -1, z: 0 }, 2.2, 3.6, 10.9);
-    } else if (ev === 'slide') { Sound.play('slide'); FX.dust(p, 5, { smax: 4.5 }); }
+    } else if (ev === 'slide') {
+      Sound.play('slide');
+      const hs = Controller.hspeed(this) || 1;
+      FX.dust(p, 5, { dir: { x: -this.vel.x / hs, y: 0.25, z: -this.vel.z / hs }, spread: 1.2, smax: 4.5 });
+    }
     else if (ev === 'land') {
       this.spinT = 0;
       if (d.vy < -18.2) { this.landSquash = 0.12; Sound.play('land', { v: clamp(-d.vy / 36.4, 0.4, 1.2) }); FX.dust(p, 4 + ((-d.vy / 9) | 0), { smax: 3.6 }); }

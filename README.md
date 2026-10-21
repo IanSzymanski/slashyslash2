@@ -16,7 +16,7 @@ npx serve .
 
 **Modes.** *Scrapper Waves* is the Phase 1 feel test: endless waves of scrappers that grow like endless waves do, with no upgrades or rival yet. *Free Roam* is the street with no enemies. The other modes are disabled until their phase lands.
 
-**The mouse.** Starting a mode locks the mouse; moving it turns the camera. `Esc` releases it and pauses (browsers keep `Esc` to themselves while the mouse is locked, so losing the lock is what pauses). Browsers refuse to re-lock for about a second after `Esc`; if Resume doesn't take, click it again. Clicking the scene beside the pause menu also resumes.
+**The mouse.** Starting a mode locks the mouse; moving it turns the camera. `Esc` releases it and pauses (browsers keep `Esc` to themselves while the mouse is locked, so losing the lock is what pauses). Browsers refuse to re-lock for about a second after `Esc`; if Resume doesn't take, click it again. Clicking the scene beside the pause menu also resumes. Where the browser offers it (Chrome on Windows and macOS), the lock uses raw mouse input, so your OS pointer speed and acceleration don't apply; tune Sensitivity in Settings instead.
 
 ### Controls built so far
 
@@ -60,7 +60,7 @@ node tools/sync-2d.js            # what the 2D game changed since SYNCED_FROM, m
 node tools/vendor-three.js       # rebuild vendor/three.js after adding a class to its list
 ```
 
-The smoke test uses Chromium's SwiftShader for WebGL, so it runs without a GPU. Its scripted checks put scrappers in front of you and confirm that a light string lands three hits, a heavy launches, aim assist turns a swing onto a target 25 degrees off, a wind-up glints, `E` on the glint parries and stuns, the counter kills, an unparried strike takes shield before health, a dash slash cuts, kills throw gibs, a wind-up behind you marks the threat ring, and a scrapper between you and the camera fades. Then it plays Scrapper Waves with random input and fails on any page error, a camera inside a box, a body inside a box or outside the arena, or saved data outside the `slashyslash3d.*` keys.
+The smoke test uses Chromium's SwiftShader for WebGL, so it runs without a GPU. Its scripted checks confirm that mouse look drops a lone cursor-recentring jump but keeps a fast flick, then put scrappers in front of you and confirm that a light string lands three hits, a heavy launches, aim assist turns a swing onto a target 25 degrees off, a wind-up glints, `E` on the glint parries and stuns, the counter kills, an unparried strike takes shield before health, a dash slash cuts, kills throw gibs, a wind-up behind you marks the threat ring, and a scrapper between you and the camera fades. Then it plays Scrapper Waves with random input and fails on any page error, a camera inside a box, a body inside a box or outside the arena, or saved data outside the `slashyslash3d.*` keys.
 
 `feel-check.js` runs the controller in Node with no browser. Current numbers: run 13.8 m/s, jump 4.4 m, double jump 8.2 m, dash 6.2 m, slide 10.9 m, and the highest climb between street tiers is 9.1 m against a reach of 9.7 m (double jump plus mantle). These are the 2D values converted at 1 m = 11 px; the plan treats them as a starting point to retune in metres after the feel test.
 

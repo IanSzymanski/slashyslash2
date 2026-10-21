@@ -15,6 +15,8 @@ const Input = {
   locked: false,
   // mouse look: deltas pile up while the pointer is locked and main.js takes them once per rendered frame
   lockRequired: false, pointerLocked: false, lookDX: 0, lookDY: 0, onLockChange: null,
+  // rawMovement: false once raw input was refused, so later locks skip asking; recent: average event size
+  rawMovement: null, recentX: 0, recentY: 0,
 
   init(canvas) {
     this.canvas = canvas;
@@ -48,7 +50,7 @@ const Input = {
       this.my = ((e.clientY - r.top) / r.height) * VIEW_H;
     };
     window.addEventListener('mousemove', (e) => {
-      if (this.pointerLocked) { this.lookDX += e.movementX || 0; this.lookDY += e.movementY || 0; }
+      if (this.pointerLocked) this.addLook(e.movementX || 0, e.movementY || 0);
       else updatePos(e);
     });
     this.lockRequired = typeof canvas.requestPointerLock === 'function';
@@ -95,8 +97,19 @@ const Input = {
   },
   capture(cb) { this.captureCb = cb; },
 
+  // Without raw input, Chrome can report the hidden cursor being recentred as one huge movement, which
+  // snaps the camera after the same amount of turning each time. A lone event far beyond recent ones is dropped.
+  addLook(dx, dy) {
+    const big = Math.max(250, window.innerWidth * 0.3);
+    if (Math.abs(dx) > big && Math.abs(dx) > this.recentX * 6) dx = 0;
+    if (Math.abs(dy) > big && Math.abs(dy) > this.recentY * 6) dy = 0;
+    this.recentX = this.recentX * 0.8 + Math.abs(dx) * 0.2;
+    this.recentY = this.recentY * 0.8 + Math.abs(dy) * 0.2;
+    this.lookDX += dx; this.lookDY += dy;
+  },
   // Resolves true once the pointer is locked. Needs a click or key press, and Chrome refuses a
-  // re-lock for about a second after Esc, so callers must handle false.
+  // re-lock for about a second after Esc, so callers must handle false. Asks for raw input first and
+  // falls back to a plain lock where it isn't supported.
   requestLock() {
     if (!this.lockRequired || this.pointerLocked) return Promise.resolve(true);
     return new Promise((resolve) => {
@@ -108,15 +121,25 @@ const Input = {
         document.removeEventListener('pointerlockerror', onError);
         resolve(ok);
       };
+      // browsers that return a promise report failures through it, so the error event only counts without one
+      let promised = false;
       const onChange = () => { if (document.pointerLockElement === this.canvas) finish(true); };
-      const onError = () => finish(false);
+      const onError = () => { if (!promised) finish(false); };
       document.addEventListener('pointerlockchange', onChange);
       document.addEventListener('pointerlockerror', onError);
       timer = setTimeout(() => finish(false), 1500);
-      try {
-        const r = this.canvas.requestPointerLock();
-        if (r && typeof r.catch === 'function') r.catch(() => finish(false));
-      } catch (e) { finish(false); }
+      const attempt = (raw) => {
+        let r;
+        try { r = raw ? this.canvas.requestPointerLock({ unadjustedMovement: true }) : this.canvas.requestPointerLock(); }
+        catch (e) { if (raw) { this.rawMovement = false; attempt(false); } else finish(false); return; }
+        if (r && typeof r.then === 'function') {
+          promised = true;
+          r.then(null, (e) => {
+            if (raw && e && e.name === 'NotSupportedError') { this.rawMovement = false; attempt(false); } else finish(false);
+          });
+        } else if (raw) this.rawMovement = false;
+      };
+      attempt(this.rawMovement !== false);
     });
   },
   releaseLock() { if (this.canvas && document.pointerLockElement === this.canvas) document.exitPointerLock(); },

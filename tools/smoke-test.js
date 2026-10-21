@@ -106,6 +106,16 @@ async function run(browser, file, errors) {
     ok(Game.state === 'paused' && !document.getElementById('lock-hint').hidden, 'refused pointer lock pauses with a hint');
     delete Input.canvas.requestPointerLock;
     Input.lockRequired = false;
+
+    // mouse look drops a lone recentring jump mid-turn but keeps a fast flick whole
+    Input.takeLook(); Input.recentX = 0;
+    for (let i = 0; i < 40; i++) Input.addLook(14, 0);
+    Input.addLook(-640, 0);
+    const turned = Input.takeLook().x;
+    Input.recentX = 0;
+    for (const d of [5, 60, 180, 320, 420, 300]) Input.addLook(d, 0);
+    const flick = Input.takeLook().x;
+    ok(turned === 560 && flick === 1285, `mouse look drops a recentring spike and keeps a flick (${turned}/560, ${flick}/1285)`);
     // render every checked frame (models only exist once drawn), small and fast
     S.visuals.resScale = 0.25; Render.resize(); T.render = true;
 
