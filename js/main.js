@@ -22,14 +22,16 @@
       if (Game.state === 'playing') {
         if (!Game.cineActive()) Camera.look(look.x, look.y);
         Game.step(realDt);
-        Camera.follow(Game.player, realDt);
-        Camera.update(realDt);
+        Render.interp();
+        const p = Game.player;
+        Camera.follow(p, realDt);
+        Camera.update(realDt, S.camera.distance, p.dashT > 0 || !!p.iaido);
       } else if (Game.state === 'menu') {
         Camera.orbit(Arena.center(), Game.realTime);
         Camera.update(realDt, 9);
         Input.consume();
       } else {
-        if (Game.player) Camera.update(realDt);
+        if (Game.player) { Render.interp(); Camera.update(realDt); }
         Input.consume();
       }
     } catch (err) { console.error(err); Input.consume(); }
@@ -43,8 +45,9 @@
       document.getElementById('nogl').hidden = false;
       return;
     }
-    World.build(TEST_ROOM);
-    Gfx.buildLevel(TEST_ROOM);
+    World.build(STREET);
+    Gfx.buildLevel(STREET);
+    Render.prewarm();
     Input.init(gl);
     Input.gameKeysActive = () => Game.state === 'playing';
     // Esc never reaches the page while the pointer is locked, so losing the lock is what pauses
@@ -60,8 +63,12 @@
       const open = UI.openPanel();
       if (open === 'settings' || open === 'howto') UI.act('back');
     });
-    // clicking the scene beside the pause panel resumes, which also retries a refused lock
-    gl.addEventListener('mousedown', () => { if (Game.state === 'paused' && UI.openPanel() === UI.pausePanel()) UI.resumeGame(); });
+    // clicking the scene beside the pause panel resumes (which also retries a refused lock);
+    // clicking it mid-run without the lock, after an upgrade pick say, takes the lock back
+    gl.addEventListener('mousedown', () => {
+      if (Game.state === 'paused' && UI.openPanel() === UI.pausePanel()) UI.resumeGame();
+      else if (Game.state === 'playing' && Input.lockRequired && !Input.pointerLocked) Input.requestLock();
+    });
     const wake = () => { Sound.init(); Sound.startMusic(); };
     document.addEventListener('pointerdown', wake, { once: true });
     document.addEventListener('keydown', wake, { once: true });
