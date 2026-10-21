@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SlashySlash 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=VT323&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="in-menu">
+<!-- BODY:START -->
+<div id="app">
+  <canvas id="gl" aria-label="SlashySlash 3D game view"></canvas>
+  <canvas id="hud" width="480" height="270" aria-hidden="true"></canvas>
+  <p id="nogl" class="nogl" hidden>This browser couldn't start WebGL, which the 3D version needs. The 2D game runs without it.</p>
+  <div id="scanlines" hidden></div>
+  <div id="ui">
+    <section id="menu" class="overlay side" hidden>
+      <div class="brand">
+        <h1 class="logo"><span>SLASHY</span><span class="cut">SLASH</span><span class="dim">3D</span></h1>
+        <p class="tag">Sector 9 went dark three winters ago. The scrap gangs moved in. You still have a blade.</p>
+      </div>
+      <nav class="stack">
+        <button type="button" id="btn-test" data-act="test">Test Room <small>camera and lighting check</small></button>
+        <button type="button" id="btn-demo" data-act="demo" disabled>Wave Demo <small>not built yet</small></button>
+        <button type="button" id="btn-endless" data-act="endless" disabled>Endless Survival <small>not built yet</small></button>
+        <button type="button" id="btn-boss" data-act="boss" disabled>Rival Fight <small>not built yet</small></button>
+        <button type="button" id="btn-duel" data-act="duel" disabled>Melee Duel <small>not built yet</small></button>
+        <button type="button" id="btn-training" data-act="training" disabled>Training <small>not built yet</small></button>
+        <button type="button" id="btn-howto" data-act="howto">How to Play</button>
+        <button type="button" id="btn-settings" data-act="settings">Settings</button>
+      </nav>
+      <p class="best" id="best"></p>
+      <p class="need">Keyboard and mouse required. Starting a mode locks the mouse; Esc releases it and pauses.</p>
+    </section>
+
+    <section id="pause" class="overlay side" hidden>
+      <h2>Paused</h2>
+      <p class="tag" id="lock-hint" hidden>The browser didn't lock the mouse. It waits about a second after Esc; click Resume again.</p>
+      <nav class="stack">
+        <button type="button" id="btn-resume" data-act="resume">Resume</button>
+        <button type="button" id="btn-restart" data-act="restart">Restart run</button>
+        <button type="button" id="btn-howto2" data-act="howto">How to Play</button>
+        <button type="button" id="btn-settings2" data-act="settings">Settings</button>
+        <button type="button" id="btn-quit" data-act="quit">Quit to title</button>
+      </nav>
+    </section>
+
+    <section id="train" class="overlay side train" hidden>
+      <h2>Training</h2>
+      <p class="tag">Spawn closes the panel and drops the enemy in front of you. You can't die here.</p>
+      <div class="scroll" id="train-body"></div>
+      <nav class="stack row">
+        <button type="button" data-act="resume">Resume</button>
+        <button type="button" data-act="settings">Settings</button>
+        <button type="button" data-act="quit">Quit</button>
+      </nav>
+    </section>
+
+    <section id="pick" class="overlay modal pick" hidden>
+      <header><h2>Choose an upgrade</h2><p class="tag">Each one changes how a move works. Press 1, 2 or 3.</p></header>
+      <div class="cards" id="pick-cards"></div>
+    </section>
+
+    <section id="over" class="overlay side" hidden>
+      <h2 id="over-title">Signal lost</h2>
+      <p class="tag" id="over-sub"></p>
+      <dl class="stats" id="over-stats"></dl>
+      <nav class="stack">
+        <button type="button" id="over-continue" data-act="continue-endless">Continue in Endless</button>
+        <button type="button" id="btn-retry" data-act="restart">Run it back</button>
+        <button type="button" id="btn-settings3" data-act="settings">Settings</button>
+        <button type="button" id="btn-quit2" data-act="quit">Title screen</button>
+      </nav>
+    </section>
+
+    <section id="howto" class="overlay modal" hidden>
+      <header><h2>How to Play</h2><button type="button" class="ghost" data-act="back">Back</button></header>
+      <div class="scroll">
+        <table id="howto-table" class="keys"></table>
+      </div>
+    </section>
+
+    <section id="settings" class="overlay modal" hidden>
+      <header><h2>Settings</h2><button type="button" class="ghost" data-act="back">Back</button></header>
+      <nav class="tabs" role="tablist">
+        <button type="button" id="tab-enemies" data-tab="enemies">Enemies</button>
+        <button type="button" id="tab-controls" data-tab="controls">Controls</button>
+        <button type="button" id="tab-camera" data-tab="camera">Camera</button>
+        <button type="button" id="tab-audio" data-tab="audio">Sound</button>
+        <button type="button" id="tab-visuals" data-tab="visuals">Visuals</button>
+      </nav>
+      <div class="scroll" id="settings-body"></div>
+      <footer><button type="button" class="ghost" id="btn-reset-tab" data-act="reset-tab">Reset this tab</button><span class="hint">Changes save automatically</span></footer>
+    </section>
+  </div>
+</div>
+<!-- BODY:END -->
+<script src="vendor/three.js"></script>
+<script src="js/util.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/input.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/world.js"></script>
+<script src="js/gfx.js"></script>
+<script src="js/camera.js"></script>
+<script src="js/player.js"></script>
+<script src="js/upgrades.js"></script>
+<script src="js/waves.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/core.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
