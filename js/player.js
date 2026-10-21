@@ -25,11 +25,6 @@ const PC = Object.assign({}, MOVE, {
   ASSIST_CONE: (30 * Math.PI) / 180, ASSIST_REACH: 1.5,
 });
 
-const PCOL = {
-  dark: '#363c50', mid: '#6b7591', light: '#a3adc4', hi: '#e2e8f2', boot: '#171a24',
-  visor: '#ff2a48', core: '#ff3a50', scarf: '#ff2a44', scarfD: '#9a1228',
-  blade: '#eef1fa', edge: '#ff4a64', handle: '#3a0a12', tsuba: '#d8b048', sheath: '#5a0c1a', sheathD: '#8e1426',
-};
 
 // r: reach (m), span: arc (rad), band: half-height of the hit area around the chest, knock/launch/lunge: m/s.
 // tilt: how far the trail's plane tips from horizontal.
@@ -68,7 +63,10 @@ class Player {
     this.aim = { x: pos.x, y: pos.y + 1, z: pos.z - 10 }; this.aimDir = { x: 0, y: 0, z: -1 }; this.aimYaw = 0;
     this.hitMarks = [];
     this.loops = {};
+    // animation: run cycle phase, double-jump flip, landing squash, time spent at rest
+    this.runPhase = 0; this.spinT = 0; this.spinDur = 0.32; this.landSquash = 0; this.idleT = 0; this.blinkT = 0;
     this.onMove = (ev, d) => this.moveEvent(ev, d);
+    this.initScarf();
   }
   center() { return { x: this.pos.x, y: this.pos.y + this.h * 0.55, z: this.pos.z }; }
   chestH() { return this.h >= PC.H ? PC.CHEST : this.h * 0.62; }
@@ -108,7 +106,7 @@ class Player {
     this.animT += dt;
     this.updateAim();
     const dec = (k) => { if (this[k] > 0) this[k] = Math.max(0, this[k] - dt); };
-    for (const k of ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold']) dec(k);
+    for (const k of ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT']) dec(k);
     Controller.timers(this, dt);
     for (const m of this.hitMarks) m.t -= dt;
     this.hitMarks = this.hitMarks.filter((m) => m.t > 0);
@@ -154,6 +152,10 @@ class Player {
     this.updateAttack(dt);
     this.updateFacing(dt);
     const hs = Controller.hspeed(this);
+    if (this.onGround && hs > 1.4) this.runPhase += hs * dt * 1.155;
+    const busy = this.attack || this.sheathe || this.iaido || this.atkPend || this.dashT > 0 || this.hurtT > 0;
+    this.idleT = this.onGround && hs < 0.5 && !busy ? this.idleT + dt : 0;
+    this.updateScarf(dt);
     if (this.onGround && hs > 3.6 && !this.sliding) {
       this.stepT -= (dt * hs) / 13.6;
       if (this.stepT <= 0) { this.stepT = 0.26; Sound.play('step'); if (Math.random() < 0.4) FX.dust(this.pos, 1, { smax: 1.8 }); }
@@ -180,12 +182,14 @@ class Player {
     const p = this.pos;
     if (ev === 'jump') { Sound.play('jump'); FX.dust(p, 4, { smax: 3.2, rise: 0.4 }); }
     else if (ev === 'djump') {
+      this.spinT = this.spinDur;
       Sound.play('djump');
       FX.ring({ x: p.x, y: p.y + 0.05, z: p.z }, 0.2, 1.1, 0.22, { c: '#ff3a52' });
       FX.sparks(p, 6, { x: 0, y: -1, z: 0 }, 2.2, 3.6, 10.9);
     } else if (ev === 'slide') { Sound.play('slide'); FX.dust(p, 5, { smax: 4.5 }); }
     else if (ev === 'land') {
-      if (d.vy < -18.2) { Sound.play('land', { v: clamp(-d.vy / 36.4, 0.4, 1.2) }); FX.dust(p, 4 + ((-d.vy / 9) | 0), { smax: 3.6 }); }
+      this.spinT = 0;
+      if (d.vy < -18.2) { this.landSquash = 0.12; Sound.play('land', { v: clamp(-d.vy / 36.4, 0.4, 1.2) }); FX.dust(p, 4 + ((-d.vy / 9) | 0), { smax: 3.6 }); }
       if (Input.isDown('crouch') && Controller.hspeed(this) > PC.SLIDE_MIN && !this.attack && !this.sheathe && !this.iaido) Controller.startSlide(this);
     } else if (ev === 'dash') {
       Sound.play('dash');
@@ -653,6 +657,7 @@ class Player {
     this.shieldDelay = PC.SHIELD_DELAY + (Game.has('bloodline') ? 1 : 0); this.regenOn = false;
     this.iframes = Math.max(this.iframes, hadShield && this.shield > 0 ? 0.35 : 0.6);
     this.hurtT = 0.22;
+    this.blinkT = this.iframes;
     Game.combo = 0; Game.comboT = 0; Game.styleHit();
     const from = h.from || { x: this.pos.x - fwdX(this.yaw), z: this.pos.z - fwdZ(this.yaw) };
     let dx = this.pos.x - from.x, dz = this.pos.z - from.z;
@@ -697,5 +702,61 @@ class Player {
     if (this.onGround) { const [nx, nz] = approach2(this.vel.x, this.vel.z, 0, 0, 54.5 * dt); this.vel.x = nx; this.vel.z = nz; }
     World.moveBody(this, dt);
     if (Math.random() < 0.15) FX.elec({ x: this.pos.x, y: this.pos.y + 0.4, z: this.pos.z }, 0.7, 1);
+    this.updateScarf(dt);
+  }
+
+  // ---------- scarf ----------
+  // The 2D scarf in 3D: a verlet chain pinned behind the neck. It streams back and off to the left from
+  // the body's motion (as in the concept art), flutters, stays out of the torso and above the street.
+  // The pose pins its first point to the model.
+  scarfAnchor() {
+    const bx = -fwdX(this.yaw), bz = -fwdZ(this.yaw), rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
+    return { x: this.pos.x + bx * 0.16 - rx * 0.06, y: this.pos.y + this.h - 0.3, z: this.pos.z + bz * 0.16 - rz * 0.06 };
+  }
+  initScarf() {
+    const a = this.scarfAnchor(), bx = -fwdX(this.yaw), bz = -fwdZ(this.yaw);
+    this.scarf = [];
+    for (let i = 0; i <= SCARF_N; i++) {
+      const x = a.x + bx * i * 0.05, y = a.y - i * SCARF_SEG * 0.95, z = a.z + bz * i * 0.05;
+      this.scarf.push({ x, y, z, px: x, py: y, pz: z });
+    }
+  }
+  updateScarf(dt) {
+    const pts = this.scarf, a = this.scarfAnchor();
+    Object.assign(pts[0], { x: a.x, y: a.y, z: a.z, px: a.x, py: a.y, pz: a.z });
+    const bx = -fwdX(this.yaw), bz = -fwdZ(this.yaw), rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
+    // gravity 9 m/s^2, a wind blowing it back at 6 m/s^2 (more toward the tail), and a side flutter
+    const dt2 = dt * dt, wind = Math.sin(this.animT * 7) * 3 * dt2;
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i];
+      const vx = (p.x - p.px) * 0.9, vy = (p.y - p.py) * 0.9, vz = (p.z - p.pz) * 0.9;
+      p.px = p.x; p.py = p.y; p.pz = p.z;
+      const back = 6 * dt2 * (1 + i * 0.25), left = -2.5 * dt2 * i;
+      p.x += vx + bx * back + rx * (wind * i + left);
+      p.y += vy - 9 * dt2;
+      p.z += vz + bz * back + rz * (wind * i + left);
+    }
+    for (let it = 0; it < 3; it++) {
+      for (let i = 1; i < pts.length; i++) {
+        const A = pts[i - 1], B = pts[i];
+        const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z, d = Math.hypot(dx, dy, dz) || 1e-4, k = (d - SCARF_SEG) / d;
+        if (i === 1) { B.x -= dx * k; B.y -= dy * k; B.z -= dz * k; }
+        else { A.x += dx * k * 0.5; A.y += dy * k * 0.5; A.z += dz * k * 0.5; B.x -= dx * k * 0.5; B.y -= dy * k * 0.5; B.z -= dz * k * 0.5; }
+      }
+    }
+    // keep out of the torso (a 0.24 m column) and above the street
+    const top = this.pos.y + this.h - 0.1, bot = this.pos.y + 0.35;
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i];
+      if (p.y < top && p.y > bot) {
+        const dx = p.x - this.pos.x, dz = p.z - this.pos.z, d = Math.hypot(dx, dz);
+        if (d < 0.24) {
+          const ux = d > 1e-3 ? dx / d : bx, uz = d > 1e-3 ? dz / d : bz;
+          p.x = this.pos.x + ux * 0.24; p.z = this.pos.z + uz * 0.24;
+        }
+      }
+      const g = World.groundAt(p.x, p.z, p.y + 0.3) + 0.02;
+      if (p.y < g) p.y = g;
+    }
   }
 }

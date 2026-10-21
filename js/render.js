@@ -3,7 +3,7 @@
 // then the 480x270 pixel HUD on a canvas above it. The HUD is the 2D render.js HUD, plus the threat ring.
 
 const Render = {
-  hud: null, ctx: null, fps: 60, standIn: null, hpTrail: 100, shTrail: 100,
+  hud: null, ctx: null, fps: 60, playerRig: null, hpTrail: 100, shTrail: 100,
   models: new Map(), pickups: new Map(), _v: null, _light: [0, 0, 0],
 
   init(glCanvas, hudCanvas) {
@@ -14,9 +14,9 @@ const Render = {
     hudCanvas.width = VIEW_W; hudCanvas.height = VIEW_H;
     this.ctx = hudCanvas.getContext('2d');
     this.ctx.imageSmoothingEnabled = false;
-    this.standIn = Gfx.standIn();
-    this.standIn.visible = false;
-    Gfx.scene.add(this.standIn);
+    this.playerRig = Rig.build(MODELS.player);
+    this.playerRig.mesh.visible = false;
+    Gfx.scene.add(this.playerRig.mesh);
     this.pickupGeo = Gfx.boxGeometry([{ min: { x: -0.08, y: -0.22, z: -0.08 }, max: { x: 0.08, y: 0.22, z: 0.08 } }, { min: { x: -0.22, y: -0.08, z: -0.08 }, max: { x: 0.22, y: 0.08, z: 0.08 } }]);
     this.pickupMat = new THREE.MeshBasicMaterial({ color: '#5aff7a' });
     this.resize();
@@ -38,7 +38,9 @@ const Render = {
     FX.ring(o, 0.1, 1, 0.2);
     FX.glint(o);
     Gfx.scene.add(g);
+    this.playerRig.mesh.visible = true;
     Gfx.renderer.compile(Gfx.scene, Gfx.camera);
+    this.playerRig.mesh.visible = false;
     Gfx.scene.remove(g);
     this.keep.push(r.mat, r.outline.material, ...FX.detachAll());
   },
@@ -134,19 +136,30 @@ const Render = {
       m.visible = !(pk.t > 11 && ((pk.t * 10) | 0) % 2);
     }
     for (const [pk, m] of this.pickups) if (!live.has(pk)) { Gfx.scene.remove(m); this.pickups.delete(pk); }
-    // the player stand-in: squashes to the crouch and slide heights, leans into dashes, fades when the camera is close
-    const P = Game.player, S0 = this.standIn;
-    S0.visible = !!P;
+    // the player: posed from the 2D pose, fading when the camera comes close, blinking while hurt
+    const P = Game.player, R = this.playerRig;
+    R.mesh.visible = !!P;
     if (P) {
       const p = P.rp || P.pos;
-      S0.position.set(p.x, p.y, p.z);
-      S0.rotation.set(P.dead ? -Math.PI / 2 * Math.min(1, P.deadT * 3) : P.dashT > 0 ? -0.35 : P.sliding ? 0.5 : 0, P.yaw, 0, 'YXZ');
-      S0.scale.y = P.h / PC.H;
+      R.mesh.position.set(p.x, p.y, p.z);
+      R.mesh.rotation.y = P.yaw;
+      PlayerPose.apply(R, P);
       const want = Camera.curDist < 1 ? clamp(Camera.curDist - 0.4, 0, 1) / 0.6 : 1;
-      const blink = P.iframes > 0 && P.hurtT > 0 && ((Game.realTime * 20) | 0) % 2 ? 0.4 : 1;
-      for (const m of S0.userData.mats) m.opacity = want * blink;
-      this.feet(S0.userData.feet, p);
+      const blink = P.blinkT > 0 && P.hurtT <= 0 && ((Game.realTime * 30) | 0) % 2 ? 0.55 : 1;
+      R.mat.opacity = want * blink;
+      R.mat.depthWrite = R.mat.opacity > 0.99;
+      R.extras[0].material.opacity = 0.2 * want;
+      R.mat.emissive.setScalar(P.hurtT > 0.12 ? 0.8 : 0);
+      this.feet(R.feet, p);
     }
+  },
+  // the drawn blade lights what's around it
+  bladeLight() {
+    const P = Game.player, R = this.playerRig;
+    if (!P || P.dead || !R.mesh.visible) return;
+    const v = this._v.set(0, 0.55, 0.03);
+    R.bones.weapon.localToWorld(v);
+    Gfx.light(v.x, v.y, v.z, '#ff2030', P.sheathe || P.idleT > 2.5 ? 0.5 : 1.4, 3.5);
   },
 
   draw(realDt) {
@@ -156,6 +169,7 @@ const Render = {
     this.syncModels(realDt);
     FX.sync(Gfx.camera);
     Gfx.beginFrame();
+    this.bladeLight();
     FX.pushLights();
     Gfx.endFrame();
     Gfx.render();

@@ -2,7 +2,7 @@
 
 A third-person 3D version of [SlashySlash](https://github.com/IanSzymanski/slashyslash): a Risk of Rain 2 style orbit camera and a Half-Life 1 style low-poly look, built with Three.js. The 2D game stays in its own repo and is the main game; this repo is the 3D lane. The build plan lives in the 2D repo at [`docs/3d-plan.md`](https://github.com/IanSzymanski/slashyslash/blob/main/docs/3d-plan.md).
 
-**Status: Phase 1 of the plan, minus the player model.** The 2D street is converted to 3D and you can fight endless waves of scrappers on it with the orbit camera, the full movement set and the melee core: light and heavy strings, dash slash, parry and counter. The player is still a stand-in figure: its model, rig and poses wait on the design. Phase 1 ends with a feel test (below) before Phase 2 starts.
+**Status: Phase 1 of the plan is built.** The 2D street is converted to 3D and you can fight endless waves of scrappers on it with the orbit camera, the full movement set and the melee core: light and heavy strings, dash slash, parry and counter. The player is the armoured swordsman from the concept sheets, with poses ported from the 2D game and a cloth scarf. Phase 1 ends with a feel test (below) before Phase 2 starts.
 
 ## Running it
 
@@ -88,11 +88,11 @@ Plain JavaScript, loaded as classic scripts. 1 unit = 1 m, y up, x along the old
 | `js/fx.js` | Particles, sword trails, slash lines, lightning, rings, glints drawn over walls, gibs, effect lights, floating text, screen flash | New (flash copied) |
 | `js/world.js` | The converted street; box collision with sub-steps and step-up; raycasts and sphere sweeps; the light bake; the street flow field; the `Arena` interface | New |
 | `js/controller.js` | Run, jump, double jump, crouch, slide, dash, step-up and mantle, shared with the rival later | New |
-| `js/gfx.js` | Renderer, procedural textures (facades with lit windows), the baked level mesh, character materials lit from their feet, outlines, the light pool, fog, the player stand-in | New |
+| `js/gfx.js` | Renderer, procedural textures (facades with lit windows), the baked level mesh, character materials lit from their feet with a cool rim, the character noise texture, outlines, the light pool, fog | New |
 | `js/camera.js` | Orbit camera: mouse look, sphere-swept collision with ease-out, the aim ray, FOV kick, rotational shake, audio listener | New |
-| `js/rig.js` | Rigid skinning: parts on bones merged into one SkinnedMesh per character, with an outline and gib pieces | New |
-| `js/models.js` | The scrapper model and its poses | New |
-| `js/player.js` | Strings, heavies, dash slash, parry and counter, shield and health, facing and aim assist | Ported |
+| `js/rig.js` | Rigid skinning: parts on bones merged into one SkinnedMesh per character, with an outline and gib pieces; two-bone IK; free root chains | New |
+| `js/models.js` | The scrapper and player models; scrapper poses; `PlayerPose`, the 2D pose function's targets mapped into 3D | New |
+| `js/player.js` | Strings, heavies, dash slash, parry and counter, shield and health, facing and aim assist, the scarf's cloth chain | Ported |
 | `js/enemies.js` | The scrapper, attack slots with the camera rule, separation, `hurtEnemy`/`killEnemy`, pickups | Ported |
 | `js/upgrades.js` | Endless upgrades and wave modifiers | Copied |
 | `js/waves.js` | Wave director, spawning through `Arena`; the Scrapper Waves mode | Copied |
@@ -109,6 +109,8 @@ Two Three.js rules from the plan apply: the light count never changes (a fixed p
 
 - **Two repos instead of a `3d/` directory.** Paths the plan writes as `3d/...` are at this repo's root. The sync diff runs through the `2d` remote instead of within one repo.
 - **Crouch defaults to `C` only, not `C`/`Ctrl`.** Holding Ctrl to crouch while pressing W to move forward is Ctrl+W, which closes the browser tab, and pages can't block it. Ctrl can still be bound in the second slot.
-- **No player model yet.** Phase 1's player model, rig, poses and scarf are on hold for its design; a stand-in figure squashes for crouch and slide and leans into dashes.
+- **The player model** follows the concept sheets loosely: charcoal armour with a voxel noise texture, a red right arm, a glowing visor slit, silver fins on the helmet, gold fittings, small red running lights, a red scarf fraying to black, and a katana whose curved blade glows. It is boxes and hexagonal prisms on bones, like the scrapper, so it stays one draw call and breaks into gibs.
+- **Poses come from the 2D game.** `PlayerPose` runs the 2D pose function's logic (feet and hand targets on the side plane, lean, flips) and maps the targets into 3D with two-bone IK. Swings point the blade along the same 3D arc the trail is drawn on. After 2.5 s at rest the blade goes back in its sheath and the left hand rests on the hilt, as on the concept sheet.
+- **Characters get a cool rim light** (not in the plan). The dark armour disappeared against the night street without it.
 - **Pulled forward from Phase 3:** the camera rule for attack slots (an attacker more than 75 degrees off the view winds up 1.3x longer), glints drawn over walls at a minimum size, threat ring markers for wind-ups, glints and the direction a hit came from, pickups and damage numbers. Feel-test item 2 needs them.
 - **The street's sides.** The 2D buildings become solid blocks behind the street with walkable roofs, and a row of facades too tall to climb closes the front, so the street is a 14 m canyon. Platforms are solid slabs you mantle onto rather than one-way ledges.

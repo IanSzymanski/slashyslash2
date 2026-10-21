@@ -2,6 +2,9 @@
 // Character models built from parts on the humanoid rig, and their poses. Colours come from the 2D
 // sprites. The player model isn't here yet: it waits on its design, and gfx.js has a stand-in.
 
+// the scarf's tail: segment length and count
+const SCARF_SEG = 0.17, SCARF_N = 6;
+
 const MODELS = {
   // hunched scrap-gang melee rusher with a cleaver; 1.64 m tall (18 px)
   scrapper: {
@@ -14,7 +17,7 @@ const MODELS = {
       { bone: 'chest', size: [0.5, 0.08, 0.32], at: [0, 0.3, 0.02], color: '#8e6a52' },
       { bone: 'head', size: [0.24, 0.22, 0.26], at: [0, 0.1, -0.04], color: '#5a3e30' },
       { bone: 'head', size: [0.24, 0.04, 0.26], at: [0, 0.22, -0.04], color: '#8e6a52' },
-      { bone: 'head', size: [0.1, 0.06, 0.04], at: [0.05, 0.12, -0.18], color: '#c8ff3a', glow: true, tag: 'eye' },
+      { bone: 'head', size: [0.1, 0.06, 0.04], at: [0.05, 0.12, -0.18], color: '#c8ff3a', glow: true, plain: true, tag: 'eye' },
       { bone: 'head', size: [0.04, 0.14, 0.04], at: [-0.06, 0.28, 0.02], color: '#3e2a24' },
       { bone: 'armL', shape: 'hex', size: [0.12, 0.3, 0.12], at: [0, -0.15, 0], color: '#8a8a90' },
       { bone: 'foreL', shape: 'hex', size: [0.1, 0.27, 0.1], at: [0, -0.13, 0], color: '#8a8a90', taper: 0.8 },
@@ -33,8 +36,140 @@ const MODELS = {
       { bone: 'footR', size: [0.13, 0.08, 0.26], at: [0, -0.02, -0.05], color: '#16121a' },
     ],
   },
+  player: playerModel(),
 };
 
+// The cyborg swordsman from the concept sheets: charcoal plate armour with a pixel-noise finish, a red
+// right arm, a red visor slit, swept silver fins on the helmet, red running lights on chest, knees,
+// shins and boots, a red scarf that frays to black, a gold-banded sheath on the left hip and a curved
+// glowing red katana with a wrapped grip.
+function playerModel() {
+  const A = '#34343a', AD = '#26262b', AL = '#46464e', RED = '#bd1828', REDD = '#7e1020', GOLD = '#c99a3a';
+  const LIT = '#ff2a3a', SILVER = '#a4a4ae', GRIP = '#17171b';
+  const light = (bone, size, at) => ({ bone, size, at, color: LIT, glow: true, plain: true });
+  const parts = [
+    // hips: pelvis, belt with a gold buckle and pouches, a plate hanging behind
+    { bone: 'hips', size: [0.32, 0.16, 0.22], at: [0, -0.04, 0], color: A },
+    { bone: 'hips', size: [0.37, 0.07, 0.25], at: [0, 0.05, 0], color: AD },
+    { bone: 'hips', size: [0.08, 0.06, 0.03], at: [0, 0.05, -0.135], color: GOLD },
+    { bone: 'hips', size: [0.07, 0.09, 0.07], at: [0.19, 0.0, -0.05], color: AL },
+    { bone: 'hips', size: [0.07, 0.09, 0.07], at: [0.19, 0.0, 0.05], color: AD },
+    { bone: 'hips', size: [0.3, 0.22, 0.04], at: [0, -0.12, 0.13], rot: [-0.2, 0, 0], color: AD },
+    // abdomen with ridges, chest plate, pecs, the red core light, collar and the scarf's wrap at the neck
+    { bone: 'spine', size: [0.29, 0.22, 0.2], at: [0, 0.1, 0], color: A, taper: 1.1 },
+    { bone: 'spine', size: [0.22, 0.03, 0.03], at: [0, 0.05, -0.1], color: AD },
+    { bone: 'spine', size: [0.22, 0.03, 0.03], at: [0, 0.13, -0.105], color: AD },
+    { bone: 'chest', size: [0.44, 0.32, 0.27], at: [0, 0.1, 0], color: A, taper: 1.12 },
+    { bone: 'chest', size: [0.18, 0.14, 0.05], at: [-0.1, 0.14, -0.145], color: AL },
+    { bone: 'chest', size: [0.18, 0.14, 0.05], at: [0.1, 0.14, -0.145], color: AL },
+    light('chest', [0.06, 0.035, 0.03], [0, 0.04, -0.145]),
+    light('chest', [0.025, 0.05, 0.02], [-0.19, 0.0, -0.12]),
+    { bone: 'chest', size: [0.38, 0.28, 0.04], at: [0, 0.1, 0.14], color: AD },
+    { bone: 'chest', size: [0.3, 0.06, 0.24], at: [0, 0.27, 0.01], color: AD },
+    { bone: 'chest', size: [0.29, 0.11, 0.27], at: [0, 0.31, 0.0], color: '#cc1a2a', tag: 'scarf' },
+    // helmet: rounded box, a mask over the lower face, the visor slit, swept fins and ear plates
+    { bone: 'head', size: [0.24, 0.27, 0.27], at: [0, 0.11, 0.0], color: A, taper: 0.9 },
+    { bone: 'head', size: [0.06, 0.04, 0.22], at: [0, 0.25, 0.02], color: AD },
+    { bone: 'head', size: [0.22, 0.13, 0.05], at: [0, 0.04, -0.13], color: AD },
+    { bone: 'head', size: [0.19, 0.035, 0.03], at: [0, 0.135, -0.14], color: LIT, glow: true, plain: true, tag: 'visor' },
+    { bone: 'head', size: [0.04, 0.1, 0.11], at: [-0.125, 0.09, 0.02], color: AD },
+    { bone: 'head', size: [0.04, 0.1, 0.11], at: [0.125, 0.09, 0.02], color: AD },
+    { bone: 'head', size: [0.03, 0.035, 0.22], at: [-0.13, 0.19, 0.08], rot: [0.55, -0.15, 0], color: SILVER, taper: 0.4 },
+    { bone: 'head', size: [0.03, 0.035, 0.22], at: [0.13, 0.19, 0.08], rot: [0.55, 0.15, 0], color: SILVER, taper: 0.4 },
+    { bone: 'head', size: [0.025, 0.03, 0.15], at: [-0.12, 0.24, 0.06], rot: [0.95, -0.1, 0], color: SILVER, taper: 0.4 },
+    { bone: 'head', size: [0.025, 0.03, 0.15], at: [0.12, 0.24, 0.06], rot: [0.95, 0.1, 0], color: SILVER, taper: 0.4 },
+  ];
+  // arms: the right one is red from the shoulder to the fingers
+  for (const [side, x, col, dark] of [['L', -1, A, AD], ['R', 1, RED, REDD]]) {
+    parts.push(
+      { bone: 'arm' + side, size: [0.2, 0.12, 0.23], at: [x * 0.03, 0.03, 0], rot: [0, 0, -x * 0.28], color: col },
+      { bone: 'arm' + side, size: [0.15, 0.05, 0.17], at: [x * 0.07, -0.06, 0], rot: [0, 0, -x * 0.4], color: dark },
+      { bone: 'arm' + side, shape: 'hex', size: [0.12, 0.3, 0.12], at: [0, -0.15, 0], color: col },
+      { bone: 'fore' + side, size: [0.1, 0.07, 0.1], at: [0, 0.0, 0], color: dark },
+      { bone: 'fore' + side, size: [0.11, 0.24, 0.12], at: [0, -0.14, 0], color: col, taper: 1.18 },
+      { bone: 'hand' + side, size: [0.09, 0.09, 0.1], at: [0, -0.045, 0], color: dark },
+      { bone: 'hand' + side, size: [0.085, 0.05, 0.08], at: [0, -0.11, -0.01], color: dark },
+    );
+  }
+  // legs: hex thighs with plates on the front and outside, knee guards and greaves with lights, chunky boots
+  for (const [side, x] of [['L', -1], ['R', 1]]) {
+    parts.push(
+      { bone: 'thigh' + side, shape: 'hex', size: [0.17, 0.43, 0.17], at: [0, -0.21, 0], color: A },
+      { bone: 'thigh' + side, size: [0.15, 0.2, 0.04], at: [0, -0.09, -0.095], rot: [0.08, 0, 0], color: AL },
+      { bone: 'thigh' + side, size: [0.04, 0.25, 0.17], at: [x * 0.1, -0.1, 0], rot: [0, 0, x * 0.08], color: AD },
+      { bone: 'shin' + side, size: [0.13, 0.11, 0.07], at: [0, 0.0, -0.08], color: AD },
+      light('shin' + side, [0.03, 0.035, 0.02], [0, -0.005, -0.12]),
+      { bone: 'shin' + side, size: [0.14, 0.4, 0.16], at: [0, -0.2, 0], color: A, taper: 1.12 },
+      light('shin' + side, [0.025, 0.05, 0.02], [0, -0.22, -0.085]),
+      { bone: 'foot' + side, size: [0.15, 0.11, 0.27], at: [0, -0.03, -0.05], color: '#232327' },
+      { bone: 'foot' + side, size: [0.14, 0.07, 0.07], at: [0, -0.045, -0.17], color: AD },
+      { bone: 'foot' + side, size: [0.155, 0.02, 0.1], at: [0, 0.015, 0.05], color: GOLD },
+      light('foot' + side, [0.02, 0.03, 0.03], [x * 0.077, -0.03, 0.06]),
+    );
+  }
+  // katana on the weapon bone: grip through the fist along +y, blade beyond the guard curving toward +z
+  // (the spine), its cutting edge on -z
+  parts.push(
+    { bone: 'weapon', size: [0.038, 0.25, 0.034], at: [0, -0.03, 0], color: GRIP },
+    light('weapon', [0.04, 0.025, 0.02], [0, -0.11, 0]),
+    light('weapon', [0.04, 0.025, 0.02], [0, -0.04, 0]),
+    light('weapon', [0.04, 0.025, 0.02], [0, 0.03, 0]),
+    { bone: 'weapon', size: [0.048, 0.03, 0.044], at: [0, 0.085, 0], color: GOLD },
+    { bone: 'weapon', size: [0.05, 0.04, 0.046], at: [0, -0.165, 0], color: GOLD },
+    light('weapon', [0.03, 0.012, 0.03], [0, -0.19, 0]),
+    { bone: 'weapon', size: [0.12, 0.03, 0.13], at: [0, 0.112, 0], color: '#222226' },
+    { bone: 'weapon', size: [0.126, 0.018, 0.04], at: [0, 0.112, 0.055], color: GOLD },
+    { bone: 'weapon', size: [0.126, 0.018, 0.04], at: [0, 0.112, -0.055], color: GOLD },
+    light('weapon', [0.02, 0.034, 0.06], [0, 0.112, 0]),
+  );
+  let px = 0.13, pz = 0;
+  const SEG = 0.215, curve = [];
+  for (let i = 0; i < 4; i++) {
+    const th = i * 0.055, cy = Math.cos(th), sz = Math.sin(th);
+    const cx = px + (cy * SEG) / 2, cz = pz + (sz * SEG) / 2;
+    curve.push([th, cx, cz]);
+    parts.push(
+      { bone: 'weapon', size: [0.012, SEG + 0.012, 0.034], at: [0, cx, cz], rot: [th, 0, 0], color: '#e01a2a', glow: true, taper: i === 3 ? 0.2 : 0, tag: 'blade' },
+      { bone: 'weapon', size: [0.015, SEG + 0.012, 0.008], at: [0, cx + 0.017 * sz, cz - 0.017 * cy], rot: [th, 0, 0], color: '#ffa8b2', glow: true, plain: true, taper: i === 3 ? 0.2 : 0, tag: 'edge' },
+    );
+    px += cy * SEG; pz += sz * SEG;
+  }
+  // sheath on the left hip, hanging down its bone's -y
+  parts.push(
+    { bone: 'sheath', shape: 'hex', size: [0.066, 0.92, 0.066], at: [0, -0.46, 0], color: '#2a2a30' },
+    { bone: 'sheath', size: [0.085, 0.07, 0.085], at: [0, -0.02, 0], color: GOLD },
+    { bone: 'sheath', size: [0.078, 0.04, 0.078], at: [0, -0.46, 0], color: GOLD },
+    { bone: 'sheath', size: [0.08, 0.07, 0.08], at: [0, -0.9, 0], color: GOLD },
+    light('sheath', [0.02, 0.04, 0.03], [-0.045, -0.07, 0]),
+    light('sheath', [0.02, 0.04, 0.03], [-0.043, -0.86, 0]),
+  );
+  // the scarf's tail: a chain of bones driven by the cloth simulation, fraying to black at the end
+  const SC = [['#cc1a2a', 0.2], ['#c41828', 0.19], ['#b81626', 0.17], ['#8a0f1e', 0.15], ['#4a0a12', 0.12], ['#200608', 0.09]];
+  SC.forEach(([color, w], i) => {
+    parts.push({ bone: 'scarf' + i, size: [w, SCARF_SEG + 0.02, 0.025], at: [0, -SCARF_SEG / 2, 0], color });
+    if (i >= 3) parts.push({ bone: 'scarf' + i, size: [0.04, 0.06, 0.022], at: [(i % 2 ? 1 : -1) * w * 0.55, -SCARF_SEG * 0.8, 0], color: '#160406' });
+  });
+  const bones = HUMANOID.concat([['sheath', 'hips', -0.21, 0.02, -0.04]]);
+  for (let i = 0; i < SC.length; i++) bones.push(['scarf' + i, null, -0.06, 1.55 - i * SCARF_SEG, 0.16]);
+  return {
+    bones, scale: 1, parts,
+    // a soft additive halo following the blade's curve, riding the weapon bone
+    attach(r) {
+      const pos = [], m = new THREE.Matrix4();
+      for (const [th, cx, cz] of curve) {
+        const g = new THREE.BoxGeometry(0.04, SEG + 0.01, 0.065).toNonIndexed();
+        g.applyMatrix4(m.makeRotationX(th).setPosition(0, cx, cz));
+        pos.push(...g.attributes.position.array);
+        g.dispose();
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      const halo = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: '#ff1a2e', transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      r.bones.weapon.add(halo);
+      r.extras.push(halo);
+    },
+  };
+}
 const Poses = {
   // walk cycle shared by humanoids: legs swing about the hip, knees bend on the back swing, arms counter-swing
   walk(r, phase, amt, air) {
@@ -57,32 +192,249 @@ const Poses = {
     const B = r.bones, st = e.state;
     const moving = Math.min(1, Math.hypot(e.vel.x, e.vel.z) / 4);
     this.walk(r, e.walk, moving, !e.onGround && e.stun <= 0);
-    // hunched
-    B.spine.rotation.x = 0.32; B.head.rotation.x = -0.25;
+    // hunched (a negative x rotation tips the top forward)
+    B.spine.rotation.x = -0.32; B.head.rotation.x = 0.25;
     B.armL.rotation.z = -0.15; B.foreL.rotation.x = 0.5;
     // rotations about x add down the arm: their sum is the blade's angle from straight down, forward positive
-    let arm = 0.55, fore = 0.7, wpn = -0.6, lean = 0.32;
+    let arm = 0.55, fore = 0.7, wpn = -0.6, lean = -0.32;
     if (st === 'windup') {
       const k = easeOutCubic(clamp(e.st / e.tele(0.45), 0, 1));
-      arm = lerp(0.55, -2.6, k); fore = lerp(0.7, 0.9, k); wpn = lerp(-0.6, -0.3, k); lean = lerp(0.32, -0.05, k);
+      arm = lerp(0.55, -2.6, k); fore = lerp(0.7, 0.9, k); wpn = lerp(-0.6, -0.3, k); lean = lerp(-0.32, 0.05, k);
       B.chest.rotation.y = lerp(0, 0.4, k);
     } else if (st === 'strike') {
       const k = clamp(e.st / 0.12, 0, 1);
-      arm = lerp(-2.6, 1.3, easeOutCubic(k)); fore = 0.2; wpn = -0.1; lean = 0.65;
+      arm = lerp(-2.6, 1.3, easeOutCubic(k)); fore = 0.2; wpn = -0.1; lean = -0.65;
       B.chest.rotation.y = lerp(0.4, -0.35, k);
     } else if (st === 'recover') {
-      arm = 1.0; fore = 0.3; wpn = 0.2; lean = 0.5;
+      arm = 1.0; fore = 0.3; wpn = 0.2; lean = -0.5;
       B.chest.rotation.y = -0.2;
     } else {
       arm += Math.sin(e.walk) * 0.25 * moving;
     }
     if (e.stun > 0) {
-      lean = -0.25; arm = 0.2; fore = 0.2;
+      lean = 0.25; arm = 0.2; fore = 0.2;
       B.armL.rotation.z = -0.9; B.armR.rotation.z = 0.9; B.head.rotation.x = 0.3;
     }
     B.spine.rotation.x = lean;
     B.armR.rotation.x = arm; B.foreR.rotation.x = fore; B.weapon.rotation.x = wpn;
     Rig.tint(r, 'eye', e.windingUp() ? '#ffffff' : '#c8ff3a');
     Rig.tint(r, 'blade', st === 'windup' ? '#ffd040' : '#b8b8c0');
+  },
+};
+
+// ---------- the player: the 2D Player.pose() laid out in 3D ----------
+// A 2D pose gives hip height, lean, a whole-body roll, and hand and foot targets in pixels in the side
+// plane (x forward, y down). At 11 px per metre that plane is the rig's (forward -z, up +y): limbs spread
+// sideways, IK reaches the targets, and swings follow the same 3D arc as their sword trail.
+const PlayerPose = {
+  _v: null,
+  // the 2D pose, with the sword given either as a side-plane angle (swordAng) or a world direction (bladeW)
+  pose2D(p) {
+    const t = p.animT;
+    const o = { hipY: -10, lean: 0.08, fF: [2.5, -1], fB: [-2.5, -1], hF: null, hB: null, sword: 'hand', swordAng: 2.35, sheathAng: null, rot: 0, tremble: 0, twist: 0, bladeW: null, edgeW: null };
+    if (p.dead) {
+      const k = clamp(p.deadT / 0.35, 0, 1);
+      o.rot = -1.45 * k; o.hipY = -10 + 4 * k; o.fF = [4, -1]; o.fB = [-1, -1]; o.lean = -0.2;
+      o.hF = [5, -4]; o.hB = [-4, -2]; o.swordAng = 0.2;
+      return o;
+    }
+    if (p.iaido) {
+      o.lean = 0.7; o.hipY = -8; o.fF = [5, -2]; o.fB = [-7, -2];
+      o.bladeW = p.iaido.dir; o.hF = 'sword'; o.hB = [-6, -9];
+      return o;
+    }
+    if (p.postPose > 0) {
+      const k = p.postPose / 0.32;
+      o.lean = 0.55; o.hipY = -6 - (1 - k) * 2; o.fF = [7, -1]; o.fB = [-6, -1];
+      o.swordAng = Math.PI - 0.35; o.hF = [-8, -12]; o.hB = [3, -6];
+      return o;
+    }
+    if (p.sheathe) {
+      const ch = p.sheathe.empowered ? 1 : 0;
+      o.lean = 0.5 + ch * 0.1; o.hipY = -7 + ch; o.fF = [6, -1]; o.fB = [-5, -1];
+      if (!p.onGround) { o.fF = [4, -4]; o.fB = [-3, -2]; }
+      o.sword = 'sheathed'; o.sheathAng = Math.PI - 0.15; o.hF = [3, -9 + ch]; o.hB = [-2, -8 + ch];
+      o.tremble = ch;
+      return o;
+    }
+    if (p.attack) {
+      const a = p.attack, big = a.stage === 3 || a.heavy;
+      o.hF = 'sword';
+      let th;
+      if (a.wind && a.t < a.wind) {
+        // heavy wind-up: the blade draws back past the start of its arc
+        const k = easeOutCubic(a.t / a.wind);
+        th = -a.dir * (a.span / 2 + 0.5 * k);
+        o.hB = [-4, -8]; o.lean = 0.05; o.tremble = 1;
+      } else {
+        const u = easeOutCubic(clamp((a.t - (a.wind || 0)) / a.sweep, 0, 1));
+        th = a.dir * (u - 0.5) * a.span;
+        o.hB = [-3, -6];
+        o.lean = a.type === 'slam' ? 0.15 + 0.5 * u : 0.25 + (big ? 0.25 * Math.sin(u * Math.PI) : 0);
+      }
+      o.bladeW = this.arcDir(a.yaw, a.tilt, th);
+      // the edge leads: the arc's tangent in the direction of the sweep
+      const e = this.arcDir(a.yaw, a.tilt, th + Math.PI / 2);
+      o.edgeW = { x: e.x * a.dir, y: e.y * a.dir, z: e.z * a.dir };
+      // the chest turns with a level swing
+      o.twist = Math.abs(a.tilt) < 1 ? clamp(-th * 0.35, -0.7, 0.7) : 0;
+      if (p.onGround) { o.fF = [5, -1]; o.fB = [-4, -1]; o.hipY = a.heavy ? -8 : -9; } else { o.fF = [3, -4]; o.fB = [-3, -2]; }
+      return o;
+    }
+    if (p.dashT > 0) {
+      o.lean = 0.85; o.hipY = -9; o.fF = [-1, -3]; o.fB = [-7, -4]; o.swordAng = Math.PI - 0.2; o.hF = [-7, -10]; o.hB = [-5, -12];
+      return o;
+    }
+    const P = p.atkPend;
+    if (P && !P.dash && P.t > 0.05 && !p.sliding && Input.isDown('attack')) {
+      // holding for a heavy: the blade draws back over the shoulder
+      const k = clamp((P.t - 0.05) / (PC.HEAVY_HOLD - 0.05), 0, 1);
+      o.lean = -0.1 * k; o.hF = [-2 - 3 * k, -15 - 2 * k]; o.hB = [2, -11]; o.swordAng = lerp(2.4, -2.6, easeOutCubic(k)); o.tremble = k >= 1 ? 1 : 0;
+      if (p.onGround) { o.fF = [5, -1]; o.fB = [-5, -1]; o.hipY = -9; } else { o.fF = [3, -4]; o.fB = [-3, -2]; }
+      return o;
+    }
+    if (p.hurtT > 0) {
+      o.lean = -0.35; o.hF = [4, -16]; o.hB = [-5, -15]; o.fF = [3, -2]; o.fB = [-3, -1]; o.swordAng = -1;
+      return o;
+    }
+    if (p.sliding) {
+      o.lean = -0.45; o.hipY = -4; o.fF = [8, -1]; o.fB = [1, -1]; o.hB = [-6, -1]; o.swordAng = -2.4; o.hF = [3, -11];
+      return o;
+    }
+    if (p.mantle) {
+      o.lean = 0.5; o.hipY = -9; o.fF = [3, -6]; o.fB = [-2, -3]; o.hF = [5, -17]; o.hB = [5, -17]; o.swordAng = 2.6;
+      return o;
+    }
+    if (!p.onGround) {
+      if (p.spinT > 0) {
+        const k = 1 - p.spinT / p.spinDur;
+        o.rot = k * TAU; o.fF = [3, -7]; o.fB = [-1, -6]; o.hipY = -11; o.hF = [3, -9]; o.hB = [1, -10]; o.swordAng = 2.6; o.lean = 0.3;
+        return o;
+      }
+      if (p.vel.y > 0) { o.fF = [3, -5]; o.fB = [-2, -2]; o.lean = 0.12; o.hF = [4, -12]; o.hB = [-4, -14]; o.swordAng = 2.6; }
+      else { o.fF = [2, 0]; o.fB = [-3, -1]; o.lean = 0.05; o.hF = [5, -15]; o.hB = [-5, -16]; o.swordAng = 2.2; o.hipY = -10.5; }
+      return o;
+    }
+    if (p.crouching) {
+      o.hipY = -6; o.fF = [4, -1]; o.fB = [-4, -1]; o.lean = 0.4; o.hF = [5, -7]; o.hB = [-1, -6]; o.swordAng = 2.8;
+      return o;
+    }
+    const sp = Controller.hspeed(p);
+    if (sp > 1.4) {
+      const ph = p.runPhase, stride = clamp(sp / 13.6, 0.3, 1.2);
+      o.lean = 0.28 * stride;
+      o.hipY = -10 + Math.abs(Math.cos(ph)) * 1.1 - 0.5;
+      o.fF = [Math.sin(ph) * 5 * stride + 1, -1 - Math.max(0, Math.cos(ph)) * 3.5 * stride];
+      o.fB = [Math.sin(ph + Math.PI) * 5 * stride + 1, -1 - Math.max(0, Math.cos(ph + Math.PI)) * 3.5 * stride];
+      o.hF = [-5, -9]; o.swordAng = Math.PI - 0.15;
+      o.hB = [Math.sin(ph) * 3 + 1, -9];
+      return o;
+    }
+    // at rest a while, the blade goes back in its sheath and the left hand rests on it (the concept sheet's stance)
+    const br = Math.sin(t * 3) > 0 ? 0 : 1;
+    if (p.idleT > 2.5) {
+      o.hipY = -10 + br * 0.6; o.lean = 0.04; o.fF = [1.5, -1]; o.fB = [-1.5, -1];
+      o.sword = 'sheathed'; o.hF = [0.5, -8.5 + br * 0.5]; o.hB = 'hilt';
+      return o;
+    }
+    // idle with breathing
+    o.hipY = -10 + br * 0.6; o.hF = [5, -8 + br * 0.5]; o.hB = [-2, -8 + br * 0.5]; o.swordAng = 2.45;
+    return o;
+  },
+  // world direction along a swing's arc at angle th: the same plane FX.swoosh draws its trail in
+  arcDir(yaw, tilt, th) {
+    const fx = fwdX(yaw), fz = fwdZ(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw), ct = Math.cos(tilt), st = Math.sin(tilt);
+    const c = Math.cos(th), s = Math.sin(th);
+    return { x: fx * c + rx * ct * s, y: st * s, z: fz * c + rz * ct * s };
+  },
+
+  apply(r, p) {
+    if (!this._v) this._v = [0, 1, 2, 3, 4, 5, 6, 7].map(() => new THREE.Vector3());
+    const [T, P, D, E, U, F, A, W] = this._v;
+    const o = this.pose2D(p), B = r.bones, M = r.mesh, X = PX;
+    Rig.reset(r);
+    const tr = () => (o.tremble ? rand(-0.012, 0.012) * o.tremble : 0);
+    // the body: hip height, a roll about the hips for flips and falls, lean shared by spine and chest
+    B.hips.position.y = -(o.hipY + (p.landSquash > 0 ? 1.5 : 0)) * X;
+    B.hips.position.x += tr();
+    B.hips.rotation.x = -o.rot;
+    B.spine.rotation.x = -o.lean * 0.55;
+    B.chest.rotation.x = -o.lean * 0.45;
+    B.chest.rotation.y = o.twist;
+    // the head stays level-ish and looks along the aim
+    B.head.rotation.x = clamp(o.lean * 0.8 + p.aimDir.y * 0.5, -0.5, 0.8);
+    M.updateMatrixWorld(true);
+    // a side-plane point (2D px, x forward, y down) at a sideways offset, rolled with the body, in world space
+    const piv = -o.hipY * X;
+    const L = (x2, y2, side, out) => {
+      let y = -y2 * X - piv, z = -x2 * X;
+      if (o.rot) { const c = Math.cos(-o.rot), s = Math.sin(-o.rot); const yy = y * c - z * s; z = y * s + z * c; y = yy; }
+      return M.localToWorld(out.set(side, y + piv, z));
+    };
+    // a side-plane direction (2D angle, y down) leaning a little to the right of the body, in world space
+    const Ldir = (a, out) => {
+      out.set(0.3, -Math.sin(a + o.rot), -Math.cos(a + o.rot)).normalize();
+      return out.applyQuaternion(M.quaternion);
+    };
+    // sheath: hangs back from the left hip, or swings level behind for the draw
+    // the concept art wears it steeper than the 2D sprite's 2.75
+    const sa = o.sheathAng !== null ? o.sheathAng : 2.2 - o.lean * 0.5;
+    U.set(-0.25, -Math.sin(sa + o.rot), -Math.cos(sa + o.rot)).normalize().applyQuaternion(M.quaternion);
+    F.set(0, 0, -1).applyQuaternion(M.quaternion);
+    Rig.orient(B.sheath, U.negate(), F);
+    B.sheath.updateMatrixWorld(true);
+    // legs: feet on their targets, knees forward, soles level with the body
+    for (const [side, foot, s] of [['R', o.fF, 0.12], ['L', o.fB, -0.12]]) {
+      L(foot[0], foot[1], s, T);
+      L(30, -6, s, P);
+      Rig.ik(r, 'thigh' + side, 'shin' + side, 'foot' + side, T, P, -1);
+      U.set(0, 1, 0).applyAxisAngle(this.X || (this.X = new THREE.Vector3(1, 0, 0)), -o.rot).applyQuaternion(M.quaternion);
+      F.set(0, 0, -1).applyAxisAngle(this.X, -o.rot).applyQuaternion(M.quaternion);
+      Rig.orient(B['foot' + side], U, F);
+    }
+    // the blade: a world direction from the swing, or the side-plane angle, or into the sheath
+    const sheathed = o.sword === 'sheathed';
+    for (const e of r.extras) e.visible = !sheathed;
+    if (o.bladeW) D.set(o.bladeW.x, o.bladeW.y, o.bladeW.z).normalize();
+    else Ldir(o.swordAng, D);
+    // arms: the sword hand reaches along the blade when it leads; elbows go back and out
+    B.chest.updateMatrixWorld(true);
+    Rig.boneWorld(r, 'armR', A);
+    if (o.hF === 'sword') T.copy(A).addScaledVector(D, 0.55);
+    else L((o.hF || [4, -8])[0], (o.hF || [4, -8])[1], 0.22, T);
+    T.x += tr(); T.y += tr();
+    P.set(0.7, -0.35, 0.8).applyQuaternion(M.quaternion).add(A);
+    Rig.ik(r, 'armR', 'foreR', 'handR', T, P, 1);
+    Rig.boneWorld(r, 'armL', A);
+    if (o.hB === 'hilt') T.setFromMatrixPosition(B.sheath.matrixWorld).addScaledVector(F.set(0, 0, -1).applyQuaternion(M.quaternion), 0.05);
+    else L((o.hB || [-2, -8])[0], (o.hB || [-2, -8])[1], -0.2, T);
+    P.set(-0.7, -0.35, 0.8).applyQuaternion(M.quaternion).add(A);
+    Rig.ik(r, 'armL', 'foreL', 'handL', T, P, 1);
+    if (sheathed) {
+      // into the sheath, grip standing out of the mouth
+      W.set(0, -1, 0).transformDirection(B.sheath.matrixWorld);
+      E.setFromMatrixPosition(B.sheath.matrixWorld).addScaledVector(W, -0.12);
+      Rig.place(B.weapon, E);
+      Rig.orient(B.weapon, W, F.set(0, 0, -1).transformDirection(B.sheath.matrixWorld));
+    } else {
+      // edge first along a swing; a carried blade keeps its edge down
+      if (o.edgeW) E.set(o.edgeW.x, o.edgeW.y, o.edgeW.z); else E.set(0, -1, 0);
+      Rig.orient(B.weapon, D, E);
+    }
+    // scarf: the cloth simulation's points, the first pinned to the neck wrap
+    const sc = p.scarf;
+    if (sc) {
+      M.updateMatrixWorld(true);
+      A.set(-0.06, 0.31, 0.15);
+      B.chest.localToWorld(A);
+      for (let i = 0; i < SCARF_N; i++) {
+        const a = i === 0 ? A : T.set(sc[i].x, sc[i].y, sc[i].z), b = sc[i + 1] || null;
+        const bone = B['scarf' + i];
+        Rig.place(bone, a);
+        if (b) U.set(a.x - b.x, a.y - b.y, a.z - b.z);
+        if (U.lengthSq() < 1e-8) U.set(0, 1, 0);
+        Rig.orient(bone, U, F.set(0, 0, -1).applyQuaternion(M.quaternion));
+      }
+    }
   },
 };
