@@ -33,6 +33,8 @@ const UI = {
   },
   show(id) {
     if (!id && document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    // any panel needs the cursor back (results, upgrade picks, pause)
+    if (id) Input.releaseLock();
     for (const k in this.panels) this.panels[k].hidden = k !== id;
     document.body.classList.toggle('in-menu', !!id);
     if (id === 'howto') this.renderHowTo();
@@ -62,6 +64,7 @@ const UI = {
       case 'duel': this.startRun('duel'); break;
       case 'training': this.startRun('training'); break;
       case 'test': this.startRun('test'); break;
+      case 'scrappers': this.startRun('scrappers'); break;
       case 'pick': Game.chooseUpgrade(el.dataset.id); break;
       case 'resume': this.resumeGame(); break;
       case 'restart': this.startRun(Game.mode); break;
@@ -109,7 +112,7 @@ const UI = {
     else if (victory) sub = boss ? 'AEGIS-07 is down and unlocked for a future character roster.' : 'All demo waves cleared, rival included. AEGIS-07 is unlocked for a future character roster.';
     else if (duel) sub = 'AEGIS-07 won the duel. Parry a swing, let it parry your counter, then parry its gold riposte.';
     else if (boss) sub = 'AEGIS-07 holds the street. Tether its pulse grenade and kick it back to break the shield.';
-    else if (Game.mode === 'endless') sub = `You held the street until wave ${Director.wave}.`;
+    else if (Game.mode === 'endless' || Game.mode === 'scrappers') sub = `You held the street until wave ${Director.wave}.`;
     else sub = Director.wave === 0 ? 'Down before the first wave.' : `Down on wave ${Director.wave} of ${DEMO_WAVES.length}.`;
     document.getElementById('over-sub').textContent = sub;
     const mm = Math.floor(st.time / 60), ss = Math.floor(st.time % 60).toString().padStart(2, '0');

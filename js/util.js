@@ -56,6 +56,10 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 const rgba = (r, g, b, a) => `rgba(${r | 0},${g | 0},${b | 0},${a})`;
+// '#rrggbb' to linear-light [r, g, b] in 0..1, the space WebGL lighting adds up in
+function hexLinear(hex) {
+  return hexToRgb(hex).map((c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); });
+}
 function mixHex(a, b, t) {
   const A = hexToRgb(a), B = hexToRgb(b);
   return `rgb(${lerp(A[0], B[0], t) | 0},${lerp(A[1], B[1], t) | 0},${lerp(A[2], B[2], t) | 0})`;
@@ -290,13 +294,14 @@ function pointInBox(x, y, z, b, pad = 0) {
   return x > b.min.x - pad && x < b.max.x + pad && y > b.min.y - pad && y < b.max.y + pad && z > b.min.z - pad && z < b.max.z + pad;
 }
 // Slab ray test against a box list along unit direction d; returns the first hit within maxT, or null.
-function rayBoxes(ox, oy, oz, dx, dy, dz, maxT, boxes) {
+// pad grows every box, which turns the ray into a sweep of a sphere (or cube) of that radius.
+function rayBoxes(ox, oy, oz, dx, dy, dz, maxT, boxes, pad = 0) {
   let best = maxT, hit = null, hitAxis = -1;
   const o = [ox, oy, oz], d = [dx, dy, dz], K = ['x', 'y', 'z'];
   for (const b of boxes) {
     let tmin = 0, tmax = best, axis = -1, miss = false;
     for (let i = 0; i < 3; i++) {
-      const lo = b.min[K[i]], hi = b.max[K[i]];
+      const lo = b.min[K[i]] - pad, hi = b.max[K[i]] + pad;
       if (Math.abs(d[i]) < 1e-9) { if (o[i] <= lo || o[i] >= hi) { miss = true; break; } continue; }
       let t1 = (lo - o[i]) / d[i], t2 = (hi - o[i]) / d[i];
       if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
@@ -310,4 +315,20 @@ function rayBoxes(ox, oy, oz, dx, dy, dz, maxT, boxes) {
   const n = [0, 0, 0];
   if (hitAxis >= 0) n[hitAxis] = d[hitAxis] > 0 ? -1 : 1;
   return { t: best, box: hit, x: ox + dx * best, y: oy + dy * best, z: oz + dz * best, nx: n[0], ny: n[1], nz: n[2] };
+}
+// Yaw 0 faces -z, like the camera; positive yaw turns left.
+const fwdX = (yaw) => -Math.sin(yaw);
+const fwdZ = (yaw) => -Math.cos(yaw);
+const yawOf = (x, z) => Math.atan2(-x, -z);
+// Moves (vx, vz) toward (tx, tz) by at most amt; returns [vx, vz].
+function approach2(vx, vz, tx, tz, amt) {
+  const dx = tx - vx, dz = tz - vz, d = Math.hypot(dx, dz);
+  if (d <= amt || d < 1e-9) return [tx, tz];
+  return [vx + (dx / d) * amt, vz + (dz / d) * amt];
+}
+// Distance from point (px, pz) to the segment (ax, az)-(bx, bz) on the ground plane.
+function segDistXZ(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+  const t = l2 > 0 ? clamp(((px - ax) * dx + (pz - az) * dz) / l2, 0, 1) : 0;
+  return Math.hypot(px - (ax + dx * t), pz - (az + dz * t));
 }

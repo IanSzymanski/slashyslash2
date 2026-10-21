@@ -55,6 +55,7 @@ const Game = {
     this.stats = { kills: 0, score: 0, maxCombo: 0, parries: 0, wave: 0, time: 0, damageTaken: 0, ults: 0 };
     this.combo = 0; this.comboT = 0; this.announcements = [];
     this.style = 0; this.styleRecent = []; this.styleIdle = 0; this.upgrades = new Set();
+    Render.hpTrail = PC.MAX_HP; Render.shTrail = PC.MAX_SHIELD;
     this.cam.trauma = 0;
     Camera.snap(this.player);
     this.resetProps(true);
@@ -277,9 +278,10 @@ const Game = {
     this.time += dt;
     if (!this.player.dead) this.stats.time += dt;
     this.player.update(dt);
+    Nav.update(this.player.pos.x, this.player.pos.z);
     const cine = this.cineActive() ? this.cine : null;
     for (const e of this.enemies) if (!e.dead && (!cine || e === cine.owner)) e.update(dt);
-    // enemy separation (the 2D anti-stacking push) comes back with the 3D enemies in Phase 3
+    separateEnemies(dt);
     for (const b of this.projectiles) b.update(dt);
     for (const h of this.hazards) h.update(dt);
     for (const p of this.props) p.update(dt);

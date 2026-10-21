@@ -32,6 +32,13 @@ const Director = {
   start(mode) {
     this.mode = mode; this.wave = 0; this.state = mode === 'training' ? 'training' : mode === 'test' ? 'idle' : 'intro'; this.breakT = 1.4; this.queue = []; this.modifier = null;
   },
+  // Phase 1 feel test: endless waves of scrappers only, growing like endless waves, no upgrades or rival.
+  buildScrappers(n) {
+    this.bossWave = false;
+    this.scale = { hp: 1 + (n - 1) * 0.07, dmg: 1 + (n - 1) * 0.035 };
+    this.waveName = ENDLESS_NAMES[(n - 1) % ENDLESS_NAMES.length];
+    return new Array(Math.max(1, Math.round((2 + n * 1.2) * S.enemies.count))).fill('scrapper');
+  },
   enabledTypes() { return ALL_TYPES.filter((t) => S.enemies[t]); },
   soloRival() { return this.mode === 'boss' || this.mode === 'duel'; },
   lastWave() { return this.soloRival() ? 1 : this.mode === 'demo' ? DEMO_WAVES.length : Infinity; },
@@ -77,7 +84,7 @@ const Director = {
   nextWave() {
     this.wave++;
     if (this.soloRival()) { this.bossWave = true; this.scale = { hp: 1, dmg: 1 }; this.waveName = this.mode === 'duel' ? 'LIMITERS OFF, FULL HEALTH' : 'RIVAL'; this.queue = []; }
-    else this.queue = this.mode === 'demo' ? this.buildDemo(this.wave) : this.buildEndless(this.wave);
+    else this.queue = this.mode === 'demo' ? this.buildDemo(this.wave) : this.mode === 'scrappers' ? this.buildScrappers(this.wave) : this.buildEndless(this.wave);
     this.total = this.queue.length;
     this.spawnT = this.bossWave ? 4 : 0.8;
     // endless waves from 4 on sometimes carry a twist
