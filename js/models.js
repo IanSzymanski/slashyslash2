@@ -1,6 +1,6 @@
 'use strict';
-// Character models built from parts on the humanoid rig, and their poses. Colours come from the 2D
-// sprites. The player model isn't here yet: it waits on its design, and gfx.js has a stand-in.
+// Character and prop models built from parts on the humanoid rig, and their poses. Enemy colours come
+// from the 2D sprites; the player follows the concept sheets.
 
 // the scarf's tail: segment length and count
 const SCARF_SEG = 0.17, SCARF_N = 6;
@@ -36,8 +36,83 @@ const MODELS = {
       { bone: 'footR', size: [0.13, 0.08, 0.26], at: [0, -0.02, -0.05], color: '#16121a' },
     ],
   },
+  // scrap-militia rifleman in olive drab with an amber visor; holds its range and lays a laser on you
+  gunner: humanoidModel(0.95, {
+    body: '#4a5a3a', dark: '#2a2a30', vest: '#3e4a32', limb: '#6a7a52', boot: '#16121a', eye: '#ffaa30',
+    extra: [
+      { bone: 'chest', size: [0.3, 0.16, 0.06], at: [0, 0.06, -0.16], color: '#2a2a30' },
+      { bone: 'chest', size: [0.08, 0.1, 0.05], at: [0.1, 0.0, -0.19], color: '#3e4a32' },
+      { bone: 'chest', size: [0.08, 0.1, 0.05], at: [-0.1, 0.0, -0.19], color: '#3e4a32' },
+      { bone: 'chest', size: [0.3, 0.3, 0.14], at: [0, 0.08, 0.2], color: '#3e4a32' },
+      { bone: 'armL', size: [0.17, 0.1, 0.17], at: [0, 0.02, 0], color: '#3e4a32' },
+      { bone: 'armR', size: [0.17, 0.1, 0.17], at: [0, 0.02, 0], color: '#3e4a32' },
+      // the rifle runs down the weapon bone from the right hand: stock, receiver and magazine, barrel, muzzle
+      { bone: 'weapon', size: [0.07, 0.22, 0.12], at: [0, 0.08, 0.02], color: '#2a2a30' },
+      { bone: 'weapon', size: [0.08, 0.42, 0.12], at: [0, -0.22, 0], color: '#3a3a42' },
+      { bone: 'weapon', size: [0.06, 0.14, 0.08], at: [0, -0.2, 0.1], color: '#2a2a30' },
+      { bone: 'weapon', size: [0.04, 0.32, 0.04], at: [0, -0.58, -0.02], color: '#8a8a90' },
+      { bone: 'weapon', size: [0.05, 0.04, 0.05], at: [0, -0.76, -0.02], color: '#ffaa30', glow: true, plain: true, tag: 'muzzle' },
+    ],
+  }),
+  // heavy-set bomber in teal with a gas mask and a backpack of glowing charges; lobs pulse grenades
+  grenadier: humanoidModel(1.0, {
+    body: '#3a5a5a', dark: '#2a3a3a', vest: '#2a3a3a', limb: '#6a8a7a', boot: '#16121a', eye: '#4af0ff', bulk: 1.15,
+    extra: [
+      { bone: 'chest', size: [0.38, 0.42, 0.22], at: [0, 0.08, 0.26], color: '#2a3a3a' },
+      { bone: 'chest', shape: 'hex', size: [0.1, 0.3, 0.1], at: [-0.11, 0.1, 0.39], color: '#4af0ff', glow: true },
+      { bone: 'chest', shape: 'hex', size: [0.1, 0.3, 0.1], at: [0.11, 0.1, 0.39], color: '#4af0ff', glow: true },
+      { bone: 'head', size: [0.16, 0.12, 0.1], at: [0, 0.04, -0.17], color: '#2a3a3a' },
+      { bone: 'head', shape: 'hex', size: [0.08, 0.08, 0.08], at: [0, 0.0, -0.24], rot: [Math.PI / 2, 0, 0], color: '#6a8a7a' },
+      // the throwing gauntlet: a heavy cuff with a charge cell that brightens through the wind-up
+      { bone: 'foreR', shape: 'hex', size: [0.17, 0.2, 0.17], at: [0, -0.16, 0], color: '#2a3a3a' },
+      { bone: 'handR', size: [0.14, 0.14, 0.14], at: [0, -0.06, 0], color: '#2a3a3a' },
+      { bone: 'handR', size: [0.1, 0.1, 0.1], at: [0, -0.13, 0], color: '#4af0ff', glow: true, plain: true, tag: 'orb' },
+    ],
+  }),
+  // red fuel barrel: slash it to light the fuse, tether it to throw
+  barrel: {
+    bones: [['root', null, 0, 0, 0]],
+    parts: [
+      { bone: 'root', shape: 'hex', size: [0.84, 1.27, 0.84], at: [0, 0.635, 0], color: '#a01c1c' },
+      { bone: 'root', shape: 'hex', size: [0.88, 0.07, 0.88], at: [0, 0.3, 0], color: '#3a0a0a' },
+      { bone: 'root', shape: 'hex', size: [0.88, 0.07, 0.88], at: [0, 0.97, 0], color: '#3a0a0a' },
+      { bone: 'root', shape: 'hex', size: [0.7, 0.05, 0.7], at: [0, 1.29, 0], color: '#5a0e0e' },
+      { bone: 'root', size: [0.32, 0.3, 0.06], at: [0, 0.64, -0.37], color: '#e8c040', plain: true },
+      { bone: 'root', size: [0.12, 0.12, 0.07], at: [0, 0.64, -0.38], color: '#1a1010', plain: true },
+    ],
+  },
   player: playerModel(),
 };
+
+// A soldier on the humanoid rig: c gives the palette (body, dark, vest, limb, boot, eye), bulk widens the
+// torso, and extra adds the type's own kit (weapon parts ride the 'weapon' bone in the right hand).
+function humanoidModel(scale, c) {
+  const k = c.bulk || 1;
+  return {
+    bones: HUMANOID, scale,
+    parts: [
+      { bone: 'hips', size: [0.32 * k, 0.18, 0.22], at: [0, -0.02, 0], color: c.dark },
+      { bone: 'spine', size: [0.34 * k, 0.3, 0.24], at: [0, 0.14, 0], color: c.body, taper: 1.08 },
+      { bone: 'chest', size: [0.44 * k, 0.34, 0.28], at: [0, 0.12, 0.01], color: c.vest, taper: 1.06 },
+      { bone: 'chest', size: [0.2, 0.08, 0.2], at: [0, 0.32, 0], color: c.dark },
+      { bone: 'head', size: [0.24, 0.24, 0.26], at: [0, 0.11, -0.02], color: c.vest },
+      { bone: 'head', size: [0.27, 0.06, 0.29], at: [0, 0.22, -0.02], color: c.body },
+      { bone: 'head', size: [0.18, 0.05, 0.04], at: [0, 0.12, -0.16], color: c.eye, glow: true, plain: true, tag: 'eye' },
+      { bone: 'armL', shape: 'hex', size: [0.12, 0.3, 0.12], at: [0, -0.15, 0], color: c.limb },
+      { bone: 'foreL', shape: 'hex', size: [0.1, 0.27, 0.1], at: [0, -0.13, 0], color: c.limb, taper: 0.85 },
+      { bone: 'handL', size: [0.09, 0.1, 0.09], at: [0, -0.04, 0], color: c.dark },
+      { bone: 'armR', shape: 'hex', size: [0.12, 0.3, 0.12], at: [0, -0.15, 0], color: c.limb },
+      { bone: 'foreR', shape: 'hex', size: [0.1, 0.27, 0.1], at: [0, -0.13, 0], color: c.limb, taper: 0.85 },
+      { bone: 'handR', size: [0.09, 0.1, 0.09], at: [0, -0.04, 0], color: c.dark },
+      { bone: 'thighL', shape: 'hex', size: [0.16, 0.43, 0.16], at: [0, -0.21, 0], color: c.dark },
+      { bone: 'shinL', shape: 'hex', size: [0.13, 0.42, 0.13], at: [0, -0.21, 0], color: c.dark, taper: 1.15 },
+      { bone: 'footL', size: [0.13, 0.08, 0.26], at: [0, -0.02, -0.05], color: c.boot },
+      { bone: 'thighR', shape: 'hex', size: [0.16, 0.43, 0.16], at: [0, -0.21, 0], color: c.dark },
+      { bone: 'shinR', shape: 'hex', size: [0.13, 0.42, 0.13], at: [0, -0.21, 0], color: c.dark, taper: 1.15 },
+      { bone: 'footR', size: [0.13, 0.08, 0.26], at: [0, -0.02, -0.05], color: c.boot },
+    ].concat(c.extra || []),
+  };
+}
 
 // The cyborg swordsman from the concept sheets: charcoal plate armour with a pixel-noise finish, a red
 // right arm, a red visor slit, swept silver fins on the helmet, red running lights on chest, knees,
@@ -220,6 +295,50 @@ const Poses = {
     Rig.tint(r, 'eye', e.windingUp() ? '#ffffff' : '#c8ff3a');
     Rig.tint(r, 'blade', st === 'windup' ? '#ffd040' : '#b8b8c0');
   },
+  // stunned: rocked back, arms out
+  stunned(r, e) {
+    const B = r.bones;
+    B.spine.rotation.x = 0.25; B.head.rotation.x = 0.3;
+    B.armL.rotation.z = -0.9; B.armR.rotation.z = 0.9; B.armR.rotation.x = 0.2; B.armL.rotation.x = 0.2;
+  },
+  // Rifle at low ready while it moves; raised along its aim (pitch from the aim line) while it aims.
+  gunner(r, e) {
+    Rig.reset(r);
+    const B = r.bones, moving = Math.min(1, Math.hypot(e.vel.x, e.vel.z) / 3.5);
+    this.walk(r, e.walk, moving, !e.onGround && e.stun <= 0);
+    if (e.stun > 0) { this.stunned(r, e); Rig.tint(r, 'eye', '#ffaa30'); return; }
+    const aiming = e.state === 'aim' || e.state === 'cool';
+    const pitch = aiming ? Math.asin(clamp(e.aimDir.y, -0.9, 0.9)) : -0.5;
+    // the right arm holds the stock at the shoulder, the left reaches under the barrel
+    B.armR.rotation.x = Math.PI / 2 + pitch - 0.25; B.foreR.rotation.x = 0.25; B.armR.rotation.z = 0.15;
+    B.armL.rotation.x = Math.PI / 2 + pitch - 0.1; B.armL.rotation.z = -0.55; B.foreL.rotation.x = 0.35;
+    B.chest.rotation.y = 0.12; B.spine.rotation.x = aiming ? -0.05 : -0.12;
+    B.head.rotation.x = aiming ? -pitch * 0.5 : 0.1;
+    if (e.state === 'cool' && e.st < 0.12) B.armR.rotation.x -= 0.25 * (1 - e.st / 0.12);
+    Rig.tint(r, 'eye', e.windingUp() ? '#ffffff' : '#ffaa30');
+    Rig.tint(r, 'muzzle', e.laser() === 2 ? '#ffffff' : '#ffaa30');
+  },
+  // The gauntlet swings back overhead through the wind-up and its cell brightens; the throw snaps it forward.
+  grenadier(r, e) {
+    Rig.reset(r);
+    const B = r.bones, moving = Math.min(1, Math.hypot(e.vel.x, e.vel.z) / 3.2);
+    this.walk(r, e.walk, moving, !e.onGround && e.stun <= 0);
+    B.spine.rotation.x = -0.12;
+    if (e.stun > 0) { this.stunned(r, e); Rig.tint(r, 'orb', '#4af0ff'); return; }
+    let arm = 0.3 + Math.sin(e.walk) * 0.2 * moving, fore = 0.4;
+    if (e.state === 'throwWind') {
+      const k = easeOutCubic(clamp(e.st / e.tele(1.0), 0, 1));
+      arm = lerp(0.3, -2.5, k); fore = lerp(0.4, 1.2, k);
+      B.spine.rotation.x = lerp(-0.12, 0.12, k); B.chest.rotation.y = lerp(0, 0.45, k);
+      B.armL.rotation.x = lerp(0, 1.2, k);
+    } else if (e.state === 'cool') {
+      const k = clamp(e.st / 0.15, 0, 1);
+      arm = lerp(-2.5, 1.3, easeOutCubic(k)); fore = 0.1; B.spine.rotation.x = -0.35; B.chest.rotation.y = lerp(0.45, -0.3, k);
+    }
+    B.armR.rotation.x = arm; B.foreR.rotation.x = fore;
+    Rig.tint(r, 'eye', e.windingUp() ? '#ffffff' : '#4af0ff');
+    Rig.tint(r, 'orb', e.state === 'throwWind' && ((e.t * 16) | 0) % 2 ? '#ffffff' : '#4af0ff');
+  },
 };
 
 // ---------- the player: the 2D Player.pose() laid out in 3D ----------
@@ -231,7 +350,8 @@ const PlayerPose = {
   // the 2D pose, with the sword given either as a side-plane angle (swordAng) or a world direction (bladeW)
   pose2D(p) {
     const t = p.animT;
-    const o = { hipY: -10, lean: 0.08, fF: [2.5, -1], fB: [-2.5, -1], hF: null, hB: null, sword: 'hand', swordAng: 2.35, sheathAng: null, rot: 0, tremble: 0, twist: 0, bladeW: null, edgeW: null };
+    // reachW: a world point the left hand reaches toward (the tether's anchor); kickW: where the front foot kicks
+    const o = { hipY: -10, lean: 0.08, fF: [2.5, -1], fB: [-2.5, -1], hF: null, hB: null, sword: 'hand', swordAng: 2.35, sheathAng: null, rot: 0, tremble: 0, twist: 0, bladeW: null, edgeW: null, reachW: null, kickW: null };
     if (p.dead) {
       const k = clamp(p.deadT / 0.35, 0, 1);
       o.rot = -1.45 * k; o.hipY = -10 + 4 * k; o.fF = [4, -1]; o.fB = [-1, -1]; o.lean = -0.2;
@@ -255,6 +375,31 @@ const PlayerPose = {
       if (!p.onGround) { o.fF = [4, -4]; o.fB = [-3, -2]; }
       o.sword = 'sheathed'; o.sheathAng = Math.PI - 0.15; o.hF = [3, -9 + ch]; o.hB = [-2, -8 + ch];
       o.tremble = ch;
+      return o;
+    }
+    if (p.plunge) {
+      o.lean = 0.05; o.fF = [3, -6]; o.fB = [-2, -5]; o.hipY = -11;
+      o.swordAng = Math.PI / 2; o.hF = [1, -9]; o.hB = [-1, -9];
+      return o;
+    }
+    if (p.attack && p.attack.groundCut) {
+      // the blade goes into the street; the street hides the buried part
+      const a = p.attack;
+      if (a.heavy) {
+        if (a.t < a.rip) {
+          const k = easeOutCubic(clamp(a.t / 0.05, 0, 1));
+          o.lean = 0.2; o.hipY = -4; o.fF = [7, -1]; o.fB = [-4, -1]; o.hB = [3, -6];
+          o.hF = [6, -8]; o.swordAng = lerp(-0.8, 1.25, k); o.tremble = k >= 1 ? 1 : 0;
+        } else {
+          const k = easeOutCubic(clamp((a.t - a.rip) / 0.08, 0, 1));
+          o.lean = lerp(0.2, -0.25, k); o.hipY = -9; o.fF = [3, -4]; o.fB = [-3, -2]; o.hB = [-5, -12];
+          o.hF = 'sword'; o.swordAng = lerp(1.25, -1.9, k);
+        }
+        return o;
+      }
+      const dig = easeOutCubic(clamp(a.t / 0.05, 0, 1)), rip = easeOutCubic(clamp((a.t - 0.27) / 0.07, 0, 1));
+      o.lean = -0.4; o.hipY = -4; o.fF = [8, -1]; o.fB = [1, -1]; o.hB = [-6, -1];
+      o.hF = [7, -6]; o.swordAng = lerp(-0.5, 0.75, dig) - 1.6 * rip;
       return o;
     }
     if (p.attack) {
@@ -285,6 +430,20 @@ const PlayerPose = {
       o.lean = 0.85; o.hipY = -9; o.fF = [-1, -3]; o.fB = [-7, -4]; o.swordAng = Math.PI - 0.2; o.hF = [-7, -10]; o.hB = [-5, -12];
       return o;
     }
+    if (p.kickAnim) {
+      const K = p.kickAnim, k = K.t / K.dur;
+      o.sword = 'sheathed'; o.sheathAng = 2.75; o.hipY = -11;
+      if (k < 0.28) {
+        // the kick: front foot snaps out along the aim, arms thrown wide for balance
+        o.lean = -0.3; o.fB = [-3, -5]; o.hF = [4, -17]; o.hB = [-6, -15];
+        const q = p.rp || p.pos;
+        o.kickW = { x: q.x + K.dir.x * 0.86, y: q.y + 1.0 + K.dir.y * 0.86, z: q.z + K.dir.z * 0.86 };
+      } else {
+        // then a tucked backflip off the grenade
+        o.rot = -easeOutQuad((k - 0.28) / 0.72) * TAU; o.lean = 0.3; o.fF = [3, -7]; o.fB = [-1, -6]; o.hF = [3, -10]; o.hB = [0, -11];
+      }
+      return o;
+    }
     const P = p.atkPend;
     if (P && !P.dash && P.t > 0.05 && !p.sliding && Input.isDown('attack')) {
       // holding for a heavy: the blade draws back over the shoulder
@@ -293,12 +452,34 @@ const PlayerPose = {
       if (p.onGround) { o.fF = [5, -1]; o.fB = [-5, -1]; o.hipY = -9; } else { o.fF = [3, -4]; o.fB = [-3, -2]; }
       return o;
     }
+    const T = p.tether;
+    if (T && T.phase === 'attached' && T.mode === 'rebound') {
+      // reeling in feet first, kick chambered, blade left in its sheath
+      o.lean = -0.25; o.fF = [6, -8]; o.fB = [-2, -5]; o.hF = [-4, -15]; o.hB = [-6, -12]; o.sword = 'sheathed'; o.sheathAng = 2.75;
+      return o;
+    }
+    if (T && (T.phase === 'fly' || (T.phase === 'attached' && (T.mode === 'zip' || T.mode === 'tow')))) {
+      // the left hand reaches along the line
+      o.reachW = T.pos;
+      if (T.mode === 'zip') { o.lean = 0.5; o.fF = [-1, -4]; o.fB = [-6, -3]; o.swordAng = Math.PI - 0.3; o.hF = [-5, -9]; }
+      else if (!p.onGround) { o.fF = [3, -4]; o.fB = [-3, -2]; }
+      return o;
+    }
+    if (p.utilT > 0) {
+      o.lean = -0.25; o.hF = [7, -17]; o.hB = [-7, -16]; o.swordAng = -0.9; o.tremble = 1;
+      if (p.onGround) { o.fF = [5, -1]; o.fB = [-5, -1]; } else { o.fF = [3, -4]; o.fB = [-3, -2]; }
+      return o;
+    }
     if (p.hurtT > 0) {
       o.lean = -0.35; o.hF = [4, -16]; o.hB = [-5, -15]; o.fF = [3, -2]; o.fB = [-3, -1]; o.swordAng = -1;
       return o;
     }
     if (p.sliding) {
       o.lean = -0.45; o.hipY = -4; o.fF = [8, -1]; o.fB = [1, -1]; o.hB = [-6, -1]; o.swordAng = -2.4; o.hF = [3, -11];
+      return o;
+    }
+    if (p.wallSliding) {
+      o.lean = -0.1; o.fF = [3, -3]; o.fB = [-3, -1]; o.hB = [-5, -14]; o.hF = [4, -9]; o.swordAng = 2.6;
       return o;
     }
     if (p.mantle) {
@@ -385,7 +566,8 @@ const PlayerPose = {
     B.sheath.updateMatrixWorld(true);
     // legs: feet on their targets, knees forward, soles level with the body
     for (const [side, foot, s] of [['R', o.fF, 0.12], ['L', o.fB, -0.12]]) {
-      L(foot[0], foot[1], s, T);
+      if (side === 'R' && o.kickW) T.set(o.kickW.x, o.kickW.y, o.kickW.z);
+      else L(foot[0], foot[1], s, T);
       L(30, -6, s, P);
       Rig.ik(r, 'thigh' + side, 'shin' + side, 'foot' + side, T, P, -1);
       U.set(0, 1, 0).applyAxisAngle(this.X || (this.X = new THREE.Vector3(1, 0, 0)), -o.rot).applyQuaternion(M.quaternion);
@@ -407,6 +589,7 @@ const PlayerPose = {
     Rig.ik(r, 'armR', 'foreR', 'handR', T, P, 1);
     Rig.boneWorld(r, 'armL', A);
     if (o.hB === 'hilt') T.setFromMatrixPosition(B.sheath.matrixWorld).addScaledVector(F.set(0, 0, -1).applyQuaternion(M.quaternion), 0.05);
+    else if (o.reachW) T.set(o.reachW.x - A.x, o.reachW.y - A.y, o.reachW.z - A.z).setLength(0.6).add(A);
     else L((o.hB || [-2, -8])[0], (o.hB || [-2, -8])[1], -0.2, T);
     P.set(-0.7, -0.35, 0.8).applyQuaternion(M.quaternion).add(A);
     Rig.ik(r, 'armL', 'foreL', 'handL', T, P, 1);

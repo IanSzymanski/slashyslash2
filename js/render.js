@@ -19,6 +19,7 @@ const Render = {
     Gfx.scene.add(this.playerRig.mesh);
     this.pickupGeo = Gfx.boxGeometry([{ min: { x: -0.08, y: -0.22, z: -0.08 }, max: { x: 0.08, y: 0.22, z: 0.08 } }, { min: { x: -0.22, y: -0.08, z: -0.08 }, max: { x: 0.22, y: 0.08, z: 0.08 } }]);
     this.pickupMat = new THREE.MeshBasicMaterial({ color: '#5aff7a' });
+    Views.init();
     this.resize();
     window.addEventListener('resize', () => this.resize());
   },
@@ -37,12 +38,17 @@ const Render = {
     FX.bolt(o, { x: 0, y: 2, z: 0 });
     FX.ring(o, 0.1, 1, 0.2);
     FX.glint(o);
+    // a ground mark's material, kept so marks never compile mid-fight
+    const decal = Gfx.decalMaterial('crack', o);
+    g.add(new THREE.Mesh(new THREE.PlaneGeometry(1, 1), decal));
+    Views.prewarmShow(g);
     Gfx.scene.add(g);
     this.playerRig.mesh.visible = true;
     Gfx.renderer.compile(Gfx.scene, Gfx.camera);
     this.playerRig.mesh.visible = false;
+    Views.prewarmHide();
     Gfx.scene.remove(g);
-    this.keep.push(r.mat, r.outline.material, ...FX.detachAll());
+    this.keep.push(r.mat, r.outline.material, decal, ...FX.detachAll());
   },
   // The 2D game's 16:9 frame; the 3D view renders at the frame's native size times the resolution scale.
   resize() {
@@ -167,9 +173,13 @@ const Render = {
     const G = Game, t = G.realTime;
     for (const m of Gfx.fireMats) m.color.setRGB(1, 0.55 + 0.25 * Math.sin(t * 17) * Math.sin(t * 5.3), 0.2);
     this.syncModels(realDt);
+    Views.sync();
     FX.sync(Gfx.camera);
+    // bullet time drains the colour from the lit world; glowing parts and effects stay bright
+    Gfx.desat.value = G.bulletK() * 0.85;
     Gfx.beginFrame();
     this.bladeLight();
+    Views.pushLights();
     FX.pushLights();
     Gfx.endFrame();
     Gfx.render();
@@ -260,10 +270,21 @@ const Render = {
       if (cdK < 1) this.fillDiamond(ctx, px, py, cdK, '#ffd070');
       drawText(ctx, 'PARRY', px + 7, y2 + 8, { color: afford ? '#7a849c' : '#5a4a4a' });
     }
+    // utility: fills as its cooldown runs down, flashes when pressed too early
+    const U = p.utility();
+    if (U) {
+      const ux = x + 88, uy = y2 + 10;
+      const k = p.utilCD > 0 ? 1 - p.utilCD / U.cooldown : 1;
+      const fl = p.utilFlash > 0 && ((t * 20) | 0) % 2;
+      ctx.fillStyle = '#0b0910'; this.diamond(ctx, ux, uy, 4);
+      ctx.fillStyle = fl ? '#ffffff' : k >= 1 ? '#ff3a52' : '#3a1a24'; this.diamond(ctx, ux, uy, 3);
+      if (k < 1) this.fillDiamond(ctx, ux, uy, k, '#a01c30');
+      drawText(ctx, hudKey('utility') + ' ' + U.hud, ux + 7, y2 + 8, { color: k >= 1 ? '#7a849c' : '#5a4a5a' });
+    }
     // wave info
     const D = Director;
     if (D.wave > 0) {
-      const label = G.mode === 'scrappers' ? 'SCRAPPER WAVE ' + D.wave : G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
+      const label = G.mode === 'street' ? 'STREET WAVE ' + D.wave : G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
       drawText(ctx, label, VIEW_W / 2, 6, { align: 'center', color: '#ffd0d8' });
       let sub;
       if (D.state === 'fight') sub = D.remaining() + ' HOSTILES' + (D.modifier ? ' - ' + WAVE_MODIFIERS[D.modifier].name : '');
@@ -312,7 +333,36 @@ const Render = {
     }
     if (G.state === 'playing') {
       if (S.visuals.indicators) this.drawThreatRing(ctx, p, t);
-      this.drawCrosshair(ctx);
+      const bt = G.bulletK();
+      if (bt > 0) this.drawReboundCue(ctx, p, bt, t);
+      this.drawCrosshair(ctx, p);
+    }
+  },
+  // Bullet time on a tethered grenade: speed lines converging on it, a closing reticle, and the line
+  // the kick will send it along (toward the crosshair).
+  drawReboundCue(ctx, p, k, t) {
+    const T = p.tether;
+    if (!T || T.mode !== 'rebound' || !T.target) return;
+    const s = this.project(T.target.pos);
+    if (!s) return;
+    const gx = s.x, gy = s.y;
+    ctx.globalAlpha = 0.35 * k;
+    ctx.fillStyle = '#e0f0ff';
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * TAU + Math.sin(i * 7.3) * 0.2, r0 = 70 + ((i * 37 + ((t * 240) | 0)) % 90), r1 = r0 + 26 + (i % 3) * 10;
+      pline(ctx, gx + Math.cos(a) * r0, gy + Math.sin(a) * r0, gx + Math.cos(a) * r1, gy + Math.sin(a) * r1, 1);
+    }
+    ctx.globalAlpha = 1;
+    const rr = 6 + 14 * clamp(Game.btT / Game.btDur, 0, 1);
+    ctx.fillStyle = '#ffd070';
+    for (let i = 0; i < 4; i++) {
+      const a = i * (Math.PI / 2) + t * 3;
+      pline(ctx, gx + Math.cos(a) * rr, gy + Math.sin(a) * rr, gx + Math.cos(a) * (rr + 4), gy + Math.sin(a) * (rr + 4), 1);
+    }
+    const cx = VIEW_W / 2, cy = VIEW_H / 2, L = Math.hypot(cx - gx, cy - gy) || 1;
+    for (let d = 14; d < L; d += 5) {
+      ctx.fillStyle = d < 60 ? '#ffffff' : '#ffd070';
+      ctx.fillRect(Math.round(gx + ((cx - gx) * d) / L), Math.round(gy + ((cy - gy) * d) / L), 1, 1);
     }
   },
   diamond(ctx, cx, cy, r) {
@@ -354,9 +404,14 @@ const Render = {
     }
     for (const m of p.hitMarks) if (((m.t * 16) | 0) % 2) mark(m.yaw, '#ff1030', 5);
   },
-  drawCrosshair(ctx) {
+  // Red while the tether would catch something (an enemy, barrel or grenade near the line, or a surface in
+  // reach) and you can pay for it; grey otherwise.
+  drawCrosshair(ctx, p) {
     const x = VIEW_W / 2, y = VIEW_H / 2;
-    const col = Camera.aimEnemy ? '#ff3a52' : '#c8b8c8';
+    const hand = p.hand(), afford = p.ult || p.shield >= PC.TETHER_COST || S.gameplay.invincible;
+    const target = p.tetherTarget(hand);
+    const live = (target && (afford || target.kind === 'grenade')) || (afford && dist3(Camera.aim, hand) <= PC.TETHER_RANGE);
+    const col = live ? '#ff3a52' : '#7a6a7a';
     ctx.fillStyle = '#0b0910';
     ctx.fillRect(x - 5, y - 1, 3, 3); ctx.fillRect(x + 3, y - 1, 3, 3); ctx.fillRect(x - 1, y - 5, 3, 3); ctx.fillRect(x - 1, y + 3, 3, 3);
     ctx.fillStyle = col;

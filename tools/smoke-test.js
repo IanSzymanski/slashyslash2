@@ -44,12 +44,26 @@ const HARNESS = () => {
       Game.enemies.push(e);
       return e;
     },
+    // an enemy of any type at (dx, dz) from the player, done spawning
+    enemy(type, dx, dz, o = {}) {
+      const p = Game.player.pos, e = new Enemy(type, { x: p.x + dx, y: p.y, z: p.z + dz }, {});
+      e.spawning = false; e.cd = o.cd === undefined ? 99 : o.cd;
+      if (o.hp) e.hp = e.maxHp = o.hp;
+      if (o.frozen) e.stun = 99;
+      Game.enemies.push(e);
+      return e;
+    },
     face(x, z, pitch = -0.12) { const p = Game.player.pos; Camera.yaw = yawOf(x - p.x, z - p.z); Camera.pitch = pitch; T.frame(2); },
+    // point the camera's crosshair straight at a world point
+    aimAt(c, dp = 0) {
+      for (let i = 0; i < 2; i++) { const q = Camera.pos; Camera.yaw = yawOf(c.x - q.x, c.z - q.z); Camera.pitch = Math.atan2(c.y - q.y, Math.hypot(c.x - q.x, c.z - q.z)) + dp; T.frame(1); }
+    },
     fresh() {
       Game.toMenu(); UI.act('test');
       const p = Game.player;
       S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD;
       T.frame(5);
+      Game.props = []; Game.projectiles = []; Game.hazards = [];
       return p;
     },
   };
@@ -200,6 +214,111 @@ async function run(browser, file, errors) {
     const f = T.scrapper(-2.5, 0);
     T.frame(20);
     ok(f.fade < 0.5, `a scrapper between the camera and you fades out (opacity ${f.fade.toFixed(2)})`);
+
+    // ---------- Phase 2 moves ----------
+    // a gunner lays its laser on you and fires; a slash sends the bolt back into it
+    p = T.fresh(); e = T.enemy('gunner', 10, 0, { cd: 0, hp: 500 }); T.face(e.pos.x, e.pos.z);
+    let bolt = null;
+    for (let i = 0; i < 200 && !bolt; i++) { T.frame(1); bolt = Game.projectiles.find((q) => q.kind === 'bolt'); }
+    ok(!!bolt, 'a gunner aims and fires a bolt');
+    for (let i = 0; i < 60 && bolt && bolt.hostile && distXZ(bolt.pos, p.pos) > 2.6; i++) T.frame(1);
+    const hpG = e.hp;
+    T.tap('Mouse0'); T.frame(4);
+    ok(bolt && !bolt.hostile, 'a slash sends the bolt back');
+    for (let i = 0; i < 60 && e.hp === hpG; i++) T.frame(1);
+    ok(e.hp < hpG, `the returned bolt hits the gunner (${hpG - e.hp})`);
+
+    // a grenadier's grenade: tether it in flight, time slows, the kick sends it home
+    p = T.fresh(); e = T.enemy('grenadier', 13, 0, { cd: 0, hp: 500 }); T.face(e.pos.x, e.pos.z);
+    let gren = null;
+    for (let i = 0; i < 240 && !gren; i++) { T.frame(1); gren = Game.projectiles.find((q) => q.kind === 'grenade'); }
+    ok(!!gren, 'a grenadier throws a pulse grenade');
+    if (gren) {
+      T.frame(14);
+      ok(!!gren.impact, 'a flying grenade marks where it will land');
+      T.aimAt(gren.pos);
+      T.tap('Mouse2');
+      let bt = false;
+      for (let i = 0; i < 30 && !bt; i++) { T.frame(1); bt = Game.btT > 0; }
+      ok(bt && gren.state === 'caught', 'tethering the grenade catches it and slows time');
+      for (let i = 0; i < 200 && gren.state !== 'kicked' && !gren.dead; i++) T.aimAt(e.center());
+      ok(gren.state === 'kicked' && !!p.kickAnim, 'reeling in kicks it and flips you off it');
+      const hpE = e.hp;
+      for (let i = 0; i < 120 && !gren.dead; i++) T.frame(1);
+      ok(e.hp < hpE, `the kicked grenade hits its thrower (${hpE - e.hp})`);
+    }
+
+    // barrels: a slash lights one; the tether swings another and throws it into a scrapper
+    p = T.fresh(); e = T.enemy('scrapper', 4.5, 0, { hp: 500 });
+    let br = new Barrel({ x: p.pos.x + 2.2, y: p.pos.y, z: p.pos.z }); Game.props.push(br);
+    T.face(br.pos.x, br.pos.z);
+    T.tap('Mouse0'); T.frame(70);
+    ok(br.dead && e.hp < 500, `a slashed barrel explodes and hurts a scrapper (${500 - e.hp})`);
+    p = T.fresh(); e = T.enemy('scrapper', 12, 3, { hp: 500 });
+    br = new Barrel({ x: p.pos.x + 6, y: p.pos.y, z: p.pos.z }); Game.props.push(br);
+    T.frame(5); T.aimAt(br.center());
+    T.press('Mouse2'); T.frame(25);
+    ok(p.towing(), 'holding the tether on a barrel tows it');
+    T.aimAt(e.center(), -0.02); T.frame(18);
+    T.release('Mouse2');
+    for (let i = 0; i < 120 && !br.dead; i++) T.frame(1);
+    ok(br.dead && e.hp < 500, `a thrown barrel bursts on a scrapper (${500 - e.hp})`);
+
+    // zip: hold the tether on a scrapper and arrive in a strike that refunds its cost
+    p = T.fresh(); e = T.enemy('scrapper', 9, 0, { hp: 500 }); T.frame(3); T.aimAt(e.center());
+    const sh0 = p.shield;
+    T.press('Mouse2'); T.frame(60); T.release('Mouse2');
+    ok(e.hp <= 500 - 22 && Math.abs(p.shield - sh0) < 0.01, `a zip strike hits (${500 - e.hp}) and refunds the tether`);
+
+    // plunge from the air onto a scrapper below
+    p = T.fresh(); e = T.enemy('scrapper', 0.3, 0, { hp: 500, frozen: true });
+    p.vel.y = 22; p.onGround = false; T.frame(15);
+    T.press('KeyC'); T.tap('Mouse0'); T.frame(60); T.release('KeyC');
+    ok(e.hp < 475, `a plunge lands a shockwave on a scrapper below (${500 - e.hp})`);
+
+    // slide attacks: a light one throws rubble and cuts, a heavy one launches you and the scrapper
+    p = T.fresh(); T.face(p.pos.x + 10, p.pos.z); T.press('KeyW'); T.frame(30); T.press('KeyC'); T.frame(3);
+    e = T.enemy('scrapper', fwdX(p.yaw) * 2, fwdZ(p.yaw) * 2, { hp: 500, frozen: true });
+    T.tap('Mouse0');
+    let rocks = 0;
+    for (let i = 0; i < 12; i++) { T.frame(1); rocks = Math.max(rocks, Game.projectiles.filter((q) => q.kind === 'rock').length); }
+    T.frame(22); T.release('KeyC'); T.release('KeyW'); T.frame(10);
+    ok(rocks >= 6 && e.hp < 500, `a light slide attack throws rubble (${rocks} rocks) and cuts (${500 - e.hp})`);
+    p = T.fresh(); T.face(p.pos.x + 10, p.pos.z); T.press('KeyW'); T.frame(30); T.press('KeyC'); T.frame(2);
+    e = T.enemy('scrapper', fwdX(p.yaw) * 4.6, fwdZ(p.yaw) * 4.6, { hp: 500, frozen: true });
+    T.press('Mouse0'); T.frame(20); T.release('Mouse0'); T.frame(8);
+    ok(!p.onGround && p.vel.y > 0 && e.hp < 500 && e.vel.y > 0, `a heavy slide attack launches you and the scrapper (${500 - e.hp})`);
+    T.release('KeyC'); T.release('KeyW');
+
+    // the heavy slam's ground ring reaches a scrapper behind you
+    p = T.fresh(); e = T.enemy('scrapper', 2.4, 0, { hp: 999 }); const far = T.enemy('scrapper', -6, 0, { hp: 500, frozen: true });
+    T.face(e.pos.x, e.pos.z);
+    for (let i = 0; i < 3; i++) { T.press('Mouse0'); T.frame(12); T.release('Mouse0'); T.frame(i < 2 ? 18 : 60); e.pos.x = p.pos.x + 2.4; e.pos.z = p.pos.z; e.vel.x = e.vel.z = 0; }
+    ok(far.hp < 500, `the heavy slam's ground ring hits a scrapper 6 m behind (${500 - far.hp})`);
+
+    // Overload shocks everything close, then refuses until its cooldown is done
+    p = T.fresh(); const o1 = T.enemy('scrapper', 3, 0), o2 = T.enemy('scrapper', -2, 2);
+    T.tap('KeyF'); T.frame(10);
+    ok(o1.hp < o1.maxHp && o2.hp < o2.maxHp && p.utilCD > 9, 'Overload shocks everything close and starts its cooldown');
+    T.tap('KeyF'); T.frame(2);
+    ok(p.utilFlash > 0, 'Overload on cooldown is refused');
+
+    // bullet jump out of a slide; wall slide and wall kick off a building
+    p = T.fresh(); Camera.pitch = 0.35; T.press('KeyW'); T.frame(30); T.press('KeyC'); T.frame(3);
+    const bx = p.pos.x, bz = p.pos.z; T.tap('Space'); T.frame(2);
+    const bullet = p.bulletT > 0 && p.vel.y > 8;
+    T.release('KeyC'); T.release('KeyW'); T.frame(40);
+    ok(bullet && Math.hypot(p.pos.x - bx, p.pos.z - bz) > 8, `crouch-slide plus jump bullet-jumps (${Math.hypot(p.pos.x - bx, p.pos.z - bz).toFixed(1)} m)`);
+    p = T.fresh(); p.pos.z = p.prev.z = -7 + 0.42; Camera.yaw = 0; T.frame(2);
+    T.press('KeyW'); T.press('Space'); T.frame(55);
+    const wallSlid = p.wallSliding;
+    T.release('Space'); T.frame(1); T.press('Space'); T.frame(2);
+    ok(wallSlid && p.vel.z > 10 && p.vel.y > 15, `pushing into a wall slides down it, and jumping kicks off (out ${p.vel.z.toFixed(1)}, up ${p.vel.y.toFixed(1)})`);
+    T.release('KeyW'); T.release('Space');
+
+    // a dash leaves afterimages
+    p = T.fresh(); T.tap('ShiftLeft'); T.frame(6);
+    ok(Views.ghosts.some((g) => g.mesh.visible), 'a dash leaves afterimages');
     T.render = false;
     Game.toMenu();
     return out;
@@ -212,11 +331,11 @@ async function run(browser, file, errors) {
     const fail = (m) => problems.push(m);
     S.visuals.resScale = 0.5; Render.resize();
     S.enemies.waveBreak = 1;
-    UI.act('scrappers');
+    UI.act('street');
     S.gameplay.invincible = true;
     T.frame(1); Render.draw(1 / 60);
     const progs0 = Gfx.renderer.info.programs.length;
-    const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'Mouse0', 'KeyE'];
+    const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'Mouse0', 'KeyE', 'Mouse2', 'KeyF'];
     const B = World.def.bounds, PM = Camera.PITCH_MAX + 1e-6;
     const inBox = (b) => World.overlap(b.pos.x, b.pos.y + 0.02, b.pos.z, b.r * 0.9, b.h - 0.04);
     let maxEnemies = 0;
@@ -249,6 +368,7 @@ async function run(browser, file, errors) {
         else if (q.x < B.minX - 0.01 || q.x > B.maxX + 0.01 || q.z < B.minZ - 0.01 || q.z > B.maxZ + 0.01 || q.y < -0.01) fail(`${b.type || 'player'} outside the arena at frame ${f}: ${q.x.toFixed(2)},${q.y.toFixed(2)},${q.z.toFixed(2)}`);
         else if (!b.mantle && inBox(b)) fail(`${b.type || 'player'} inside a box at frame ${f}: ${q.x.toFixed(2)},${q.y.toFixed(2)},${q.z.toFixed(2)}`);
       }
+      for (const o of Game.projectiles.concat(Game.props)) if (!o.dead && ![o.pos.x, o.pos.y, o.pos.z].every(isFinite)) fail(`${o.kind} position not finite at frame ${f}`);
       if (problems.length) break;
     }
     if (Gfx.renderer.info.programs.length !== progs0) fail(`shaders compiled mid-fight: ${progs0} programs before, ${Gfx.renderer.info.programs.length} after`);
@@ -261,7 +381,7 @@ async function run(browser, file, errors) {
   const keys = await page.evaluate(() => Object.keys(localStorage));
   if (keys.some((k) => !k.startsWith('slashyslash3d.'))) errors.push(`storage keys outside slashyslash3d.*: ${keys.join(', ')}`);
   if (!keys.includes('slashyslash3d.settings.v1') || !keys.includes('slashyslash3d.save.v1')) errors.push(`3D saves missing: ${keys.join(', ')}`);
-  console.log(`  scrapper waves: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies, style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
+  console.log(`  street waves: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies, style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
   if (res.kills < 1) errors.push(`${name}: random play killed nothing`);
   errors.push(...res.problems.map((m) => `${name}: ${m}`));
   await page.close();

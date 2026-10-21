@@ -9,7 +9,7 @@ const UPGRADES = {
   emberWake: { name: 'Ember Wake', tag: 'EW', desc: 'Dashing through enemies cuts them for 20. Dash charges refill 0.25s slower.' },
   openGuard: { name: 'Open Guard', tag: 'OG', desc: 'Parry window 60% wider. Parries no longer refund shield.' },
   breaker: { name: 'Breaker', tag: 'BR', desc: 'Finishers (the lunge and the heavy slam) hit 60% harder and launch. Other lights deal 20% less.' },
-  aftershock: { name: 'Aftershock', tag: 'AS', desc: 'Plunges send a ground wave each way. The impact itself deals 20% less.' },
+  aftershock: { name: 'Aftershock', tag: 'AS', desc: 'Plunges send a ground ring outward. The impact itself deals 20% less.' },
   glass: { name: 'Glass Edge', tag: 'GE', desc: 'Deal 35% more damage. Take 25% more.' },
   bloodline: { name: 'Bloodline', tag: 'BL', desc: 'Every kill heals 2. Your shield starts recharging 1s later.' },
 };
@@ -36,30 +36,4 @@ function makeElite(e) {
   e.def = Object.assign({}, e.def, { score: e.def.score * 2 });
 }
 
-// Aftershock and the heavy slam: a friendly wave that runs along the floor and hits each enemy once.
-// Still the 2D version; it becomes an expanding ring with the plunge in Phase 2.
-class FriendlyWave {
-  constructor(x, y, dir, speed, dmg, o = {}) {
-    this.x = x; this.y = y; this.dir = dir; this.speed = speed; this.dmg = dmg; this.cause = o.cause || 'plunge';
-    this.t = 0; this.dur = 0.6; this.dead = false; this.hit = new Set();
-  }
-  update(dt) {
-    this.t += dt;
-    this.x += this.dir * this.speed * dt;
-    if (this.t > this.dur || Level.pointSolid(this.x + this.dir * 3, this.y - 4) || !Level.pointSolid(this.x, this.y + 1, this.y)) { this.dead = true; return; }
-    if (Math.random() < 0.8) FX.dust(this.x, this.y, 1, { smax: 30, rise: 30, c: '#6a5a5a' });
-    for (const e of Game.enemies) {
-      if (e.dead || e.spawning || this.hit.has(e)) continue;
-      if (Math.abs(e.x - this.x) < 8 + e.w / 2 && e.y > this.y - 8 && e.y < this.y + 4) {
-        this.hit.add(e);
-        hurtEnemy(e, this.dmg, { kx: this.dir * 140, ky: -220, cause: this.cause, heavyAtk: this.cause === 'heavy', angle: -Math.PI / 2, stagger: 0.5, hitstop: 0.01 });
-      }
-    }
-  }
-  drawEmissive(ctx, camX, camY) {
-    const x = Math.round(this.x - camX), y = Math.round(this.y - camY), k = 1 - this.t / this.dur, h = Math.round(4 + k * 6);
-    ctx.fillStyle = '#ff3048'; ctx.fillRect(x - 1, y - h, 3, h);
-    ctx.fillStyle = '#ffd0d8'; ctx.fillRect(x, y - h + 1, 1, h - 1);
-  }
-  addLights() { FX.frameLight(this.x, this.y - 5, 24, '#ff3048', 0.8); }
-}
+// Aftershock and the heavy slam send out a SlamRing (projectiles.js): the 2D ground waves as one expanding ring.

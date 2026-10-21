@@ -32,12 +32,32 @@ const Director = {
   start(mode) {
     this.mode = mode; this.wave = 0; this.state = mode === 'training' ? 'training' : mode === 'test' ? 'idle' : 'intro'; this.breakT = 1.4; this.queue = []; this.modifier = null;
   },
-  // Phase 1 feel test: endless waves of scrappers only, growing like endless waves, no upgrades or rival.
-  buildScrappers(n) {
+  // Phase 2 feel test: endless waves of the three types built so far (scrappers, then gunners from wave 2
+  // and grenadiers from wave 3), growing like endless waves, with no upgrades or rival.
+  buildStreet(n) {
     this.bossWave = false;
+    const types = [
+      { type: 'scrapper', cost: 1, minWave: 1, weight: 4 },
+      { type: 'gunner', cost: 1.4, minWave: 2, weight: 2.4 },
+      { type: 'grenadier', cost: 1.8, minWave: 3, weight: 1.4 },
+    ].filter((d) => d.minWave <= n && (d.type === 'scrapper' || S.enemies[d.type] !== false));
+    let budget = (3 + n * 1.5) * S.enemies.count;
+    const out = [];
+    for (let guard = 0; budget > 0.5 && guard < 200; guard++) {
+      const opts = types.filter((d) => d.cost <= budget + 0.6);
+      if (!opts.length) break;
+      let r = Math.random() * opts.reduce((a, d) => a + d.weight, 0), k = 0;
+      while (r > opts[k].weight) { r -= opts[k].weight; k++; }
+      out.push(opts[k].type);
+      budget -= opts[k].cost;
+    }
+    // every wave from 2 on has at least one of the newest type, so the moves that answer it get used
+    const newest = types[types.length - 1].type;
+    if (n >= 2 && !out.includes(newest)) out[out.length - 1] = newest;
+    for (let i = out.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [out[i], out[j]] = [out[j], out[i]]; }
     this.scale = { hp: 1 + (n - 1) * 0.07, dmg: 1 + (n - 1) * 0.035 };
     this.waveName = ENDLESS_NAMES[(n - 1) % ENDLESS_NAMES.length];
-    return new Array(Math.max(1, Math.round((2 + n * 1.2) * S.enemies.count))).fill('scrapper');
+    return out.length ? out : ['scrapper'];
   },
   enabledTypes() { return ALL_TYPES.filter((t) => S.enemies[t]); },
   soloRival() { return this.mode === 'boss' || this.mode === 'duel'; },
@@ -84,7 +104,7 @@ const Director = {
   nextWave() {
     this.wave++;
     if (this.soloRival()) { this.bossWave = true; this.scale = { hp: 1, dmg: 1 }; this.waveName = this.mode === 'duel' ? 'LIMITERS OFF, FULL HEALTH' : 'RIVAL'; this.queue = []; }
-    else this.queue = this.mode === 'demo' ? this.buildDemo(this.wave) : this.mode === 'scrappers' ? this.buildScrappers(this.wave) : this.buildEndless(this.wave);
+    else this.queue = this.mode === 'demo' ? this.buildDemo(this.wave) : this.mode === 'street' ? this.buildStreet(this.wave) : this.buildEndless(this.wave);
     this.total = this.queue.length;
     this.spawnT = this.bossWave ? 4 : 0.8;
     // endless waves from 4 on sometimes carry a twist

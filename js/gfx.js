@@ -62,22 +62,27 @@ const Gfx = {
   // Both still receive the dynamic light pool on top. Parts of one character share one feet uniform.
   // A cool rim on characters keeps dark armour readable against a night street.
   rim: { value: new THREE.Color('#2e3a58') },
-  litMaterial(opts, mode, feetUniform = null) {
+  // bullet time drains the colour from lit surfaces; glowing parts and effects stay bright
+  desat: { value: 0 },
+  litMaterial(opts, mode, feetUniform = null, rim = true) {
     const m = new THREE.MeshLambertMaterial(opts);
     m.defines = mode === 'baked' ? { USE_BAKED: '' } : { USE_FEET: '' };
+    if (!rim) m.defines.NO_RIM = '';
     const feet = mode === 'baked' ? null : feetUniform || { value: new THREE.Color(0.25, 0.22, 0.3) };
     m.userData.feet = feet;
     m.onBeforeCompile = (sh) => {
       if (feet) { sh.uniforms.uFeet = feet; sh.uniforms.uRim = this.rim; }
+      sh.uniforms.uDesat = this.desat;
       // characters: a 'glow' vertex attribute marks fullbright parts (eyes, cores) and 'plain' parts skip the
       // texture (clean lights); meshes without them read 0
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\n#ifdef USE_BAKED\nattribute vec3 baked;\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nattribute float glow;\nattribute float plain;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
         .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_BAKED\nvBaked = baked;\n#endif\n#ifdef USE_FEET\nvGlow = glow;\nvPlain = plain;\n#endif');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\n#ifdef USE_BAKED\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nuniform vec3 uFeet;\nuniform vec3 uRim;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
+        .replace('#include <common>', '#include <common>\nuniform float uDesat;\n#ifdef USE_BAKED\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nuniform vec3 uFeet;\nuniform vec3 uRim;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
         .replace('#include <map_fragment>', '#ifdef USE_FEET\n#ifdef USE_MAP\ndiffuseColor *= mix( texture2D( map, vMapUv ), vec4( 1.0 ), vPlain );\n#endif\n#else\n#include <map_fragment>\n#endif')
-        .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n#ifdef USE_BAKED\nreflectedLight.indirectDiffuse += vBaked * diffuseColor.rgb;\n#endif\n#ifdef USE_FEET\nreflectedLight.indirectDiffuse += mix( uFeet, vec3( 1.0 ), vGlow ) * diffuseColor.rgb;\nfloat rim = 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) );\nreflectedLight.indirectDiffuse += uRim * rim * rim * rim * ( 1.0 - vGlow );\n#endif');
+        .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n#ifdef USE_BAKED\nreflectedLight.indirectDiffuse += vBaked * diffuseColor.rgb;\n#endif\n#ifdef USE_FEET\nreflectedLight.indirectDiffuse += mix( uFeet, vec3( 1.0 ), vGlow ) * diffuseColor.rgb;\n#ifndef NO_RIM\nfloat rim = 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) );\nreflectedLight.indirectDiffuse += uRim * rim * rim * rim * ( 1.0 - vGlow );\n#endif\n#endif')
+        .replace('#include <opaque_fragment>', '#include <opaque_fragment>\n#ifdef USE_FEET\nfloat dsk = uDesat * ( 1.0 - vGlow );\n#else\nfloat dsk = uDesat;\n#endif\ngl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( dot( gl_FragColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ) * vec3( 0.62, 0.68, 0.95 ), dsk );');
     };
     return m;
   },
@@ -187,6 +192,49 @@ const Gfx = {
     t.magFilter = THREE.NearestFilter;
     this.texCache.set('char', t);
     return t;
+  },
+  // Ground marks as white masks the material tints: a furrow running down the texture (with a fainter
+  // churned rim), cracks out from the middle, or a soft round scorch.
+  decalTexture(kind) {
+    const key = 'decal:' + kind;
+    let t = this.texCache.get(key);
+    if (t) return t;
+    const N = 64, c = makeCanvas(N, N), g = c.ctx, R = mulberry32(kind.length * 977 + 13);
+    if (kind === 'scorch') {
+      for (let y = 0; y < N; y += 2) {
+        for (let x = 0; x < N; x += 2) {
+          const a = clamp(1 - Math.hypot(x - 31, y - 31) / 31 + (R() - 0.5) * 0.3, 0, 1);
+          if (a > 0) { g.fillStyle = `rgba(255,255,255,${(a * 0.9).toFixed(2)})`; g.fillRect(x, y, 2, 2); }
+        }
+      }
+    } else if (kind === 'crack') {
+      g.fillStyle = 'rgba(255,255,255,0.95)';
+      for (let i = 0; i < 7; i++) {
+        let a = (i / 7) * TAU + R() * 0.5, x = 31, y = 31;
+        const L = 12 + R() * 16;
+        for (let s = 0; s < L; s += 2) { a += (R() - 0.5) * 0.8; x += Math.cos(a) * 2; y += Math.sin(a) * 2; g.fillRect(Math.round(x), Math.round(y), 2, 2); }
+      }
+      for (let i = 0; i < 14; i++) g.fillRect(Math.round(31 + (R() - 0.5) * 10), Math.round(31 + (R() - 0.5) * 10), 2, 2);
+    } else {
+      for (let y = 0; y < N; y += 2) {
+        const w = 2 * Math.round(3 + R() * 2 + Math.sin((y / N) * Math.PI) * 4), x0 = 32 - w / 2;
+        g.fillStyle = 'rgba(255,255,255,0.95)'; g.fillRect(x0, y, w, 2);
+        g.fillStyle = 'rgba(150,150,150,0.6)'; g.fillRect(x0 - 2, y, 2, 2); g.fillRect(x0 + w, y, 2, 2);
+      }
+    }
+    t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = THREE.NearestFilter;
+    this.texCache.set(key, t);
+    return t;
+  },
+  // A mark's material: lit by the street where it lies, like a character, and glowing hot at first.
+  // Gouges and cracks are pale scars of broken surface; a scorch is soot.
+  decalMaterial(kind, at) {
+    const L = World.def ? World.lightAt(at.x, at.y + 0.3, at.z) : [0.3, 0.26, 0.34];
+    const m = this.litMaterial({ map: this.decalTexture(kind), color: kind === 'scorch' ? '#140e0e' : '#9a8c92', transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 },
+      'feet', { value: new THREE.Color(L[0], L[1], L[2]) }, false);
+    return m;
   },
   // a four-pointed star for glints, white so it can be tinted
   starTexture() {
