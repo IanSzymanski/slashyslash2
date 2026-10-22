@@ -1,7 +1,8 @@
 'use strict';
 // Wave director for the scripted demo, endless survival, the rival fight and the melee duel test mode.
 // Spawns go through Arena (world.js); distances are in metres, converted from the 2D pixel values.
-// Until AEGIS-07 arrives in Phase 5, the demo ends after its sixth wave and endless has no rival waves.
+// AEGIS-07 (rival.js) is the demo's last wave, every eighth wave in endless, and the whole of the rival fight
+// and the melee duel.
 
 // Each wave introduces one problem that a specific move solves, so the rival tests practised skills.
 const DEMO_WAVES = [
@@ -144,12 +145,26 @@ const Director = {
     // 27 m from the player, toward the middle of the arena
     const d = distXZ(p, c) || 1, k = 27 / d;
     const x = clamp(p.x + (c.x - p.x) * k, B.minX + 11, B.maxX - 11), z = clamp(p.z + (c.z - p.z) * k, B.minZ + 11, B.maxZ - 11);
-    const r = new Rival(Arena.freeGroundAt(x, z, 1.1), this.scale);
+    const r = new Rival(this.rivalSpot(x, z), this.scale);
     if (this.mode === 'duel') r.startDuel();
     // the entry cutscene plays except on duel retries, which go straight to the fight
     if (!(this.mode === 'duel' && (Game.runs.duel || 0) > 1)) r.cinematicIntro();
     Game.enemies.push(r);
     Sound.play('spawn');
+  },
+  // street level near (x, z) with room for its 2.5 m frame and open sky above, for the beacon it arrives in
+  rivalSpot(x, z) {
+    const g = World.def.groundY;
+    for (let ring = 0; ring <= 30; ring++) {
+      const n = ring ? ring * 8 : 1;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * TAU, px = x + Math.cos(a) * ring * 0.6, pz = z + Math.sin(a) * ring * 0.6, t = World.groundAt(px, pz, g + 0.5);
+        if (t < g - 0.01 || !World.boxFree(px, t + 0.02, pz, 1.1, 2.6)) continue;
+        if (World.raycast({ x: px, y: t + 2.6, z: pz }, { x: 0, y: 1, z: 0 }, 30, 0.5)) continue;
+        return { x: px, y: t, z: pz };
+      }
+    }
+    return Arena.freeGroundAt(x, z, 1.1);
   },
   spawn(type) {
     const p = Game.player.pos, B = Arena.bounds();

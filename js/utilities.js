@@ -5,7 +5,7 @@
 const UTILITIES = {};
 function registerUtility(def) { UTILITIES[def.id] = def; }
 function getUtility(id) { return UTILITIES[id] || null; }
-// The 2D rival.js keeps this table; it moves there when the rival arrives in Phase 5.
+// rival.js adds AEGIS-07, which has no utility until it becomes playable.
 const CHARACTERS = { ronin: { id: 'ronin', name: 'RONIN', utility: 'overload' } };
 
 // RONIN: vents the core in a red shock sphere. Everything close is interrupted and thrown back, and hostile

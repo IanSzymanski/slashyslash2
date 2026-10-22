@@ -78,13 +78,17 @@ const FX = {
   detachAll() {
     const mats = [];
     for (const list of [this.swooshes, this.lines, this.bolts, this.rings, this.glints, this.decals]) {
-      for (const o of list) { if (o.mesh) { this.group.remove(o.mesh); mats.push(o.mesh.material); } }
+      for (const o of list) {
+        if (o.mesh) { this.group.remove(o.mesh); mats.push(o.mesh.material); }
+        if (o.extra) { for (const m of o.extra) { this.group.remove(m); mats.push(m.material); } o.extra = null; }
+      }
       list.length = 0;
     }
     this.lights.length = 0;
     return mats;
   },
   drop(o) {
+    if (o.extra) { for (const m of o.extra) { this.group.remove(m); m.geometry.dispose(); m.material.dispose(); } o.extra = null; }
     if (!o.mesh) return;
     this.group.remove(o.mesh);
     if (o.ownGeo) o.mesh.geometry.dispose();
@@ -148,8 +152,10 @@ const FX = {
   // A sword trail: a curved ribbon around a centre (o.follow keeps it on a character). The arc lies in
   // the plane of the facing direction and a sweep axis tilted from horizontal by o.tilt; o.dir picks
   // which way the head travels. The head draws over o.sweep seconds, then the trail fades by o.dur.
+  // With o.bolts, that many strands of lightning crawl along its lit stretch, each throwing a fork outward
+  // (o.boltPal colours them apart from the trail).
   swoosh(o) {
-    const s = Object.assign({ t: 0, dur: 0.24, sweep: 0.09, trail: 0.85, thick: 0.4, dir: 1, tilt: 0, pal: 'red', oy: 1.15, N: 24 }, o);
+    const s = Object.assign({ t: 0, dur: 0.24, sweep: 0.09, trail: 0.85, thick: 0.4, dir: 1, tilt: 0, pal: 'red', oy: 1.15, N: 24, bolts: 0 }, o);
     const geo = new THREE.BufferGeometry(), n = (s.N + 1) * 2;
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
@@ -159,9 +165,14 @@ const FX = {
     s.mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false, fog: false }));
     s.mesh.frustumCulled = false; s.ownGeo = true; s.ownMat = true;
     this.group.add(s.mesh);
+    if (s.bolts) {
+      s.extra = [];
+      for (let i = 0; i < s.bolts; i++) s.extra.push(this.stripMesh(this.ARC_BOLT * 2), this.stripMesh(this.FORK_N * 2));
+    }
     this.swooshes.push(s);
     return s;
   },
+  ARC_BOLT: 18, FORK_N: 6,
   // a drawn slash: a camera-facing band from a to b that grows over o.grow seconds
   slashLine(a, b, o = {}) {
     const l = Object.assign({ a, b, t: 0, dur: 0.35, w: 0.2, pal: 'red', grow: 0.05 }, o);
@@ -169,13 +180,42 @@ const FX = {
     this.lines.push(l);
     return l;
   },
+  // Lightning from a to b: a jagged path by midpoint displacement, re-struck every frame, with o.forks short
+  // branches off it.
   bolt(a, b, dur = 0.1, o = {}) {
-    const B = { a, b, t: 0, dur, outer: hexLinear(o.outer || '#ff2a44'), core: hexLinear(o.core || '#ffe8ee'), jag: o.jag === undefined ? 0.3 : o.jag, w: o.w || 0.07, seg: 0, pts: null };
-    const n = Math.max(3, Math.ceil(dist3(a, b) / 0.5) + 1);
+    const B = { a, b, t: 0, dur, outer: hexLinear(o.outer || '#ff2a44'), core: hexLinear(o.core || '#ffe8ee'), jag: o.jag === undefined ? 0.3 : o.jag, w: o.w || 0.07, seg: 0, pts: null, forks: o.forks || 0 };
+    const L = dist3(a, b), n = L > 3 ? 33 : L > 1 ? 17 : 9;
     B.n = n;
     B.mesh = this.stripMesh(n * 2); B.ownGeo = true; B.ownMat = true;
+    if (B.forks) { B.extra = []; for (let i = 0; i < B.forks; i++) B.extra.push(this.stripMesh(this.FORK_N * 2)); }
     this.bolts.push(B);
     return B;
+  },
+  // n points from a to b, displaced sideways by midpoint subdivision: amp at the middle, halving each level
+  jagPath(a, b, n, amp) {
+    const P = new Array(n);
+    P[0] = { x: a.x, y: a.y, z: a.z }; P[n - 1] = { x: b.x, y: b.y, z: b.z };
+    const fill = (i, j, s) => {
+      if (j - i < 2) return;
+      const m = (i + j) >> 1, A = P[i], Bp = P[j];
+      P[m] = { x: (A.x + Bp.x) / 2 + rand(-s, s), y: (A.y + Bp.y) / 2 + rand(-s, s), z: (A.z + Bp.z) / 2 + rand(-s, s) };
+      fill(i, m, s * 0.55); fill(m, j, s * 0.55);
+    };
+    fill(0, n - 1, amp);
+    return P;
+  },
+  // outer glow and a thin hot core along pts, k its brightness
+  writeBolt(mesh, pts, w, cp, outer, core, k) {
+    const n = pts.length;
+    this.writeStrip(mesh, pts.concat(pts.slice().reverse()), w, cp, (i, out) => {
+      const c = i < n ? outer : core;
+      out[0] = c[0] * k; out[1] = c[1] * k; out[2] = c[2] * k;
+    }, n);
+  },
+  // a short branch thrown off point p toward dir (unit), len long
+  writeFork(mesh, p, dir, len, w, cp, outer, core, k) {
+    const N = this.FORK_N, end = { x: p.x + dir.x * len, y: p.y + dir.y * len, z: p.z + dir.z * len };
+    this.writeBolt(mesh, this.jagPath(p, end, N, len * 0.3), w * 0.6, cp, outer, core, k * 0.8);
   },
   stripMesh(n) {
     const geo = new THREE.BufferGeometry();
@@ -379,19 +419,15 @@ const FX = {
       this.writeStrip(l.mesh, [l.a, b], l.w * (0.4 + 0.6 * f), cp, (i, out) => { palAt(l.pal, f * (i ? 1 : 0.7), out); out[0] *= f; out[1] *= f; out[2] *= f; });
     }
     for (const B of this.bolts) {
-      // re-jag every frame so it flickers
-      const pts = [], n = B.n;
-      const ax = B.b.x - B.a.x, ay = B.b.y - B.a.y, az = B.b.z - B.a.z;
-      for (let i = 0; i < n; i++) {
-        const t = i / (n - 1), j = i && i < n - 1 ? B.jag * Math.sin(t * Math.PI) : 0;
-        pts.push({ x: B.a.x + ax * t + rand(-j, j), y: B.a.y + ay * t + rand(-j, j), z: B.a.z + az * t + rand(-j, j) });
+      // re-struck every frame so it flickers; a wide outer strip and a thin hot core
+      const pts = this.jagPath(B.a, B.b, B.n, B.jag), f = 1 - B.t / B.dur;
+      this.writeBolt(B.mesh, pts, B.w, cp, B.outer, B.core, f);
+      if (B.extra) {
+        for (const m of B.extra) {
+          const p = pts[1 + ((Math.random() * (B.n - 2)) | 0)], d = coneDir(null, TAU);
+          this.writeFork(m, p, d, rand(0.2, 0.5) * Math.max(0.6, B.jag * 3), B.w, cp, B.outer, B.core, f);
+        }
       }
-      const f = 1 - B.t / B.dur;
-      // a wide outer strip, then the same points again as a thin hot core
-      this.writeStrip(B.mesh, pts.concat(pts.slice().reverse()), B.w, cp, (i, out) => {
-        const c = i < n ? B.outer : B.core;
-        out[0] = c[0] * f; out[1] = c[1] * f; out[2] = c[2] * f;
-      }, n);
     }
     for (const R of this.rings) {
       const k = R.t / R.dur, r = lerp(R.r0, R.r1, R.ease === false ? k : easeOutCubic(k));
@@ -453,6 +489,37 @@ const FX = {
       C.setXYZ(i * 2 + 1, col[0] * g * lit, col[1] * g * lit, col[2] * g * lit);
     }
     P.needsUpdate = true; C.needsUpdate = true;
+    if (s.extra) this.syncSwooshBolts(s, cx, cy, cz, fx, fy, fz, ax, ay, az, r0, r1, k, fade);
+  },
+  // Lightning crawling along a trail's lit stretch: each strand follows the arc at its own radius with a jagged
+  // path re-struck every frame, and throws a fork out past the blade's reach.
+  syncSwooshBolts(s, cx, cy, cz, fx, fy, fz, ax, ay, az, r0, r1, k, fade) {
+    const cp = Gfx.camera.position, N = this.ARC_BOLT, u1 = k, u0 = Math.max(0, k - s.trail * 0.8);
+    const hot = this._boltHot || (this._boltHot = [0, 0, 0]), glow = this._boltGlow || (this._boltGlow = [0, 0, 0]);
+    const bp = s.boltPal || s.pal;
+    palAt(bp, 1, hot); palAt(bp, 0.55, glow);
+    const at = (u, rad, out) => {
+      const th = s.dir * (u - 0.5) * s.span, c = Math.cos(th), sn = Math.sin(th);
+      out.x = cx + (fx * c + ax * sn) * rad; out.y = cy + (fy * c + ay * sn) * rad; out.z = cz + (fz * c + az * sn) * rad;
+      return out;
+    };
+    for (let j = 0; j < s.extra.length; j += 2) {
+      const strand = s.extra[j], fork = s.extra[j + 1];
+      const show = fade > 0.03 && u1 - u0 > 0.03 && Math.random() > 0.12;
+      strand.visible = fork.visible = show;
+      if (!show) continue;
+      const rad = lerp(r0, r1, rand(0.45, 1.05)), amp = 0.09 + 0.05 * (j / 2), pts = [];
+      for (let i = 0; i < N; i++) {
+        const p = at(lerp(u0, u1, i / (N - 1)), rad, {}), e = i && i < N - 1 ? amp : 0;
+        p.x += rand(-e, e); p.y += rand(-e, e); p.z += rand(-e, e);
+        pts.push(p);
+      }
+      const kk = fade * (0.75 + 0.25 * Math.random());
+      this.writeBolt(strand, pts, 0.1, cp, glow, hot, kk);
+      const fi = 2 + ((Math.random() * (N - 4)) | 0), q = pts[fi], dx = q.x - cx, dy = q.y - cy, dz = q.z - cz, l = Math.hypot(dx, dy, dz) || 1;
+      const d = { x: dx / l + rand(-0.4, 0.4), y: dy / l + rand(-0.4, 0.4), z: dz / l + rand(-0.4, 0.4) }, dl = Math.hypot(d.x, d.y, d.z) || 1;
+      this.writeFork(fork, q, { x: d.x / dl, y: d.y / dl, z: d.z / dl }, rand(0.35, 0.8), 0.1, cp, glow, hot, kk);
+    }
   },
   // Writes a camera-facing band through pts. With split, the second half of pts is a thinner core strip.
   writeStrip(mesh, pts, w, cp, color, split = 0) {

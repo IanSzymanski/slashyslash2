@@ -17,6 +17,8 @@ const Input = {
   lockRequired: false, pointerLocked: false, lookDX: 0, lookDY: 0, onLockChange: null,
   // rawMovement: false once raw input was refused, so later locks skip asking; recent: average event size
   rawMovement: null, recentX: 0, recentY: 0,
+  // scroll wheel notches (positive away from you), taken once per rendered frame
+  wheel: 0,
 
   init(canvas) {
     this.canvas = canvas;
@@ -77,6 +79,12 @@ const Input = {
     });
     window.addEventListener('mouseup', (e) => release('Mouse' + e.button));
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    // the wheel zooms the camera while playing; a trackpad's small deltas add up to notches
+    window.addEventListener('wheel', (e) => {
+      if (!this.gameKeysActive() || (e.target !== canvas && !this.pointerLocked)) return;
+      e.preventDefault();
+      this.wheel += clamp(e.deltaY / (e.deltaMode === 1 ? 3 : 100), -3, 3);
+    }, { passive: false });
     window.addEventListener('contextmenu', (e) => { if (this.captureCb || this.gameKeysActive()) e.preventDefault(); });
   },
 
@@ -143,6 +151,7 @@ const Input = {
     });
   },
   releaseLock() { if (this.canvas && document.pointerLockElement === this.canvas) document.exitPointerLock(); },
+  takeWheel() { const w = this.wheel; this.wheel = 0; return w; },
   takeLook() {
     const d = { x: this.lookDX, y: this.lookDY };
     this.lookDX = this.lookDY = 0;

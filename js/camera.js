@@ -1,7 +1,8 @@
 'use strict';
 // Third-person orbit camera in the Risk of Rain 2 style: behind and above the player, turned directly by the mouse.
 // A 0.25 m sphere swept from the pivot keeps it out of walls; the aim ray through the crosshair sets
-// where slashes, the tether and returned bolts go.
+// where slashes, the tether and returned bolts go. The scroll wheel zooms it; all the way in is first person,
+// from the eyes, with the body turned to the view.
 
 const Camera = {
   yaw: 0, pitch: -0.2, curDist: 5, fov: 62,
@@ -9,6 +10,20 @@ const Camera = {
   PIVOT_UP: 0.5, PITCH_MAX: (80 * Math.PI) / 180, RADIUS: 0.25, EASE_OUT: 0.3, SENS: 0.0022, AIM_FAR: 60, TRAIL: 26,
   // threats more than this far off the view's centre count as unseen (the wind-up fairness rule)
   OFFVIEW: (75 * Math.PI) / 180,
+  // fp: first person (camera distance 0); ZOOM_MIN: closer than this in third person snaps to first person
+  fp: false, ZOOM_MIN: 1.2, ZOOM_MAX: 9, cineView: null,
+
+  // the wheel, in notches: in toward first person, out to ZOOM_MAX; saved as the distance setting
+  zoom(notches) {
+    if (!notches) return;
+    let d = S.camera.distance;
+    if (d <= 0) { if (notches > 0) d = this.ZOOM_MIN + 0.3; }
+    else {
+      d = clamp(d + notches * 0.6, 0, this.ZOOM_MAX);
+      if (d < this.ZOOM_MIN) d = 0;
+    }
+    if (d !== S.camera.distance) { S.camera.distance = d; saveSettings(); }
+  },
 
   // mouse deltas in pixels, applied in real time (never slowed by slow motion or frozen by hitstop)
   look(dx, dy) {
@@ -25,10 +40,39 @@ const Camera = {
   // base is the top of the head: the pivot is kept in open space between it and where the smoothing wants it.
   follow(p, realDt) {
     const r = p.rp || p.pos;
+    this.fp = S.camera.distance <= 0;
+    if (this.fp) {
+      // the eyes: ahead of the hull's middle so the inside of the helmet stays behind the lens, further ahead
+      // looking down so the chest does too
+      const ahead = 0.14 + 0.36 * Math.max(0, -Math.sin(this.pitch));
+      this.pivot.x = r.x + fwdX(this.yaw) * ahead; this.pivot.z = r.z + fwdZ(this.yaw) * ahead;
+      this.pivot.y = damp(this.pivot.y, r.y + p.h - 0.16, 30, realDt);
+      this.base = null;
+      return;
+    }
     this.pivot.x = damp(this.pivot.x, r.x, this.TRAIL, realDt); this.pivot.z = damp(this.pivot.z, r.z, this.TRAIL, realDt);
     if (Math.hypot(this.pivot.x - r.x, this.pivot.z - r.z) > 3) { this.pivot.x = r.x; this.pivot.z = r.z; }
     this.pivot.y = damp(this.pivot.y, r.y + PC.HEIGHT + this.PIVOT_UP, 12, realDt);
     this.base = { x: r.x, y: r.y + Math.max(0.5, p.h - 0.3), z: r.z };
+  },
+  // A cutscene's shot: its owner sets Game.cine.shot = { look, yaw, pitch, dist, ease } and the view eases
+  // toward it. Returns the distance to pass to update().
+  cine(C, realDt) {
+    const s = C.shot;
+    if (!this.cineView) this.cineView = { yaw: this.yaw, pitch: this.pitch, dist: Math.max(1.5, this.curDist), look: { x: this.pivot.x, y: this.pivot.y, z: this.pivot.z } };
+    const V = this.cineView, k = 1 - Math.exp(-realDt * (s.ease || 3));
+    V.yaw += angDiff(V.yaw, s.yaw) * k; V.pitch = lerp(V.pitch, s.pitch, k); V.dist = lerp(V.dist, s.dist, k);
+    V.look.x = lerp(V.look.x, s.look.x, k); V.look.y = lerp(V.look.y, s.look.y, k); V.look.z = lerp(V.look.z, s.look.z, k);
+    this.yaw = V.yaw; this.pitch = V.pitch;
+    this.pivot.x = V.look.x; this.pivot.y = V.look.y; this.pivot.z = V.look.z;
+    this.base = null; this.fp = false;
+    return V.dist;
+  },
+  // back to the player after a cutscene, turned to face what it showed
+  endCine(p, focus) {
+    this.cineView = null;
+    if (p && focus && focus.pos && !focus.dead) { this.yaw = yawOf(focus.pos.x - p.pos.x, focus.pos.z - p.pos.z); this.pitch = -0.12; }
+    if (p) { this.pivot.x = p.pos.x; this.pivot.y = p.pos.y + PC.HEIGHT + this.PIVOT_UP; this.pivot.z = p.pos.z; }
   },
   // the title screen's slow orbit around a point, looking down at pitch, the pivot lifted by lift
   orbit(c, realTime, pitch = -0.3, lift = 0) {
@@ -48,10 +92,13 @@ const Camera = {
     }
     const cp = Math.cos(this.pitch), d = this.dir;
     d.x = -Math.sin(this.yaw) * cp; d.y = Math.sin(this.pitch); d.z = -Math.cos(this.yaw) * cp;
-    // move in to a hit at once, ease back out over EASE_OUT once the space clears
-    const hit = World.raycast(this.pivot, { x: -d.x, y: -d.y, z: -d.z }, distance, this.RADIUS);
-    const allowed = hit ? Math.max(0, hit.t - 0.02) : distance;
-    this.curDist = Math.min(approach(this.curDist, distance, (distance / this.EASE_OUT) * realDt), allowed);
+    if (this.fp && Game.state === 'playing') this.curDist = 0;
+    else {
+      // move in to a hit at once, ease back out over EASE_OUT once the space clears
+      const hit = World.raycast(this.pivot, { x: -d.x, y: -d.y, z: -d.z }, distance, this.RADIUS);
+      const allowed = hit ? Math.max(0, hit.t - 0.02) : distance;
+      this.curDist = Math.min(approach(this.curDist, distance, (Math.max(distance, 2) / this.EASE_OUT) * realDt), allowed);
+    }
     const p = this.pos;
     p.x = this.pivot.x - d.x * this.curDist; p.y = this.pivot.y - d.y * this.curDist; p.z = this.pivot.z - d.z * this.curDist;
     // shake is small rotations, never a jolt of the position, and no roll

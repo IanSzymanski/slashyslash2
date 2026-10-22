@@ -131,11 +131,12 @@ const UI = {
   renderHowTo() {
     const rows = [
       ['Look (click the game to lock the mouse)', 'Mouse'],
+      ['Zoom the camera; all the way in is first person', 'Mouse wheel'],
       ['Move (relative to the camera); keep running and it builds to a sprint', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
       ['Skid turn: reverse at speed to plant a hand and push off', `${actionLabel('back')} while sprinting`],
       ['Vault over cars and anything chest-high', 'Run into it'],
       ['Jump / double jump', actionLabel('jump')],
-      ['Wall cling (hold a second, then slide); jump to kick off', `Jump into a wall, ${actionLabel('jump')}`],
+      ['Wall cling: holds while a move key is held, then slides; let go to drop; jump to kick off', `Jump into a wall, ${actionLabel('jump')}`],
       ['Crouch · slide while running', actionLabel('crouch')],
       ['Bullet jump (toward the crosshair)', `${actionLabel('crouch')} + ${actionLabel('jump')}`],
       ['Dash (2 charges, invulnerable)', `${actionLabel('dash')} + direction`],
@@ -152,6 +153,9 @@ const UI = {
       ['Grab, swing and throw barrels', `Hold ${actionLabel('tether')}, release`],
       ['Rebound a pulse grenade: reel in, kick it back', `${actionLabel('tether')} on it, aim`],
       ['Sawblade ultimate (when charged)', `Hold ${actionLabel('ultimate')} 1s`],
+      ['AEGIS-07 shielded: slash its bolts back (8 cracks) or kick its grenade back', `${actionLabel('attack')} · ${actionLabel('tether')}`],
+      ['AEGIS-07 gold flash: parry its riposte to stun it', actionLabel('sheathe')],
+      ['AEGIS-07 red flash: no parry stops it; dash through to its back', actionLabel('dash')],
       ['Pause (training: spawn panel)', actionLabel('pause')],
       ['Skip a cutscene you have seen', `Hold ${actionLabel('sheathe')}`],
       ['Pick an endless upgrade', 'Click, or 1 / 2 / 3'],

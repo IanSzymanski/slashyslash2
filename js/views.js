@@ -1,7 +1,8 @@
 'use strict';
 // Meshes for the simulation's non-character objects, synced each rendered frame: bolts, rubble, pulse
 // grenades and their blast zones, barrels, the tether line, gunner lasers, grenadier arcs, and the
-// player's afterimages. Every material is made once here and compiled in Render.prewarm.
+// player's afterimages. The rival's own effects are in rivalviews.js. Every material is made once here and
+// compiled in Render.prewarm.
 
 const Views = {
   map: new Map(), mats: null, geos: null, ghosts: [], lasers: [], arcs: [], zones: [], zips: [], beams: [], tetherMesh: null, rain: null, ash: null,
@@ -10,7 +11,7 @@ const Views = {
   init() {
     const add = (color, o = {}) => new THREE.MeshBasicMaterial(Object.assign({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }, o));
     this.mats = {
-      boltH: add('#ff7a2a'), boltF: add('#ff2a48'), boltS: add('#ff3a52'), boltCore: add('#fff4d0'),
+      boltH: add('#ff7a2a'), boltF: add('#ff2a48'), boltS: add('#ff3a52'), boltB: add('#2f6bff'), boltCore: add('#fff4d0'),
       shell: Gfx.litMaterial({ color: '#1c2a30' }, 'feet', FX.gibFeet),
       gFly: new THREE.MeshBasicMaterial({ color: '#4af0ff' }), gCaught: new THREE.MeshBasicMaterial({ color: '#ffd070' }),
       gKick: new THREE.MeshBasicMaterial({ color: '#ff5a6a' }), white: new THREE.MeshBasicMaterial({ color: '#ffffff' }),
@@ -52,6 +53,7 @@ const Views = {
     }
     for (const m of [this.tetherMesh, ...this.zips, ...this.lasers, ...this.arcs]) m.visible = false;
     this.initWeather();
+    BossViews.init();
   },
   // everything once, visible, for the shader compile
   prewarmShow(group) {
@@ -68,9 +70,11 @@ const Views = {
     this.ghosts[0].mesh.visible = true;
     this.zones[0].visible = true;
     this.tetherMesh.visible = true;
+    BossViews.prewarmShow(group);
   },
   prewarmHide() {
     this.ghosts[0].mesh.visible = false; this.zones[0].visible = false; this.tetherMesh.visible = false; this.beams[0].visible = false;
+    BossViews.prewarmHide();
   },
   waveMat() { return new THREE.MeshBasicMaterial({ color: '#ff7a2a', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }); },
 
@@ -92,8 +96,10 @@ const Views = {
     this.syncBeams(t);
     this.syncWeather();
     this.syncTells(t);
+    BossViews.sync();
   },
   make(o) {
+    if (BossViews.kinds.has(o.kind)) return BossViews.make(o);
     const M = this.mats, G = this.geos, g = new THREE.Group();
     if (o.kind === 'bolt') {
       g.add(new THREE.Mesh(G.bolt, this.boltMat(o)), new THREE.Mesh(G.boltCore, M.boltCore));
@@ -121,6 +127,7 @@ const Views = {
     return { group: g };
   },
   update(o, v, t) {
+    if (v.boss) { BossViews.update(o, v, t); return; }
     if (v.rig) {
       const R = v.rig, m = R.mesh;
       m.position.set(o.pos.x, o.pos.y, o.pos.z);
@@ -159,12 +166,13 @@ const Views = {
     }
   },
   dispose(v) {
+    if (v.boss) { BossViews.dispose(v); return; }
     if (v.rig) { Gfx.scene.remove(v.rig.mesh); v.rig.geo.dispose(); v.rig.mat.dispose(); v.rig.outline.material.dispose(); return; }
     Gfx.scene.remove(v.group);
     if (v.group.userData.halo) v.group.userData.halo.material.dispose();
     if (v.group.userData.band) v.group.userData.band.material.dispose();
   },
-  boltMat(o) { return !o.hostile ? this.mats.boltF : o.col && o.col.outer === '#ff3a52' ? this.mats.boltS : this.mats.boltH; },
+  boltMat(o) { return !o.hostile ? this.mats.boltF : o.col && o.col.outer === '#ff3a52' ? this.mats.boltS : o.col && o.col.outer === '#2f6bff' ? this.mats.boltB : this.mats.boltH; },
 
   // Afterimages: each new request copies the player's current bone matrices into a free pool mesh.
   syncGhosts() {

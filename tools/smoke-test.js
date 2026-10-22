@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Headless smoke test. Boots the 3D page and checks WebGL draws, runs scripted checks of the moves
-// (Phases 1 and 2), the nav graph, each enemy type's answer and the wave modes (Phase 3), then plays
-// Endless from wave 6 with random input and mouse look. Fails on any page error, a camera inside a box
-// or under the street, a body inside a box or outside the arena, a shader compiled mid-fight, or a
-// failed check.
+// (Phases 1 and 2), the nav graph, each enemy type's answer and the wave modes (Phase 3) and the rival's
+// rules (Phase 5), then plays Endless from wave 6 and the rival fight with random input and mouse look.
+// Fails on any page error, a camera inside a box or under the street, a body inside a box or outside the
+// arena, a shader compiled mid-fight, or a failed check.
 // Needs the dev dependencies:  npm install
 // Usage: node tools/smoke-test.js [seconds-of-random-play] [--dist]
 //   --dist also loads the single-file build (run node tools/build.js first).
@@ -467,10 +467,10 @@ async function run(browser, file, errors) {
     makeElite(e); T.frame(2);
     ok(Render.models.get(e) && Render.models.get(e).outline.visible, 'an elite wears a gold outline');
 
-    // the demo: six waves until the rival lands, the second bringing shield scrappers
+    // the demo: six waves and then the rival, the second bringing shield scrappers
     Game.toMenu(); UI.act('demo'); T.frame(2);
     Director.wave = 1; Director.nextWave();
-    ok(Director.demoWaves() === 6 && Director.waveName === 'SHIELD WALL' && Director.queue.includes('shielder'), `demo wave 2 is ${Director.waveName} with shield scrappers, of ${Director.demoWaves()} waves`);
+    ok(Director.demoWaves() === 7 && Director.waveName === 'SHIELD WALL' && Director.queue.includes('shielder'), `demo wave 2 is ${Director.waveName} with shield scrappers, of ${Director.demoWaves()} waves`);
 
     // ---------- Phase 4: the crossroads and the look ----------
     Game.toMenu(); UI.act('test'); T.frame(2);
@@ -548,6 +548,121 @@ async function run(browser, file, errors) {
     }
     S.gameplay.invincible = false;
 
+    // ---------- AEGIS-07 ----------
+    // the rival fight opens on its entry cutscene, and it fights once that's over
+    Game.toMenu(); UI.act('boss');
+    p = Game.player; S.gameplay.invincible = true;
+    let R = null;
+    for (let i = 0; i < 60 * 4 && !R; i++) { T.frame(1); R = Game.enemies.find((e) => e.isBoss); }
+    T.frame(2);
+    const sawIntro = !!(Game.cine && Game.cine.kind === 'rivalIntro');
+    for (let i = 0; i < 60 * 12 && (R.spawning || !R.act || R.act.kind === 'intro'); i++) T.frame(1);
+    let acted = '';
+    for (let i = 0; i < 60 * 8 && !acted; i++) { T.frame(1); if (R.act && R.act.kind !== 'intro') acted = R.act.kind; }
+    ok(sawIntro && !R.spawning && acted && !Game.cineActive(), `the rival fight opens on its entry cutscene, then it fights (first act: ${acted || 'none'})`);
+    Game.toMenu(); UI.act('endless'); T.frame(1);
+    Director.wave = BOSS_EVERY - 1; Director.nextWave(); T.frame(1);
+    ok(DEMO_WAVES[6].boss && Director.bossWave && Game.enemies.some((e) => e.isBoss), `the demo ends on the rival, and it comes for endless wave ${BOSS_EVERY}`);
+    // a rival at (dx, dz) from where the player stands, done arriving, its own choices switched off
+    const rival = (dx, dz, o = {}) => {
+      Game.toMenu(); UI.act('test'); T.frame(2);
+      p = Game.player; S.gameplay.invincible = true;
+      const q = Game.player.pos, r = new Rival({ x: q.x + dx, y: 0, z: q.z + dz }, {});
+      r.spawning = false; r.pos.y = r.prev.y = World.groundAt(r.pos.x, r.pos.z, 1);
+      for (const k in r.cds) r.cds[k] = 99;
+      if (o.phase2) { r.enterPhase2(true); r.transT = 0; }
+      if (!o.think) { r.chooseAct = () => {}; r.react = () => {}; }
+      if (!o.move) r.navigate = () => {};
+      Game.enemies.push(r); T.frame(1);
+      return r;
+    };
+    // eight of its bolts slashed back crack its shield through and stun it; a kicked-back grenade breaks it at once
+    R = rival(0, -10);
+    for (let i = 0; i < SHIELD_CRACKS; i++) {
+      const b = new Bolt({ x: R.pos.x, y: R.pos.y + 1.5, z: R.pos.z + 3 }, { x: 0, y: 0, z: -1 }, 30, 22);
+      b.hostile = false; Game.projectiles.push(b); T.frame(8);
+    }
+    ok(!R.shield && R.stunT > 0, `eight returned bolts break the rival's shield and stun it (cracks taken ${SHIELD_CRACKS})`);
+    R = rival(0, -10);
+    const pg = new PulseGrenade({ x: R.pos.x, y: R.pos.y + 1.4, z: R.pos.z + 4 }, { x: 0, y: 0, z: 0 }, R);
+    pg.kick({ x: 0, y: 0, z: -1 }); Game.projectiles.push(pg);
+    for (let i = 0; i < 40 && R.shield; i++) T.frame(1);
+    ok(!R.shield, 'a pulse grenade kicked back into it breaks the shield at once');
+    // phase 1 can't be skipped: hits stop at half health, and there it enrages into phase 2
+    R = rival(0, -10); R.shield = false; R.hp = Math.floor(R.maxHp / 2) + 10;
+    hurtEnemy(R, 60, { cause: 'slash' });
+    const gated = R.hp === Math.floor(R.maxHp / 2);
+    T.frame(2);
+    const enr = !!(Game.cine && Game.cine.kind === 'enrage') && R.phase === 2;
+    for (let i = 0; i < 60 * 6 && Game.cineActive(); i++) T.frame(1);
+    ok(gated && enr && !Game.cineActive() && R.phase === 2 && !R.shield && !!R.storm, 'damage stops at half health, where it enrages in a cutscene and fights on in phase 2 as the street erupts');
+    // phase 2: parrying its swing locks blades and it raises a guard; swinging into the guard gets you parried and a
+    // riposte in bullet time; parrying the riposte stuns it
+    R = rival(0, -3, { phase2: true });
+    R.rollReparry = () => false; R.rollRedFirst = () => false;
+    R.stagger(1.3, { x: 0, y: 0, z: -5 });
+    const clash = R.act && R.act.kind === 'guard' && Game.btKind === 'clash';
+    T.frame(3);
+    hurtEnemy(R, 20, { cause: 'slash' });
+    const rip = R.act && R.act.move === 'riposte' && Game.btKind === 'riposte';
+    T.frame(2);
+    R.stagger(1.3, { x: 0, y: 0, z: -5 });
+    ok(clash && rip && R.stunT > 0, 'phase 2: a parried swing raises its guard, a hit into the guard draws a riposte in bullet time, and parrying that stuns it');
+    // the red flash: you take it in front; behind it, it whiffs and is left wide open
+    R = rival(0, -3, { phase2: true });
+    S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
+    R.yaw = R.faceYaw = R.yawTo(p.pos); R.startPeril();
+    for (let i = 0; i < 90 && R.act && R.act.move === 'peril'; i++) T.frame(1);
+    const tookIt = p.hp < PC.MAX_HP;
+    R = rival(0, -3, { phase2: true });
+    p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
+    R.yaw = R.faceYaw = R.yawTo(p.pos); R.startPeril();
+    // it tracks you until its eye flashes, so get behind it after that
+    for (let i = 0; i < 90 && R.act && R.act.move === 'peril' && !R.act.glinted; i++) T.frame(1);
+    const f1 = R.fwd();
+    p.pos.x = p.prev.x = R.pos.x - f1.x * 2.5; p.pos.z = p.prev.z = R.pos.z - f1.z * 2.5;
+    for (let i = 0; i < 90 && R.act && R.act.move === 'peril'; i++) T.frame(1);
+    ok(tookIt && p.hp === PC.MAX_HP && R.stunT > 0, 'its red flash goes through a parry in front, but whiffs on you behind it and leaves it stunned');
+    S.gameplay.invincible = true;
+    // a sword dash chain: to one side of the line to you, to the other, then a cut through where you stand
+    R = rival(0, -14, { phase2: true });
+    R.startChain('zigzag'); R.act.side = 1;
+    const legs = [];
+    let lastDash = null, closest = 99;
+    for (let i = 0; i < 400 && (R.dash || (R.act && R.act.kind === 'chain')); i++) {
+      T.frame(1);
+      if (R.dash && R.dash !== lastDash) { lastDash = R.dash; legs.push({ x: R.pos.x, z: R.pos.z, vx: R.dash.vx, vz: R.dash.vz, cut: R.dash.cut, px: p.pos.x, pz: p.pos.z }); }
+      if (R.dash && R.dash.cut) closest = Math.min(closest, distXZ(R.pos, p.pos));
+    }
+    const legAng = (L) => Math.abs(angDiff(yawOf(L.px - L.x, L.pz - L.z), yawOf(L.vx, L.vz))) * 180 / Math.PI;
+    const legSide = (L) => sign((L.px - L.x) * L.vz - (L.pz - L.z) * L.vx);
+    ok(legs.length === 3 && legAng(legs[0]) > 40 && legAng(legs[1]) > 40 && legSide(legs[0]) !== legSide(legs[1]) && legs[2].cut && closest < 1.8,
+      `a sword dash chain goes side (${legs[0] ? legAng(legs[0]).toFixed(0) : '-'} deg), other side (${legs[1] ? legAng(legs[1]).toFixed(0) : '-'} deg), then cuts through you (closest ${closest.toFixed(1)} m)`);
+    // zoning backs off to its range; charging closes in
+    R = rival(0, -6, { move: true }); R.mode = 'zone'; R.modeT = 99;
+    for (let i = 0; i < 60 * 3; i++) T.frame(1);
+    const zoneD = distXZ(R.pos, p.pos);
+    R = rival(0, -16, { move: true }); R.mode = 'charge'; R.modeT = 99; R.cds.closer = 0;
+    for (let i = 0; i < 60 * 4; i++) T.frame(1);
+    const chargeD = distXZ(R.pos, p.pos);
+    ok(zoneD > 8 && chargeD < 4, `zoning it backs off to range (${zoneD.toFixed(1)} m); charging it closes in (${chargeD.toFixed(1)} m)`);
+    // up on a rooftop you're not safe: it boosts up after you
+    R = rival(0, -6, { move: true });
+    p.pos.x = p.prev.x = -15; p.pos.z = p.prev.z = -15; p.pos.y = p.prev.y = 6; p.vel.x = p.vel.y = p.vel.z = 0;
+    R.pos.x = R.prev.x = -5; R.pos.z = R.prev.z = -15; R.pos.y = R.prev.y = World.groundAt(-5, -15, 1); R.mode = 'charge'; R.modeT = 99; R.cds.leap = 0;
+    let roofT = -1;
+    for (let i = 0; i < 60 * 8 && roofT < 0; i++) { T.frame(1); if (R.onGround && Math.abs(R.pos.y - 6) < 0.3) roofT = i / 60; }
+    ok(roofT >= 0, `on a 6 m rooftop it boosts up after you (${roofT >= 0 ? 'there in ' + roofT.toFixed(1) + ' s' : 'never got there'})`);
+    // the knockout: a slow-motion cutscene, then it lies in the street as a husk until the next wave
+    R = rival(0, -6, { phase2: true });
+    R.hp = 5; hurtEnemy(R, 30, { cause: 'slash', dir: { x: 0, y: 0, z: -1 } });
+    const koCine = !!(Game.cine && Game.cine.kind === 'ko');
+    for (let i = 0; i < 60 * 9 && !R.dead; i++) T.frame(1);
+    Render.draw(1 / 60);
+    const husk = Game.props.find((q) => q.kind === 'husk');
+    ok(koCine && R.dead && husk && husk.rig, 'the last hit plays the knockout cutscene and leaves its husk lying in the street');
+    S.gameplay.invincible = false;
+
     // Retro renders at the 2D game's 480x270
     S.visuals.retro = true; Render.resize();
     const gl = Gfx.renderer.getContext(), retro = [gl.drawingBufferWidth, gl.drawingBufferHeight];
@@ -561,14 +676,15 @@ async function run(browser, file, errors) {
   for (const c of checks) { console.log(`  ${c.pass ? 'ok  ' : 'FAIL'} ${c.msg}`); if (!c.pass) errors.push(`${name}: ${c.msg}`); }
 
   // ---------- random play ----------
-  const res = await page.evaluate(async (frames) => {
+  // Endless from wave 6, so every enemy type turns up; then the rival fight
+  for (const [mode, secs] of [['endless', seconds], ['boss', Math.min(seconds, 30)]]) {
+  const res = await page.evaluate(async ([frames, mode]) => {
     const problems = [];
     const fail = (m) => problems.push(m);
     S.visuals.resScale = 0.5; Render.resize();
     S.enemies.waveBreak = 1;
-    // endless from wave 6, so every enemy type turns up
-    UI.act('endless');
-    Director.wave = 5;
+    UI.act(mode);
+    if (mode === 'endless') Director.wave = 5;
     S.gameplay.invincible = true;
     T.frame(1); Render.draw(1 / 60);
     const progs0 = Gfx.renderer.info.programs.length;
@@ -592,6 +708,8 @@ async function run(browser, file, errors) {
         if (e) { Camera.yaw = yawOf(e.pos.x - p.x, e.pos.z - p.z); Camera.pitch = -0.15; }
       }
       if (Game.state === 'pick') Game.chooseUpgrade(UI.pickIds[0]);
+      // a third of the way into the rival fight, bring it to half health so its blade phase gets played too
+      if (mode === 'boss' && f === Math.floor(frames / 3)) { const r = Game.enemies.find((e) => e.isBoss && !e.spawning); if (r) r.hp = Math.floor(r.maxHp / 2) - 1; }
       if (f === Math.floor(frames / 2)) { Game.pause(); if (Game.state !== 'paused') fail('pause failed'); await UI.resumeGame(); if (Game.state !== 'playing') fail('resume failed'); }
       T.frame(1);
       if (f % 3 === 0) Render.draw(1 / 60);
@@ -614,18 +732,22 @@ async function run(browser, file, errors) {
       if (problems.length) break;
     }
     if (Gfx.renderer.info.programs.length !== progs0) fail(`shaders compiled mid-fight: ${progs0} programs before, ${Gfx.renderer.info.programs.length} after`);
-    const r = { problems, wave: Director.wave, kills: Game.stats.kills, maxEnemies, types: [...seen].join(' '), style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length };
+    const boss = Game.enemies.find((e) => e.isBoss);
+    const r = { problems, wave: Director.wave, kills: Game.stats.kills, maxEnemies, types: [...seen].join(' '), style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length, boss: boss ? `rival at ${boss.hp}/${boss.maxHp}, phase ${boss.phase}` : 'no rival left' };
     Game.toMenu();
     S.visuals.resScale = 1; Render.resize();
     return r;
-  }, Math.round(seconds * 60));
+  }, [Math.round(secs * 60), mode]);
+  if (mode === 'endless') {
+    console.log(`  endless from wave 6: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies (${res.types}), style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
+    if (res.kills < 1) errors.push(`${name}: random play killed nothing`);
+  } else console.log(`  rival fight: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
+  errors.push(...res.problems.map((m) => `${name}: ${mode}: ${m}`));
+  }
   await page.waitForTimeout(300);
   const keys = await page.evaluate(() => Object.keys(localStorage));
   if (keys.some((k) => !k.startsWith('slashyslash3d.'))) errors.push(`storage keys outside slashyslash3d.*: ${keys.join(', ')}`);
   if (!keys.includes('slashyslash3d.settings.v1') || !keys.includes('slashyslash3d.save.v1')) errors.push(`3D saves missing: ${keys.join(', ')}`);
-  console.log(`  endless from wave 6: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies (${res.types}), style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
-  if (res.kills < 1) errors.push(`${name}: random play killed nothing`);
-  errors.push(...res.problems.map((m) => `${name}: ${m}`));
   await page.close();
 }
 
