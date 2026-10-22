@@ -17,9 +17,10 @@ const UPGRADE_FIRST = 2, UPGRADE_EVERY = 3;
 
 const WAVE_MODIFIERS = {
   elite: { name: 'ELITES', desc: 'SOME ENEMIES ARE GILDED: TOUGHER AND WORTH DOUBLE' },
-  glints: { name: 'GLINTS ONLY', desc: 'NO ! MARKERS' },
+  glints: { name: 'GLINTS ONLY', desc: 'THE THREAT RING SHOWS ONLY GLINTS' },
   lowgrav: { name: 'LOW GRAVITY', desc: 'EVERYONE FLOATS' },
-  blackout: { name: 'BLACKOUT', desc: 'THE STREET LIGHTS ARE OUT' },
+  // later: not offered until its phase lands (the Blackout rebake is Phase 4)
+  blackout: { name: 'BLACKOUT', desc: 'THE STREET LIGHTS ARE OUT', later: true },
 };
 
 function upgradeOffer(n = 3) {

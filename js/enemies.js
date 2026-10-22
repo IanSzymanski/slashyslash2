@@ -1,17 +1,22 @@
 'use strict';
-// Enemies, pickups, and hit and kill handling: the scrapper, plus the gunner and grenadier that Phase 2's
-// moves answer (bolts to send back, grenades to kick home). The other five types come in Phase 3.
-// Behaviour and timings follow the 2D enemies.js and specialists.js; distances and speeds are converted at PX = 1/11.
+// Enemies, pickups, and hit and kill handling: the scrapper, gunner, drone and brute. The specialists
+// (shield scrapper, crawler, grenadier, sniper) are in specialists.js, as in 2D. Behaviour and timings
+// follow the 2D enemies.js; distances and speeds are converted at PX = 1/11. Ground enemies walk the
+// nav graph in world.js, jumping between surfaces; drones fly.
 
 const ENEMY_DEFS = {
-  scrapper: { hp: 44, r: 0.45, h: 1.64, speed: 7.45, score: 100, mass: 1, dmg: 12, model: 'scrapper', debris: ['#6b4a3a', '#3e2a24', '#8e6a52', '#8a8a90'] },
-  gunner: { hp: 32, r: 0.45, h: 1.73, speed: 5.6, score: 130, mass: 1, dmg: 10, model: 'gunner', debris: ['#4a5a3a', '#3e4a32', '#2a2a30', '#6a7a52'] },
-  grenadier: { hp: 50, r: 0.5, h: 1.64, speed: 5.0, score: 200, mass: 1.2, dmg: 12, model: 'grenadier', debris: ['#3a5a5a', '#2a3a3a', '#4af0ff', '#6a8a7a'] },
+  scrapper: { hp: 44, r: 0.45, h: 1.64, speed: 7.45, score: 100, mass: 1, dmg: 12, debris: ['#6b4a3a', '#3e2a24', '#8e6a52', '#8a8a90'] },
+  gunner: { hp: 32, r: 0.45, h: 1.73, speed: 5.6, score: 130, mass: 1, dmg: 10, debris: ['#4a5a3a', '#3e4a32', '#2a2a30', '#6a7a52'] },
+  drone: { hp: 22, r: 0.5, h: 0.8, speed: 11.4, score: 90, mass: 0.7, dmg: 12, flying: true, debris: ['#5a5a66', '#8a8a96', '#3a3a44', '#ffd040'] },
+  // brutes are too big to jump between surfaces: steps and kerbs only
+  brute: { hp: 250, r: 0.9, h: 2.82, speed: 3.8, score: 450, mass: 3.5, dmg: 22, heavy: true, climb: 2.0, debris: ['#3a3a44', '#55555f', '#24242c', '#7a3e28', '#ff7a2a'] },
 };
-const ENEMY_BASE_STATE = { scrapper: 'chase', gunner: 'move', grenadier: 'move' };
+const ENEMY_BASE_STATE = { scrapper: 'chase', gunner: 'move', drone: 'hover', brute: 'walk' };
 const WINDUP_STATES = new Set(['windup', 'aim', 'tele', 'punchWind', 'slamWind', 'bashWind', 'lungeWind', 'throwWind']);
 // The melee glint flashes this long before a hit lands, so a reaction to it lands inside the parry window.
 const GLINT_LEAD = 0.28;
+// where each type's glint sits: a bone of its model and a lift above it
+const GLINT_AT = { scrapper: ['weapon', 0.25], brute: ['handR', 0.15], shielder: ['shield', 0.5], crawler: ['head', 0.2], drone: ['body', 0.1] };
 // Melee attack tokens: only this many enemies may wind up or swing at once; the rest hold back.
 const MELEE_STATES = new Set(['windup', 'strike', 'punchWind', 'punch', 'tele', 'dive', 'bashWind', 'bash', 'lungeWind', 'lunge']);
 function meleeTokenLimit() { return clamp(Math.round(2 * S.enemies.aggression), 1, 4); }
@@ -22,6 +27,7 @@ function meleeTokensFree(self) {
 }
 // An attacker the camera can't see (more than 75 degrees off its view) winds up 1.3x longer.
 const OFFVIEW_WIND = 1.3;
+const ENEMY_G = 81.8;
 
 class Enemy {
   constructor(type, pos, scale = {}) {
@@ -31,7 +37,7 @@ class Enemy {
     this.vel = { x: 0, y: 0, z: 0 }; this.r = d.r; this.h = d.h; this.onGround = false; this.col = null;
     this.maxHp = this.hp = Math.max(1, Math.round(d.hp * S.enemies.health * (scale.hp || 1)));
     this.dmgMul = scale.dmg || 1;
-    this.heavy = !!d.heavy; this.flying = !!d.flying; this.mass = d.mass;
+    this.heavy = !!d.heavy; this.flying = !!d.flying; this.mass = d.mass; this.climb = d.climb === undefined ? Nav.CLIMB : d.climb;
     this.state = ENEMY_BASE_STATE[type]; this.st = 0; this.cd = rand(0.6, 1.5);
     this.stun = 0; this.hitFlash = 0;
     const p = Game.player;
@@ -40,21 +46,37 @@ class Enemy {
     this.tethered = false; this.cutMark = 0; this.poise = 0; this.windMul = 1;
     this.speedVar = rand(0.88, 1.12); this.walk = 0; this.struck = false; this.fade = 1;
     this.model = null; this.side = chance(0.5) ? 1 : -1; this.seek = null; this.blockedT = 0; this.grenade = null; this.plan = null;
+    this.hop = null; this.navTo = null; this.skipPhysics = false; this.orbit = p ? yawOf(pos.x - p.pos.x, pos.z - p.pos.z) : 0;
     this.aimDir = { x: fwdX(this.yaw), y: 0, z: fwdZ(this.yaw) };
-    if (type === 'grenadier') this.cd = rand(1.5, 2.5);
+    if (this.initType) this.initType();
   }
   center() { return { x: this.pos.x, y: this.pos.y + this.h / 2, z: this.pos.z }; }
   setState(s) { this.state = s; this.st = 0; this.glinted = false; }
+  // Starts a wind-up: slower when the camera can't see it, with its sound placed where it is.
+  startWind(state, pm = 1) {
+    this.setState(state);
+    this.windMul = Camera.offView(this.center()) ? OFFVIEW_WIND : 1;
+    Sound.play('enemyWindup', { pm }, this.center());
+  }
+  // Wind-up length of the current melee attack, or 0 when none is coming.
   meleeWind() {
-    if (this.type === 'scrapper' && this.state === 'windup') return this.tele(0.45);
+    const s = this.state, t = this.type;
+    if (t === 'scrapper' && s === 'windup') return this.tele(0.45);
+    if (t === 'brute' && s === 'punchWind') return this.tele(0.55);
+    // a drone's hit lands after its flight, so its glint is timed to the impact
+    if (t === 'drone' && s === 'tele') return this.tele(0.5) + this.diveTime();
+    if (t === 'drone' && s === 'dive' && !this.struck) return this.st + this.diveTime();
+    if (t === 'shielder' && s === 'bashWind') return this.tele(0.5);
+    if (t === 'crawler' && s === 'lungeWind') return this.tele(0.45);
     return 0;
   }
   glintPoint() {
-    if (this.model && this.model.bones.weapon) {
-      const v = Rig.boneWorld(this.model, 'weapon', new THREE.Vector3());
-      return { x: v.x, y: v.y + 0.25, z: v.z };
+    const at = GLINT_AT[this.type];
+    if (at && this.model && this.model.bones[at[0]]) {
+      const v = Rig.boneWorld(this.model, at[0], new THREE.Vector3());
+      return { x: v.x, y: v.y + at[1], z: v.z };
     }
-    return { x: this.pos.x, y: this.pos.y + this.h + 0.8, z: this.pos.z };
+    return { x: this.pos.x, y: this.pos.y + this.h + 0.3, z: this.pos.z };
   }
   checkGlint() {
     const w = this.meleeWind();
@@ -64,6 +86,8 @@ class Enemy {
     FX.glint(g, { c: '#ffe8a0', size: this.heavy ? 1.1 : 0.8, follow: () => this.glintPoint(), threat: this });
     Sound.play('glint', {}, g);
   }
+  // seconds until a dive from here reaches the player's chest
+  diveTime() { return dist3(this.center(), Game.player.chest()) / (29.1 * S.enemies.speed); }
   windingUp() { return WINDUP_STATES.has(this.state); }
   // kv: knock velocity { x, y, z } in m/s
   stagger(dur, kv) {
@@ -71,6 +95,7 @@ class Enemy {
     this.stun = Math.max(this.stun, dur);
     if (kv) { this.vel.x += kv.x / this.mass; this.vel.z += kv.z / this.mass; }
     if (this.state !== ENEMY_BASE_STATE[this.type]) this.setState(ENEMY_BASE_STATE[this.type]);
+    this.skipPhysics = false; this.hop = null;
     this.cd = Math.max(this.cd, 0.4);
   }
   scaleSpeed() { return this.def.speed * S.enemies.speed * this.speedVar; }
@@ -92,9 +117,9 @@ class Enemy {
       if (this.spawnT <= 0) {
         this.spawning = false;
         const c = this.center();
-        FX.ring({ x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z }, 0.2, 1.6, 0.25, { c: '#ff7a3a', flat: true });
+        FX.ring({ x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z }, 0.2, 1.6, 0.25, { c: '#ff7a3a', flat: !this.flying });
         FX.sparks(c, 10, null, TAU, 3.6, 12.7, { c0: '#fff4d0', c1: '#ff9a3a', c2: '#7a2a10' });
-        FX.dust(this.pos, 5, { smax: 3.6 });
+        if (!this.flying) FX.dust(this.pos, 5, { smax: 3.6 });
       }
       return;
     }
@@ -106,47 +131,81 @@ class Enemy {
     }
     this[this.type](dt);
     this.checkGlint();
-    this.physics(dt, false);
+    if (!this.skipPhysics) this.physics(dt, false);
   }
   physics(dt, stunned) {
     const v = this.vel;
-    v.y = Math.max(v.y - 81.8 * dt * Game.gravMul(), -47.3);
-    if (stunned) {
-      const [nx, nz] = approach2(v.x, v.z, 0, 0, (this.onGround ? 63.6 : 10.9) * dt);
-      v.x = nx; v.z = nz;
+    if (this.flying && !stunned) {
+      World.moveBody(this, dt);
+      // drones keep off the ground below them, except when they dive at it
+      const g = World.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.1);
+      if (this.state !== 'dive' && this.pos.y < g + 0.7) v.y = Math.max(v.y, (g + 0.7 - this.pos.y) * 8);
+    } else {
+      v.y = Math.max(v.y - ENEMY_G * dt * Game.gravMul() * (this.flying ? 0.6 : 1), -47.3);
+      if (stunned) {
+        const [nx, nz] = approach2(v.x, v.z, 0, 0, (this.onGround ? 63.6 : 10.9) * dt);
+        v.x = nx; v.z = nz;
+      }
+      World.moveBody(this, dt, { step: stunned ? 0 : 1.0 });
     }
-    World.moveBody(this, dt, { step: stunned ? 0 : 1.0 });
     const B = Arena.bounds();
     this.pos.x = clamp(this.pos.x, B.minX + this.r, B.maxX - this.r);
     this.pos.z = clamp(this.pos.z, B.minZ + this.r, B.maxZ - this.r);
     if (this.pos.y < -20) { this.dead = true; Game.onKill(this, { cause: 'fall' }); }
   }
-  // Steer at the player: straight when the way is clear or off the street, else down the street flow field.
+
+  // ---------- getting around ----------
+  // Steer at the player: straight when it's on your level and the way is clear, else along the nav graph,
+  // jumping and dropping between surfaces where the graph says to.
   groundChase(dt, spd, stopDist) {
+    if (this.inHop(dt)) return;
     const p = Game.player, dx = p.pos.x - this.pos.x, dz = p.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1e-3;
-    let mx = dx / d, mz = dz / d;
-    const street = Math.abs(this.pos.y - World.def.groundY) < 0.3;
-    if (street && d > 2.5) {
-      const knee = { x: this.pos.x, y: this.pos.y + 0.5, z: this.pos.z };
-      if (World.raycast(knee, { x: mx, y: 0, z: mz }, d)) {
-        const f = Nav.dir(this.pos.x, this.pos.z);
-        if (f) { mx = f.x; mz = f.z; }
+    let mx = dx / d, mz = dz / d, go = d > stopDist;
+    const level = Math.abs(p.pos.y - this.pos.y) < 1.2;
+    const knee = { x: this.pos.x, y: this.pos.y + 0.5, z: this.pos.z };
+    if (!level || (d > 2.5 && World.raycast(knee, { x: mx, y: 0, z: mz }, d))) {
+      const s = this.onGround ? Nav.steer(this, this.climb) : null;
+      if (s) {
+        if (s.kind === Nav.JUMP) { this.startHop(s.to, s.via, spd); return; }
+        mx = s.x; mz = s.z; go = true; this.navTo = s.to;
+      } else if (!this.onGround && this.navTo) {
+        // walked off an edge: keep heading for where the drop lands
+        const tx = this.navTo.x - this.pos.x, tz = this.navTo.z - this.pos.z, tl = Math.hypot(tx, tz);
+        if (tl > 0.2) { mx = tx / tl; mz = tz / tl; go = true; }
       }
     }
-    if (d > stopDist) {
-      const [nx, nz] = approach2(this.vel.x, this.vel.z, mx * spd, mz * spd, 63.6 * dt);
-      this.vel.x = nx; this.vel.z = nz;
-    } else {
-      const [nx, nz] = approach2(this.vel.x, this.vel.z, 0, 0, 81.8 * dt);
-      this.vel.x = nx; this.vel.z = nz;
-    }
+    if (this.onGround) this.navTo = null;
+    if (go) this.steer(dt, mx, mz, spd);
+    else this.brake(dt);
     // close up it faces you; further off it faces where it's going
-    if (d < 6) this.turnToward(p.pos.x, p.pos.z, 9, dt);
+    if (d < 6 && level) this.turnToward(p.pos.x, p.pos.z, 9, dt);
     else this.turnToward(this.pos.x + mx, this.pos.z + mz, 7, dt);
-    const hs = Math.hypot(this.vel.x, this.vel.z);
-    if (hs > 0.9 && this.onGround) this.walk += hs * dt * 1.43;
   }
-  // Walk toward a direction on the ground (unit mx, mz) at spd, turning to face fx, fz when given.
+  // A jump along a nav link: up high enough to clear the landing, out past an overhang first if the link
+  // says so, then across onto the far surface.
+  startHop(to, via, spd) {
+    const g = ENEMY_G * Game.gravMul(), rise = to.y - this.pos.y, h = Math.max(rise, 0) + 1.0;
+    const vy = Math.sqrt(2 * g * h), T = (vy + Math.sqrt(Math.max(0, vy * vy - 2 * g * rise))) / g;
+    const L = (via ? Math.hypot(via.x - this.pos.x, via.z - this.pos.z) + Math.hypot(to.x - via.x, to.z - via.z) : Math.hypot(to.x - this.pos.x, to.z - this.pos.z));
+    this.hop = { to, via, spd: clamp(L / T, 5, Math.max(9, spd * 1.5)), t: 0 };
+    this.vel.y = vy; this.onGround = false;
+    Sound.play('jump', {}, this.pos);
+    FX.dust(this.pos, 4, { smax: 2.7 });
+  }
+  inHop(dt) {
+    const H = this.hop;
+    if (!H) return false;
+    H.t += dt;
+    if ((this.onGround && H.t > 0.08) || H.t > 2.5) { this.hop = null; return false; }
+    // through the waypoint until above the landing, then onto it
+    const wp = H.via && this.pos.y < H.to.y + 0.25 ? H.via : H.to;
+    const dx = wp.x - this.pos.x, dz = wp.z - this.pos.z, d = Math.hypot(dx, dz);
+    const s = d > 0.15 ? Math.min(H.spd, d * 12) : 0;
+    this.vel.x = d > 1e-3 ? (dx / d) * s : 0; this.vel.z = d > 1e-3 ? (dz / d) * s : 0;
+    if (d > 0.3) this.turnToward(wp.x, wp.z, 10, dt);
+    return true;
+  }
+  // Walk toward a direction on the ground (unit mx, mz) at spd.
   steer(dt, mx, mz, spd) {
     const [nx, nz] = approach2(this.vel.x, this.vel.z, mx * spd, mz * spd, 63.6 * dt);
     this.vel.x = nx; this.vel.z = nz;
@@ -160,15 +219,15 @@ class Enemy {
   // Ranged types hold a band of distance: back off when close, close in when far, drift sideways between.
   // A wall in the way of backing off turns it into a sidestep.
   keepRange(dt, near, far, spd) {
+    if (this.inHop(dt)) return;
     const p = Game.player, dx = p.pos.x - this.pos.x, dz = p.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1e-3;
     const ux = dx / d, uz = dz / d, knee = { x: this.pos.x, y: this.pos.y + 0.5, z: this.pos.z };
     if (this.seek) {
       const sx = this.seek.x - this.pos.x, sz = this.seek.z - this.pos.z, sd = Math.hypot(sx, sz);
       if (sd < 0.6 || this.st > 2.5) this.seek = null;
       else {
-        let mx = sx / sd, mz = sz / sd;
-        if (World.raycast(knee, { x: mx, y: 0, z: mz }, Math.min(sd, 2))) { const f = Nav.dir(this.pos.x, this.pos.z); if (f) { mx = f.x; mz = f.z; } }
-        this.steer(dt, mx, mz, spd);
+        this.steer(dt, sx / sd, sz / sd, spd);
+        this.turnToward(this.seek.x, this.seek.z, 7, dt);
         return;
       }
     }
@@ -223,20 +282,15 @@ class Enemy {
         // without a free attack token it hangs back just out of reach
         const token = meleeTokensFree(this);
         this.groundChase(dt, this.scaleSpeed() * (token ? 1 : 0.6), token ? 1.64 : 4.2);
-        if (!token && d < 3.6 && this.onGround) {
+        if (!token && d < 3.6 && this.onGround && !this.hop) {
           const [nx, nz] = approach2(this.vel.x, this.vel.z, (-dx / (d || 1)) * 3.6, (-dz / (d || 1)) * 3.6, 54.5 * dt);
           this.vel.x = nx; this.vel.z = nz;
         }
-        if (token && d < 2.7 && Math.abs(dy) < 2.2 && this.cd <= 0 && !p.dead && this.onGround) {
-          this.setState('windup');
-          this.windMul = Camera.offView(this.center()) ? OFFVIEW_WIND : 1;
-          Sound.play('enemyWindup', {}, this.center());
-        }
+        if (token && d < 2.7 && Math.abs(dy) < 2.2 && this.cd <= 0 && !p.dead && this.onGround) this.startWind('windup');
         break;
       }
-      case 'windup': {
-        const [nx, nz] = approach2(this.vel.x, this.vel.z, 0, 0, 81.8 * dt);
-        this.vel.x = nx; this.vel.z = nz;
+      case 'windup':
+        this.brake(dt);
         // tracks you through most of the wind-up, then commits to its line
         if (this.st < this.tele(0.45) * 0.7) this.turnToward(p.pos.x, p.pos.z, 4, dt);
         if (this.st >= this.tele(0.45)) {
@@ -247,30 +301,134 @@ class Enemy {
           Sound.play('enemyMelee', {}, this.center());
         }
         break;
-      }
       case 'strike':
         this.meleeCheck(2.2, 0.75, 0.25, 1.55, this.dmg(), 15.5);
         if (this.st > 0.15) this.setState('recover');
         break;
-      case 'recover': {
-        const [nx, nz] = approach2(this.vel.x, this.vel.z, 0, 0, 81.8 * dt);
-        this.vel.x = nx; this.vel.z = nz;
+      case 'recover':
+        this.brake(dt);
         if (this.st > 0.5) { this.setState('chase'); this.cd = rand(0.9, 1.7); this.windMul = 1; }
         break;
+    }
+  }
+
+  // ---------- drone: circles above head height and dives at you in a straight line ----------
+  drone(dt) {
+    const p = Game.player, pc = p.chest(), c = this.center(), v = this.vel;
+    const fly = (tx, ty, tz, spd, acc) => {
+      const dx = tx - c.x, dy = ty - c.y, dz = tz - c.z, d = Math.hypot(dx, dy, dz) || 1, s = Math.min(spd, d * 3);
+      const k = acc * dt;
+      v.x = approach(v.x, (dx / d) * s, k); v.y = approach(v.y, (dy / d) * s, k); v.z = approach(v.z, (dz / d) * s, k);
+    };
+    switch (this.state) {
+      case 'hover': {
+        // a slow orbit to one side of you, 5 m up; a wall in the way sends it round the other way
+        this.orbit += this.side * 0.45 * dt;
+        const R = 5.6 + Math.sin(this.t * 0.8) * 1.8;
+        const tx = p.pos.x + Math.cos(this.orbit) * R, tz = p.pos.z + Math.sin(this.orbit) * R, ty = p.pos.y + 5.3 + Math.sin(this.t * 2.2) * 0.7;
+        if (World.pointSolid(tx, ty, tz, 0.7) && (this.flipT = (this.flipT || 0) - dt) <= 0) { this.side = -this.side; this.flipT = 1; }
+        fly(tx, ty, tz, this.scaleSpeed(), 36.4);
+        this.turnToward(p.pos.x, p.pos.z, 8, dt);
+        if (this.cd <= 0 && dist3(c, pc) < 18.2 && !p.dead && meleeTokensFree(this)) this.startWind('tele', 1.3);
+        break;
       }
+      case 'tele':
+        v.x = approach(v.x, 0, 45.5 * dt); v.z = approach(v.z, 0, 45.5 * dt); v.y = approach(v.y, 0.9, 45.5 * dt);
+        this.turnToward(p.pos.x, p.pos.z, 10, dt);
+        if (this.st >= this.tele(0.5)) {
+          const dx = pc.x - c.x, dy = pc.y - c.y, dz = pc.z - c.z, d = Math.hypot(dx, dy, dz) || 1, sp = 29.1 * S.enemies.speed;
+          v.x = (dx / d) * sp; v.y = (dy / d) * sp; v.z = (dz / d) * sp;
+          this.yaw = yawOf(dx, dz);
+          // one glint per attack, whether it came in the wind-up or the dive
+          const g = this.glinted;
+          this.setState('dive'); this.struck = false; this.glinted = g;
+          Sound.play('droneDive', {}, c);
+        }
+        break;
+      case 'dive': {
+        if (!this.struck && !p.dead && pointInBody(c, p, 0.45)) {
+          this.struck = true;
+          p.takeHit({ dmg: this.dmg(), from: c, kind: 'melee', source: this, knock: 13.6 });
+        }
+        if (Math.random() < 0.6) FX.sparks(c, 1, { x: -v.x, y: -v.y, z: -v.z }, 0.4, 2.7, 7.3, { c0: '#fff4d0', c1: '#ffb040', c2: '#a04010' });
+        const col = this.col;
+        if (this.st > 0.6 || this.struck || (col && (col.wall || col.ground || col.ceil))) { this.setState('recover'); this.side = -this.side; }
+        break;
+      }
+      case 'recover':
+        v.x = approach(v.x, 0, 36.4 * dt); v.z = approach(v.z, 0, 36.4 * dt); v.y = approach(v.y, 8.2, 54.5 * dt);
+        if (this.st > 0.6) { this.setState('hover'); this.cd = rand(1.6, 2.8); this.windMul = 1; this.orbit = yawOf(c.x - p.pos.x, c.z - p.pos.z); }
+        break;
+    }
+  }
+
+  // ---------- brute: punches when close, slams a ground wave you jump from further off ----------
+  brute(dt) {
+    const p = Game.player, d = distXZ(p.pos, this.pos), dy = p.pos.y - this.pos.y;
+    switch (this.state) {
+      case 'walk':
+        this.groundChase(dt, this.scaleSpeed(), 2.6);
+        if (this.cd <= 0 && !p.dead && this.onGround && !this.hop) {
+          if (d < 3.4 && Math.abs(dy) < 3.1 && meleeTokensFree(this)) this.startWind('punchWind', 0.5);
+          else if (d < 15.5 && Math.abs(dy) < 4.5 && chance(0.02)) this.startWind('slamWind', 0.4);
+        }
+        break;
+      case 'punchWind':
+        this.brake(dt);
+        if (this.st < this.tele(0.55) * 0.7) this.turnToward(p.pos.x, p.pos.z, 3, dt);
+        if (this.st >= this.tele(0.55)) {
+          this.setState('punch'); this.struck = false;
+          const f = this.fwd();
+          this.vel.x = f.x * 10.9; this.vel.z = f.z * 10.9;
+          Sound.play('enemyMelee', {}, this.center());
+        }
+        break;
+      case 'punch':
+        this.meleeCheck(3.0, 1.0, 0.55, 2.4, this.dmg(), 25.5);
+        if (this.st > 0.18) this.setState('recover');
+        break;
+      case 'slamWind':
+        this.brake(dt);
+        this.turnToward(p.pos.x, p.pos.z, 2, dt);
+        if (this.st >= this.tele(0.85)) {
+          this.setState('slam');
+          const f = this.fwd(), at = { x: this.pos.x + f.x * 1.2, y: this.pos.y, z: this.pos.z + f.z * 1.2 };
+          Game.hazards.push(new GroundWave(at, 20.9 * S.enemies.speed, this.dmg() * 0.8, this));
+          Sound.play('slam', {}, at);
+          Game.shake(0.3);
+          FX.dust(at, 16, { dir: { x: 0, y: 0.2, z: 0 }, spread: TAU, smax: 10.9 });
+          FX.debris(at, 12, ['#4a4252', '#5c5464', '#3a3442'], 14.5);
+          FX.decal('crack', at, { len: 3.6 });
+          FX.ring({ x: at.x, y: at.y + 0.06, z: at.z }, 0.3, 3.6, 0.3, { c: '#ff7a2a' });
+          FX.light({ x: at.x, y: at.y + 0.8, z: at.z }, '#ff7a2a', 5, 8, 0.3);
+        }
+        break;
+      case 'slam':
+        if (this.st > 0.2) this.setState('recover');
+        break;
+      case 'recover':
+        this.brake(dt);
+        if (this.st > 0.7) { this.setState('walk'); this.cd = rand(1.0, 1.9); this.windMul = 1; }
+        break;
     }
   }
 }
 
 // ---------- gunner: holds its distance, lays a laser on you, fires a bolt you can slash back ----------
-// the rifle pivots at the right shoulder; its muzzle sits 1.35 m along the aim (as the model holds it)
+// the rifle pivots at the right shoulder; its muzzle sits this far along the aim, as the model holds it
+const MUZZLE_LEN = { gunner: 1.35, sniper: 1.62 };
 Enemy.prototype.shoulder = function () {
   const Y = this.yaw;
   return { x: this.pos.x + Math.cos(Y) * 0.26, y: this.pos.y + 1.42, z: this.pos.z - Math.sin(Y) * 0.26 };
 };
 Enemy.prototype.muzzle = function () {
-  const s = this.shoulder(), a = this.aimDir;
-  return { x: s.x + a.x * 1.35, y: s.y + a.y * 1.35, z: s.z + a.z * 1.35 };
+  const s = this.shoulder(), a = this.aimDir, L = MUZZLE_LEN[this.type] || 1.35;
+  return { x: s.x + a.x * L, y: s.y + a.y * L, z: s.z + a.z * L };
+};
+// keeps the rifle on the player's chest
+Enemy.prototype.trackAim = function () {
+  const c = Game.player.chest(), s = this.shoulder(), l = dist3(c, s) || 1;
+  this.aimDir = { x: (c.x - s.x) / l, y: (c.y - s.y) / l, z: (c.z - s.z) / l };
 };
 Enemy.prototype.gunner = function (dt) {
   const p = Game.player, d = distXZ(p.pos, this.pos);
@@ -278,14 +436,11 @@ Enemy.prototype.gunner = function (dt) {
     case 'move': {
       this.keepRange(dt, 9, 16.8, this.scaleSpeed());
       // between shots the rifle follows you, so the clear-shot test looks from where it will fire
-      const c = p.chest(), s = this.shoulder(), l = dist3(c, s) || 1;
-      this.aimDir = { x: (c.x - s.x) / l, y: (c.y - s.y) / l, z: (c.z - s.z) / l };
+      this.trackAim();
       const clear = this.clearShot(this.muzzle());
       if (this.cd <= 0 && d < 25.5 && !p.dead && this.onGround && clear) {
-        this.setState('aim');
+        this.startWind('aim', 0.7);
         this.blockedT = 0; this.seek = null;
-        this.windMul = Camera.offView(this.center()) ? OFFVIEW_WIND : 1;
-        Sound.play('enemyWindup', { pm: 0.7 }, this.center());
       } else if (this.cd <= 0 && d < 25.5 && !p.dead && !clear) {
         // blocked by a car or a ledge: find a spot with a clear shot
         this.blockedT += dt;
@@ -297,11 +452,7 @@ Enemy.prototype.gunner = function (dt) {
       this.brake(dt);
       const dur = this.tele(0.75);
       // tracks you, then locks for the last 0.2 s: the laser turns white
-      if (this.st < dur - 0.2) {
-        const c = p.chest(), s = this.shoulder(), dx = c.x - s.x, dy = c.y - s.y, dz = c.z - s.z, l = Math.hypot(dx, dy, dz) || 1;
-        this.aimDir = { x: dx / l, y: dy / l, z: dz / l };
-        this.turnToward(p.pos.x, p.pos.z, 12, dt);
-      }
+      if (this.st < dur - 0.2) { this.trackAim(); this.turnToward(p.pos.x, p.pos.z, 12, dt); }
       if (this.st >= dur) {
         const a = this.aimDir, m = this.muzzle();
         Game.projectiles.push(new Bolt({ x: m.x + a.x * 0.36, y: m.y + a.y * 0.36, z: m.z + a.z * 0.36 }, a, 22.3 * S.enemies.speed, this.dmg()));
@@ -319,56 +470,12 @@ Enemy.prototype.gunner = function (dt) {
       break;
   }
 };
-// the laser's state for render.js: 0 off, 1 tracking, 2 locked
+// the laser's state for views.js: 0 off, 1 tracking, 2 locked
 Enemy.prototype.laser = function () {
-  if (this.type !== 'gunner' || this.state !== 'aim') return 0;
-  return this.st >= this.tele(0.75) - 0.2 ? 2 : 1;
-};
-
-// ---------- grenadier: lobs a small pulse grenade with its landing marked; tether it and kick it back ----------
-// the charge cell in the gauntlet at the top of the wind-up, behind the right shoulder
-Enemy.prototype.orbPos = function () {
-  const Y = this.yaw;
-  return { x: this.pos.x - fwdX(Y) * 0.3 + Math.cos(Y) * 0.45, y: this.pos.y + 1.68, z: this.pos.z - fwdZ(Y) * 0.3 - Math.sin(Y) * 0.45 };
-};
-Enemy.prototype.grenadier = function (dt) {
-  const p = Game.player, d = distXZ(p.pos, this.pos);
-  if (this.grenade && this.grenade.dead) this.grenade = null;
-  switch (this.state) {
-    case 'move':
-      this.keepRange(dt, 10, 20, this.scaleSpeed());
-      if (this.cd <= 0 && d < 27.3 && !p.dead && this.onGround && !this.grenade) {
-        this.setState('throwWind');
-        this.windMul = Camera.offView(this.center()) ? OFFVIEW_WIND : 1;
-        Sound.play('enemyWindup', { pm: 0.6 }, this.center());
-      }
-      break;
-    case 'throwWind': {
-      this.brake(dt);
-      this.turnToward(p.pos.x, p.pos.z, 9, dt);
-      // the arc tracks you through the wind-up: aimed where you stand, a little above your feet
-      const o = this.orbPos(), tx = p.pos.x, ty = p.pos.y + 0.55, tz = p.pos.z;
-      const T = clamp(Math.hypot(tx - o.x, ty - o.y, tz - o.z) / 15.5, 0.8, 1.4);
-      this.plan = { o, T, v: { x: (tx - o.x) / T, y: (ty - o.y) / T + 0.5 * GRENADIER_G * T, z: (tz - o.z) / T } };
-      if (Math.random() < 0.5) FX.elec(o, 0.45 + this.st * 0.55, 1, { outer: '#2ab8d8', core: '#ffffff' });
-      if (this.st >= this.tele(1.0)) {
-        this.grenade = new PulseGrenade(o, this.plan.v, this, { g: GRENADIER_G, R: 3.6, dmg: 12, disable: 0, size: 0.75 });
-        Game.projectiles.push(this.grenade);
-        Sound.play('throw', {}, o);
-        this.plan = null;
-        this.setState('cool');
-      }
-      break;
-    }
-    case 'cool':
-      this.brake(dt);
-      if (this.st > 0.6) { this.setState('move'); this.cd = rand(3.5, 5.5); this.windMul = 1; }
-      break;
-  }
-};
-// a grenade kicked back onto its own thrower
-Enemy.prototype.pulseHit = function () {
-  hurtEnemy(this, 90, { cause: 'barrel', heavy: true, kv: { x: 0, y: 20, z: 0 }, dir: { x: 0, y: 1, z: 0 }, crit: true });
+  if (this.state !== 'aim') return 0;
+  if (this.type === 'gunner') return this.st >= this.tele(0.75) - 0.2 ? 2 : 1;
+  if (this.type === 'sniper') return this.st >= this.tele(1.1) - 0.25 ? 2 : 1;
+  return 0;
 };
 
 // Keep grounded enemies from stacking: the 2D push, around in a circle instead of along a line.
@@ -376,15 +483,17 @@ function separateEnemies(dt) {
   const es = Game.enemies;
   for (let i = 0; i < es.length; i++) {
     const a = es[i];
-    if (a.dead || a.spawning || a.flying) continue;
+    if (a.dead || a.spawning || a.flying || a.skipPhysics) continue;
     for (let j = i + 1; j < es.length; j++) {
       const b = es[j];
-      if (b.dead || b.spawning || b.flying) continue;
+      if (b.dead || b.spawning || b.flying || b.skipPhysics) continue;
       const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d = Math.hypot(dx, dz), minD = (a.r + b.r) * 0.84;
       if (d < minD && Math.abs(a.pos.y - b.pos.y) < 1.1) {
         const ux = d > 1e-4 ? dx / d : 1, uz = d > 1e-4 ? dz / d : 0, push = (minD - d) * 4 * dt;
-        if (World.boxFree(a.pos.x - ux * push, a.pos.y + 0.01, a.pos.z - uz * push, a.r, a.h - 0.05)) { a.pos.x -= ux * push; a.pos.z -= uz * push; }
-        if (World.boxFree(b.pos.x + ux * push, b.pos.y + 0.01, b.pos.z + uz * push, b.r, b.h - 0.05)) { b.pos.x += ux * push; b.pos.z += uz * push; }
+        // the lighter one gives way more
+        const ka = b.mass / (a.mass + b.mass), kb = 1 - ka;
+        if (World.boxFree(a.pos.x - ux * push * 2 * ka, a.pos.y + 0.01, a.pos.z - uz * push * 2 * ka, a.r, a.h - 0.05)) { a.pos.x -= ux * push * 2 * ka; a.pos.z -= uz * push * 2 * ka; }
+        if (World.boxFree(b.pos.x + ux * push * 2 * kb, b.pos.y + 0.01, b.pos.z + uz * push * 2 * kb, b.r, b.h - 0.05)) { b.pos.x += ux * push * 2 * kb; b.pos.z += uz * push * 2 * kb; }
       }
     }
   }
@@ -445,6 +554,15 @@ function killEnemy(e, o) {
   FX.debris(c, 10 * big, e.def.debris, 15.5);
   FX.elec(c, 1.3 * big, 4);
   FX.light(c, '#ff5030', 4, 6 * big, 0.25);
+  // drones and brutes go up: a blast ring, smoke and embers
+  if (e.flying || e.heavy) {
+    FX.ring(c, 0.3, 2 * big, 0.3, { c: '#ff7a2a', flat: false });
+    FX.dust(c, 8 * big, { c: '#2a2026', smax: 5.5, life: 1.5, rise: 1.8 });
+    FX.embers(c, 8 * big);
+    Sound.play('explode', { big: e.heavy }, c);
+    Game.shake(e.heavy ? 0.45 : 0.15);
+    if (e.heavy) { Game.hitstop(0.08); FX.flash('#ff7a3a', 0.2); FX.decal('scorch', e.pos, { r: 1.5 }); }
+  }
   Sound.play('kill', {}, c);
   Game.onKill(e, o);
 }

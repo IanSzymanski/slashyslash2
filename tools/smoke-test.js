@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Headless smoke test. Boots the 3D page and checks WebGL draws, runs scripted combat checks (a string
-// lands, aim assist turns a swing, a glint can be parried and countered, a dash slash cuts, a hit costs
-// shield), then plays Scrapper Waves with random input and mouse look. Fails on any page error, a
-// camera inside a box or under the street, a body inside a box or outside the arena, or a failed check.
+// Headless smoke test. Boots the 3D page and checks WebGL draws, runs scripted checks of the moves
+// (Phases 1 and 2), the nav graph, each enemy type's answer and the wave modes (Phase 3), then plays
+// Endless from wave 6 with random input and mouse look. Fails on any page error, a camera inside a box
+// or under the street, a body inside a box or outside the arena, a shader compiled mid-fight, or a
+// failed check.
 // Needs the dev dependencies:  npm install
 // Usage: node tools/smoke-test.js [seconds-of-random-play] [--dist]
 //   --dist also loads the single-file build (run node tools/build.js first).
@@ -319,6 +320,122 @@ async function run(browser, file, errors) {
     // a dash leaves afterimages
     p = T.fresh(); T.tap('ShiftLeft'); T.frame(6);
     ok(Views.ghosts.some((g) => g.mesh.visible), 'a dash leaves afterimages');
+
+    // ---------- Phase 3: navigation, the other enemies, the wave modes ----------
+    // a scrapper on the street climbs onto the 5.9 m roof you stand on, and one on a roof comes down to you
+    const roof = World.boxes.find((b) => b.kind === 'building' && Math.abs(b.max.y - 5.91) < 0.05);
+    const rx = (roof.min.x + roof.max.x) / 2;
+    p = T.fresh(); S.gameplay.invincible = true;
+    p.pos.x = p.prev.x = rx; p.pos.y = p.prev.y = roof.max.y; p.pos.z = p.prev.z = -11; Camera.snap(p);
+    e = T.enemy('scrapper', 0, 13, { hp: 999 }); e.pos.y = 0;
+    let hopped = false, up = false;
+    for (let i = 0; i < 720 && !up; i++) { T.frame(1); hopped = hopped || !!e.hop; up = e.pos.y > roof.max.y - 0.1 && distXZ(e.pos, p.pos) < 3; }
+    ok(up && hopped, `a scrapper jumps up onto the roof you stand on (${hopped ? 'jumped' : 'no jump'}, at ${e.pos.y.toFixed(1)} m, ${distXZ(e.pos, p.pos).toFixed(1)} m from you)`);
+    p = T.fresh(); S.gameplay.invincible = true;
+    p.pos.x = p.prev.x = rx; p.pos.z = p.prev.z = 3; Camera.snap(p);
+    e = T.enemy('scrapper', 0, -14, { hp: 999 }); e.pos.y = roof.max.y;
+    let down = false;
+    for (let i = 0; i < 600 && !down; i++) { T.frame(1); down = e.pos.y < 0.2 && distXZ(e.pos, p.pos) < 3; }
+    ok(down, `a scrapper on a roof drops to the street to reach you (at ${e.pos.y.toFixed(1)} m, ${distXZ(e.pos, p.pos).toFixed(1)} m away)`);
+    S.gameplay.invincible = false;
+
+    // a drone hovers above head height, dives, and a parry on the dive knocks it out of the air
+    p = T.fresh(); e = T.enemy('drone', 6, 0, { hp: 999 }); e.pos.y = p.pos.y + 4;
+    T.frame(120);
+    ok(e.pos.y - p.pos.y > 3.5, `a drone hovers above head height (${(e.pos.y - p.pos.y).toFixed(1)} m up)`);
+    e.cd = 0;
+    let dived = false;
+    for (let i = 0; i < 240 && !e.glinted; i++) { T.frame(1); dived = dived || e.state === 'dive'; }
+    ok(e.glinted, 'a drone glints before its dive lands');
+    const pd = Game.stats.parries;
+    T.frame(6); T.press('KeyE');
+    for (let i = 0; i < 40 && Game.stats.parries === pd; i++) T.frame(1);
+    T.release('KeyE'); T.frame(2);
+    ok(Game.stats.parries === pd + 1 && e.stun > 0, 'pressing parry on the drone\'s glint parries the dive and staggers it');
+
+    // a brute shrugs off a light; its slam sends a ground wave that hits you standing and misses you jumping
+    p = T.fresh(); e = T.enemy('brute', 2.8, 0, { hp: 999 }); T.face(e.pos.x, e.pos.z);
+    T.tap('Mouse0'); T.frame(12);
+    ok(e.hp < 999 && e.stun <= 0, `a light hurts a brute without staggering it (${999 - e.hp})`);
+    p = T.fresh(); e = T.enemy('brute', 7, 0, { hp: 999 }); e.yaw = yawOf(-1, 0); e.startWind('slamWind');
+    for (let i = 0; i < 150 && p.shield === PC.MAX_SHIELD; i++) T.frame(1);
+    ok(p.shield < PC.MAX_SHIELD, `a brute's ground wave hits you standing (shield ${p.shield.toFixed(0)})`);
+    p = T.fresh(); e = T.enemy('brute', 7, 0, { hp: 999 }); e.yaw = yawOf(-1, 0); e.startWind('slamWind');
+    for (let i = 0; i < 150 && e.state !== 'slam'; i++) T.frame(1);
+    T.press('Space'); T.frame(20); T.release('Space'); T.frame(50);
+    ok(p.shield === PC.MAX_SHIELD && p.hp === PC.MAX_HP && Game.hazards.length === 0, 'jumping clears the ground wave');
+
+    // a shield scrapper blocks from the front, not from behind; a heavy or a parried bash knocks the shield aside
+    p = T.fresh(); e = T.enemy('shielder', 2.4, 0, { hp: 999 }); e.yaw = yawOf(-1, 0); T.face(e.pos.x, e.pos.z);
+    T.tap('Mouse0'); T.frame(16);
+    ok(e.hp === 999, 'a shield scrapper blocks a slash from the front');
+    T.frame(30); T.press('Mouse0'); T.frame(14); T.release('Mouse0'); T.frame(16);
+    ok(e.guardBrokenT > 0, 'a heavy from the front knocks its shield aside');
+    p = T.fresh(); e = T.enemy('shielder', 2.4, 0, { hp: 999 }); e.yaw = yawOf(1, 0); T.face(e.pos.x, e.pos.z);
+    T.tap('Mouse0'); T.frame(10);
+    ok(e.hp < 999, `a slash from behind gets past the shield (${999 - e.hp})`);
+    p = T.fresh(); e = T.enemy('shielder', 2.0, 0, { cd: 0, hp: 999 }); e.yaw = yawOf(-1, 0); T.face(e.pos.x, e.pos.z);
+    for (let i = 0; i < 160 && !e.glinted; i++) T.frame(1);
+    T.frame(6); T.press('KeyE');
+    for (let i = 0; i < 40 && e.guardBrokenT <= 0; i++) T.frame(1);
+    T.release('KeyE'); T.frame(2);
+    ok(e.guardBrokenT > 0, 'parrying its bash breaks its guard');
+
+    // an armoured crawler ignores slashes until a plunge cracks it
+    p = T.fresh(); e = T.enemy('crawler', 2.4, 0, { hp: 999 }); T.face(e.pos.x, e.pos.z);
+    T.tap('Mouse0'); T.frame(16);
+    ok(e.hp === 999, 'a crawler\'s armour shrugs off a slash');
+    p = T.fresh(); e = T.enemy('crawler', 0.3, 0, { hp: 999, frozen: true });
+    p.vel.y = 22; p.onGround = false; T.frame(15);
+    T.press('KeyC'); T.tap('Mouse0'); T.frame(60); T.release('KeyC');
+    ok(e.crackT > 0 && e.hp < 999, `a plunge cracks its armour (${999 - e.hp})`);
+    const hpc = e.hp; e.stun = 0; e.pos.x = p.pos.x + 2.2; e.pos.z = p.pos.z; T.face(e.pos.x, e.pos.z); T.frame(20);
+    T.tap('Mouse0'); T.frame(16);
+    ok(e.hp < hpc, 'slashes land once it is cracked');
+
+    // a sniper on a perch lays its laser and fires; get close and it zips to another perch; zip up and hit it
+    p = T.fresh();
+    const perch = Arena.perches().filter((q) => { const d = distXZ(q, p.pos); return d > 12 && d < 30; }).find((q) => {
+      const c = p.chest(), dx = c.x - q.x, dy = c.y - q.y - 1.42, dz = c.z - q.z, l = Math.hypot(dx, dy, dz);
+      return !World.raycast({ x: q.x, y: q.y + 1.42, z: q.z }, { x: dx / l, y: dy / l, z: dz / l }, l - 0.3);
+    });
+    ok(!!perch, 'a perch near the start has a clear shot at you');
+    if (perch) {
+      e = new Enemy('sniper', perch, {}); e.spawning = false; e.cd = 0; Game.enemies.push(e);
+      let locked = false, shot = null;
+      for (let i = 0; i < 300 && !shot; i++) { T.frame(1); locked = locked || e.laser() === 2; shot = Game.projectiles.find((q) => q.kind === 'bolt' && q.col.outer === '#ff3a52'); }
+      ok(locked && !!shot, 'a sniper locks its laser and fires');
+      Game.projectiles = [];
+      p.pos.x = p.prev.x = perch.x + 1.5; p.pos.y = p.prev.y = perch.y; p.pos.z = p.prev.z = perch.z; p.vel.y = 0; Camera.snap(p);
+      e.fleeCD = 0; e.setState('perch');
+      let zipped = false;
+      for (let i = 0; i < 240 && !(zipped && e.state === 'perch'); i++) { T.frame(1); zipped = zipped || e.state === 'zip'; }
+      ok(zipped && e.state === 'perch' && dist3(e.pos, perch) > 5, `getting close sends it zipping to another perch (${dist3(e.pos, perch).toFixed(1)} m away)`);
+      p = T.fresh(); e.pos = { x: perch.x, y: perch.y, z: perch.z }; e.prev = { ...e.pos }; e.cd = 99; e.fleeCD = 99; e.hp = e.maxHp = 500; Game.enemies.push(e);
+      T.frame(3); T.aimAt(e.center());
+      T.press('Mouse2'); T.frame(70); T.release('Mouse2');
+      ok(e.hp < 500, `you can tether up to a sniper and hit it (${500 - e.hp})`);
+    }
+
+    // endless: clearing wave 2 offers three upgrades; Ember Wake makes a dash cut
+    Game.toMenu(); UI.act('endless'); S.gameplay.invincible = false;
+    T.frame(5); Director.wave = 2; Director.state = 'fight'; Director.queue = []; Game.enemies = [];
+    for (let i = 0; i < 120 && Game.state !== 'pick'; i++) T.frame(1);
+    ok(Game.state === 'pick' && document.querySelectorAll('#pick-cards .card').length === 3, 'clearing endless wave 2 offers three upgrades');
+    if (Game.state === 'pick') { Game.chooseUpgrade(UI.pickIds[0]); }
+    ok(Game.state === 'playing' && Game.upgrades.size === 1, 'picking one applies it and the run goes on');
+    p = Game.player; Game.upgrades.add('emberWake'); Director.state = 'idle';
+    e = T.enemy('scrapper', 3, 0, { hp: 500 }); T.face(e.pos.x, e.pos.z);
+    T.press('KeyW'); T.tap('ShiftLeft'); T.frame(20); T.release('KeyW');
+    ok(e.hp < 500, `Ember Wake: a dash through a scrapper cuts it (${500 - e.hp})`);
+    // elites wear a gold outline
+    makeElite(e); T.frame(2);
+    ok(Render.models.get(e) && Render.models.get(e).outline.visible, 'an elite wears a gold outline');
+
+    // the demo: six waves until the rival lands, the second bringing shield scrappers
+    Game.toMenu(); UI.act('demo'); T.frame(2);
+    Director.wave = 1; Director.nextWave();
+    ok(Director.demoWaves() === 6 && Director.waveName === 'SHIELD WALL' && Director.queue.includes('shielder'), `demo wave 2 is ${Director.waveName} with shield scrappers, of ${Director.demoWaves()} waves`);
     T.render = false;
     Game.toMenu();
     return out;
@@ -331,7 +448,9 @@ async function run(browser, file, errors) {
     const fail = (m) => problems.push(m);
     S.visuals.resScale = 0.5; Render.resize();
     S.enemies.waveBreak = 1;
-    UI.act('street');
+    // endless from wave 6, so every enemy type turns up
+    UI.act('endless');
+    Director.wave = 5;
     S.gameplay.invincible = true;
     T.frame(1); Render.draw(1 / 60);
     const progs0 = Gfx.renderer.info.programs.length;
@@ -339,6 +458,7 @@ async function run(browser, file, errors) {
     const B = World.def.bounds, PM = Camera.PITCH_MAX + 1e-6;
     const inBox = (b) => World.overlap(b.pos.x, b.pos.y + 0.02, b.pos.z, b.r * 0.9, b.h - 0.04);
     let maxEnemies = 0;
+    const seen = new Set();
     for (let f = 0; f < frames; f++) {
       for (const c of codes) {
         const held = Input.down.has(c);
@@ -353,10 +473,12 @@ async function run(browser, file, errors) {
         const p = Game.player.pos, e = Game.enemies.filter((q) => !q.dead).sort((a, b) => distXZ(a.pos, p) - distXZ(b.pos, p))[0];
         if (e) { Camera.yaw = yawOf(e.pos.x - p.x, e.pos.z - p.z); Camera.pitch = -0.15; }
       }
+      if (Game.state === 'pick') Game.chooseUpgrade(UI.pickIds[0]);
       if (f === Math.floor(frames / 2)) { Game.pause(); if (Game.state !== 'paused') fail('pause failed'); await UI.resumeGame(); if (Game.state !== 'playing') fail('resume failed'); }
       T.frame(1);
       if (f % 3 === 0) Render.draw(1 / 60);
       maxEnemies = Math.max(maxEnemies, Game.enemies.length);
+      for (const e of Game.enemies) seen.add(e.type);
       const cp = Camera.pos, p = Game.player;
       if (![cp.x, cp.y, cp.z].every(isFinite)) fail(`camera position not finite at frame ${f}`);
       else if (World.pointSolid(cp.x, cp.y, cp.z)) fail(`camera inside a box at frame ${f}: ${cp.x.toFixed(2)},${cp.y.toFixed(2)},${cp.z.toFixed(2)}`);
@@ -372,7 +494,7 @@ async function run(browser, file, errors) {
       if (problems.length) break;
     }
     if (Gfx.renderer.info.programs.length !== progs0) fail(`shaders compiled mid-fight: ${progs0} programs before, ${Gfx.renderer.info.programs.length} after`);
-    const r = { problems, wave: Director.wave, kills: Game.stats.kills, maxEnemies, style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length };
+    const r = { problems, wave: Director.wave, kills: Game.stats.kills, maxEnemies, types: [...seen].join(' '), style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length };
     Game.toMenu();
     S.visuals.resScale = 1; Render.resize();
     return r;
@@ -381,7 +503,7 @@ async function run(browser, file, errors) {
   const keys = await page.evaluate(() => Object.keys(localStorage));
   if (keys.some((k) => !k.startsWith('slashyslash3d.'))) errors.push(`storage keys outside slashyslash3d.*: ${keys.join(', ')}`);
   if (!keys.includes('slashyslash3d.settings.v1') || !keys.includes('slashyslash3d.save.v1')) errors.push(`3D saves missing: ${keys.join(', ')}`);
-  console.log(`  street waves: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies, style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
+  console.log(`  endless from wave 6: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies (${res.types}), style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
   if (res.kills < 1) errors.push(`${name}: random play killed nothing`);
   errors.push(...res.problems.map((m) => `${name}: ${m}`));
   await page.close();

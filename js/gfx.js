@@ -273,6 +273,7 @@ const Gfx = {
       { n: [0, 0, 1], u: [1, 0, 0], v: [0, 1, 0] }, { n: [0, 0, -1], u: [-1, 0, 0], v: [0, 1, 0] },
     ];
     for (const b of def.boxes) {
+      if (b.hidden) continue;
       const mn = [b.min.x, b.min.y, b.min.z], mx = [b.max.x, b.max.y, b.max.z], ctr = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
       for (const F of FACES) {
         const ax = F.n[0] ? 0 : F.n[1] ? 1 : 2, top = F.n[1] > 0;

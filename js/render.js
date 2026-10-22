@@ -105,11 +105,11 @@ const Render = {
   syncModels(realDt) {
     const seen = new Set();
     for (const e of Game.enemies) {
-      if (e.dead || !MODELS[e.def.model]) continue;
+      if (e.dead || !MODELS[e.type]) continue;
       seen.add(e);
       let R = this.models.get(e);
       if (!R) {
-        R = Rig.build(MODELS[e.def.model]);
+        R = Rig.build(MODELS[e.type]);
         Gfx.scene.add(R.mesh);
         this.models.set(e, R);
         e.model = R;
@@ -284,7 +284,7 @@ const Render = {
     // wave info
     const D = Director;
     if (D.wave > 0) {
-      const label = G.mode === 'street' ? 'STREET WAVE ' + D.wave : G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
+      const label = G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
       drawText(ctx, label, VIEW_W / 2, 6, { align: 'center', color: '#ffd0d8' });
       let sub;
       if (D.state === 'fight') sub = D.remaining() + ' HOSTILES' + (D.modifier ? ' - ' + WAVE_MODIFIERS[D.modifier].name : '');
@@ -389,8 +389,10 @@ const Render = {
         ctx.fillRect(Math.round(px), Math.round(py), 1, 1);
       }
     };
+    // the Glints Only modifier leaves just the glints and where hits came from
+    const glintsOnly = Game.mod('glints');
     for (const e of Game.enemies) {
-      if (e.dead) continue;
+      if (e.dead || glintsOnly) continue;
       const s = this.project(e.center());
       if (s && !s.off) continue;
       const yaw = yawOf(e.pos.x - Camera.pos.x, e.pos.z - Camera.pos.z);

@@ -278,7 +278,7 @@ const Game = {
     this.time += dt;
     if (!this.player.dead) this.stats.time += dt;
     this.player.update(dt);
-    Nav.update(this.player.pos.x, this.player.pos.z);
+    Nav.update(this.player.pos, this.time);
     const cine = this.cineActive() ? this.cine : null;
     for (const e of this.enemies) if (!e.dead && (!cine || e === cine.owner)) e.update(dt);
     separateEnemies(dt);

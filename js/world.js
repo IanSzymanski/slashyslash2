@@ -141,83 +141,287 @@ const World = {
   },
 };
 
-// Street navigation: a 0.5 m grid on the street layer and a breadth-first flow field toward the
-// player, recomputed only when the player changes cell. Roofs and jump links come in Phase 3.
+// Navigation over every walkable surface: the street, roofs, platforms and car tops, each sampled on a
+// 0.5 m grid where a body fits. Nodes link to neighbours a body can walk to (steps up to 1 m), and the
+// edges of each surface link to surfaces a jump can reach (up to CLIMB above, or across a gap) or a drop
+// lands on. A flow field toward the player (Dijkstra over the reversed links) is recomputed when the
+// player changes node. Nodes under the player on lower layers are seeded at a cost, so when the player is
+// somewhere nothing can climb to, enemies gather below instead of giving up.
 const Nav = {
-  CELL: 0.5, x0: 0, z0: 0, w: 0, d: 0, walk: null, dist: null, queue: null, target: -1,
+  CELL: 0.5, R: 0.4, H: 1.5, STEP: 1.0, CLIMB: 6.4, JUMP_R: 3.0, DROP_R: 1.6, MAX_COST: 1200,
+  WALK: 0, JUMP: 1, DROP: 2,
+  W: 0, D: 0, x0: 0, z0: 0, N: 0, nx: null, ny: null, nz: null, nbox: null, colStart: null, isEdge: null,
+  eStart: null, eTo: null, eCost: null, eKind: null, eRise: null, eVx: null, eVz: null, rStart: null, rFrom: null, rCost: null,
+  dist: null, heapK: null, heapV: null, target: -1, lastT: -1e9, stats: null,
 
   build() {
     const D = World.def, B = D.bounds, C = this.CELL;
     this.x0 = B.minX; this.z0 = B.minZ;
-    this.w = Math.ceil((B.maxX - B.minX) / C); this.d = Math.ceil((B.maxZ - B.minZ) / C);
-    const n = this.w * this.d;
-    this.walk = new Uint8Array(n); this.dist = new Int32Array(n).fill(-1); this.queue = new Int32Array(n); this.target = -1;
-    for (let j = 0; j < this.d; j++) {
-      for (let i = 0; i < this.w; i++) {
-        const x = this.x0 + (i + 0.5) * C, z = this.z0 + (j + 0.5) * C;
-        this.walk[j * this.w + i] = World.groundAt(x, z, D.groundY + 0.01) === D.groundY && World.boxFree(x, D.groundY, z, 0.4, 1.5) ? 1 : 0;
+    const W = (this.W = Math.ceil((B.maxX - B.minX) / C)), DD = (this.D = Math.ceil((B.maxZ - B.minZ) / C));
+    // nodes: column centres on a box top where a body fits above it
+    const raw = [], seen = new Map();
+    World.boxes.forEach((b, bi) => {
+      const y = b.max.y;
+      const i0 = Math.max(0, Math.ceil((b.min.x - this.x0) / C - 0.5)), i1 = Math.min(W - 1, Math.floor((b.max.x - this.x0) / C - 0.5));
+      const j0 = Math.max(0, Math.ceil((b.min.z - this.z0) / C - 0.5)), j1 = Math.min(DD - 1, Math.floor((b.max.z - this.z0) / C - 0.5));
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const x = this.x0 + (i + 0.5) * C, z = this.z0 + (j + 0.5) * C, col = j * W + i;
+          if (!World.boxFree(x, y, z, this.R, this.H)) continue;
+          const ys = seen.get(col);
+          if (ys && ys.some((v) => Math.abs(v - y) < 0.05)) continue;
+          if (ys) ys.push(y); else seen.set(col, [y]);
+          raw.push(col, y, bi);
+        }
+      }
+    });
+    const order = [];
+    for (let k = 0; k < raw.length; k += 3) order.push(k);
+    order.sort((a, b) => raw[a] - raw[b] || raw[a + 1] - raw[b + 1]);
+    const N = (this.N = order.length);
+    const nx = (this.nx = new Float32Array(N)), ny = (this.ny = new Float32Array(N)), nz = (this.nz = new Float32Array(N)), nbox = (this.nbox = new Int32Array(N));
+    const ncol = new Int32Array(N), cs = (this.colStart = new Int32Array(W * DD + 1));
+    for (let k = 0; k < N; k++) {
+      const o = order[k], col = raw[o];
+      ncol[k] = col; nx[k] = this.x0 + ((col % W) + 0.5) * C; nz[k] = this.z0 + (((col / W) | 0) + 0.5) * C; ny[k] = raw[o + 1]; nbox[k] = raw[o + 2];
+      cs[col + 1]++;
+    }
+    for (let c = 0; c < W * DD; c++) cs[c + 1] += cs[c];
+    const find = (i, j, y, tol) => {
+      if (i < 0 || j < 0 || i >= W || j >= DD) return -1;
+      const c = j * W + i;
+      let best = -1, bd = tol;
+      for (let k = cs[c]; k < cs[c + 1]; k++) { const d = Math.abs(ny[k] - y); if (d <= bd) { bd = d; best = k; } }
+      return best;
+    };
+
+    // walking: the 8 neighbouring columns, within a step; diagonals only where both sides are open.
+    // A node missing a straight neighbour is on a surface's edge; out is the way off it.
+    let cap = N * 8 + 4096, E = 0;
+    let from = new Int32Array(cap), to = new Int32Array(cap), cost = new Int32Array(cap), kind = new Uint8Array(cap), vx = new Float32Array(cap), vz = new Float32Array(cap);
+    const link = (a, b, c, k, wx = NaN, wz = NaN) => {
+      if (E === cap) {
+        cap *= 2;
+        const grow = (A) => { const n = new A.constructor(cap); n.set(A); return n; };
+        from = grow(from); to = grow(to); cost = grow(cost); kind = grow(kind); vx = grow(vx); vz = grow(vz);
+      }
+      from[E] = a; to[E] = b; cost[E] = c; kind[E] = k; vx[E] = wx; vz[E] = wz; E++;
+    };
+    const edge = (this.isEdge = new Uint8Array(N)), outX = new Int8Array(N), outZ = new Int8Array(N);
+    const nb = new Int32Array(9);
+    for (let a = 0; a < N; a++) {
+      const i = ncol[a] % W, j = (ncol[a] / W) | 0, y = ny[a];
+      for (let dj = -1, q = 0; dj <= 1; dj++) for (let di = -1; di <= 1; di++, q++) nb[q] = di || dj ? find(i + di, j + dj, y, this.STEP) : -1;
+      for (let dj = -1, q = 0; dj <= 1; dj++) {
+        for (let di = -1; di <= 1; di++, q++) {
+          if (!di && !dj) continue;
+          const b = nb[q];
+          if (b < 0) {
+            if (!di || !dj) { edge[a] = 1; outX[a] += di; outZ[a] += dj; }
+            continue;
+          }
+          if (di && dj && (nb[4 + di] < 0 || nb[4 + dj * 3] < 0)) continue;
+          link(a, b, (di && dj ? 14 : 10) + Math.max(0, Math.round((ny[b] - y) * 4)), this.WALK);
+        }
       }
     }
+    // jumps and drops from surface edges: per target surface, the nearest node a body can get to.
+    // A jump needs open air above its start (or just off the edge, for a platform stacked overhead).
+    let jumps = 0, drops = 0;
+    const RJ = Math.ceil(this.JUMP_R / C), g0 = D.groundY, cands = [], tried = new Map();
+    for (let a = 0; a < N; a++) {
+      const i = ncol[a] % W, j = (ncol[a] / W) | 0;
+      // every other edge node is enough: its neighbours reach it in one step
+      if (!edge[a] || (i + j) & 1) continue;
+      const xa = nx[a], ya = ny[a], za = nz[a];
+      cands.length = 0;
+      for (let jj = Math.max(0, j - RJ); jj <= Math.min(DD - 1, j + RJ); jj++) {
+        for (let ii = Math.max(0, i - RJ); ii <= Math.min(W - 1, i + RJ); ii++) {
+          const cc = jj * W + ii;
+          for (let b = cs[cc]; b < cs[cc + 1]; b++) {
+            if (nbox[b] === nbox[a]) continue;
+            const r = ny[b] - ya, hd = Math.hypot(nx[b] - xa, nz[b] - za);
+            if (hd > this.JUMP_R) continue;
+            if ((r > this.STEP && r <= this.CLIMB && edge[b]) || (Math.abs(r) <= this.STEP && hd >= 0.9 && Math.min(ya, ny[b]) > g0 + 0.5 && edge[b])) cands.push(hd, b, this.JUMP);
+            else if (r < -this.STEP && hd <= this.DROP_R && !World.pointSolid(nx[b], ya - 0.05, nz[b])) cands.push(hd, b, this.DROP);
+          }
+        }
+      }
+      const idx = [];
+      for (let q = 0; q < cands.length; q += 3) idx.push(q);
+      idx.sort((p, q) => cands[p] - cands[q]);
+      tried.clear();
+      let n = 0;
+      const ol = Math.hypot(outX[a], outZ[a]), ux = ol ? outX[a] / ol : 0, uz = ol ? outZ[a] / ol : 0;
+      for (const q of idx) {
+        const hd = cands[q], b = cands[q + 1], cat = cands[q + 2], key = nbox[b] * 3 + cat, t = tried.get(key) || 0;
+        if (t < 0 || t >= 3 || n >= 6) continue;
+        tried.set(key, t + 1);
+        const via = this.linkClear(a, b, cat, ux, uz);
+        if (!via) continue;
+        tried.set(key, -1); n++;
+        const r = ny[b] - ya;
+        if (cat === this.JUMP) { link(a, b, 25 + Math.round(Math.max(0, r) * 8 + hd * 5), this.JUMP, via[0], via[1]); jumps++; }
+        else { link(a, b, 12 + Math.round(-r * 1.5 + hd * 5), this.DROP); drops++; }
+      }
+    }
+    // forward links by node, and reversed for the search toward the player
+    this.eStart = new Int32Array(N + 1); this.rStart = new Int32Array(N + 1);
+    for (let e = 0; e < E; e++) { this.eStart[from[e] + 1]++; this.rStart[to[e] + 1]++; }
+    for (let k = 0; k < N; k++) { this.eStart[k + 1] += this.eStart[k]; this.rStart[k + 1] += this.rStart[k]; }
+    this.eTo = new Int32Array(E); this.eCost = new Int32Array(E); this.eKind = new Uint8Array(E); this.eRise = new Float32Array(E);
+    this.eVx = new Float32Array(E); this.eVz = new Float32Array(E);
+    this.rFrom = new Int32Array(E); this.rCost = new Int32Array(E);
+    const fi = this.eStart.slice(0, N), ri = this.rStart.slice(0, N);
+    for (let e = 0; e < E; e++) {
+      const f = fi[from[e]]++, r = ri[to[e]]++;
+      this.eTo[f] = to[e]; this.eCost[f] = cost[e]; this.eKind[f] = kind[e]; this.eRise[f] = ny[to[e]] - ny[from[e]];
+      this.eVx[f] = vx[e]; this.eVz[f] = vz[e];
+      this.rFrom[r] = from[e]; this.rCost[r] = cost[e];
+    }
+    this.dist = new Int32Array(N).fill(-1);
+    this.heapK = new Int32Array(N + E + 16); this.heapV = new Int32Array(N + E + 16);
+    this.target = -1; this.lastT = -1e9;
+    this.stats = { nodes: N, links: E, jumps, drops, surfaces: new Set(nbox).size };
   },
-  cellOf(x, z) {
-    const i = Math.floor((x - this.x0) / this.CELL), j = Math.floor((z - this.z0) / this.CELL);
-    if (i < 0 || j < 0 || i >= this.w || j >= this.d) return -1;
-    return j * this.w + i;
+  // A jump needs open air above its start up to the landing height, then a clear way across at that
+  // height; if a platform overhead blocks the start, it can step off the edge (ux, uz) first. Returns
+  // [via x, via z] (NaN for a straight jump), or null. A drop needs a clear way off the edge and open
+  // air down to where it lands.
+  linkClear(a, b, cat, ux, uz) {
+    const xa = this.nx[a], ya = this.ny[a], za = this.nz[a], xb = this.nx[b], yb = this.ny[b], zb = this.nz[b], r = 0.35;
+    const across = (x0, z0, x1, z1, y) => {
+      const L = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.ceil(L / 0.25));
+      for (let s = 1; s <= n; s++) if (!World.boxFree(lerp(x0, x1, s / n), y, lerp(z0, z1, s / n), r, 1.5)) return false;
+      return true;
+    };
+    if (cat === this.DROP) return across(xa, za, xb, zb, ya + 0.08) && World.boxFree(xb, yb + 0.05, zb, r, ya - yb + 1.55) ? [NaN, NaN] : null;
+    const top = Math.max(ya, yb), rise = top - ya + 1.6;
+    if (World.boxFree(xa, ya + 0.05, za, r, rise) && across(xa, za, xb, zb, top + 0.08)) return [NaN, NaN];
+    if (!ux && !uz) return null;
+    for (const d of [0.8, 1.3]) {
+      const wx = xa + ux * d, wz = za + uz * d;
+      if (across(xa, za, wx, wz, ya + 0.08) && World.boxFree(wx, ya + 0.05, wz, r, rise) && across(wx, wz, xb, zb, top + 0.08)) return [wx, wz];
+    }
+    return null;
   },
-  // the walkable cell nearest (x, z), searched in growing squares
-  nearestWalk(x, z) {
-    const i0 = clamp(Math.floor((x - this.x0) / this.CELL), 0, this.w - 1), j0 = clamp(Math.floor((z - this.z0) / this.CELL), 0, this.d - 1);
-    for (let rad = 0; rad < 40; rad++) {
+  // the node in a column nearest height y, within tol
+  colFind(c, y, tol) {
+    let best = -1, bd = tol;
+    for (let k = this.colStart[c]; k < this.colStart[c + 1]; k++) {
+      const d = Math.abs(this.ny[k] - y);
+      if (d <= bd) { bd = d; best = k; }
+    }
+    return best;
+  },
+  // The node a body stands on, searched outward up to two cells (bodies brush walls a node can't).
+  // air: the body may be in the air; use the surface under it.
+  bodyNode(x, y, z, air) {
+    if (air) { const g = World.groundAt(x, z, y + 0.05); if (g === -Infinity) return -1; y = g; }
+    const C = this.CELL, i0 = Math.floor((x - this.x0) / C), j0 = Math.floor((z - this.z0) / C);
+    let best = -1, bd = Infinity;
+    for (let rad = 0; rad <= 2 && best < 0; rad++) {
       for (let j = j0 - rad; j <= j0 + rad; j++) {
         for (let i = i0 - rad; i <= i0 + rad; i++) {
-          if (Math.max(Math.abs(i - i0), Math.abs(j - j0)) !== rad || i < 0 || j < 0 || i >= this.w || j >= this.d) continue;
-          if (this.walk[j * this.w + i]) return j * this.w + i;
+          if (Math.max(Math.abs(i - i0), Math.abs(j - j0)) !== rad || i < 0 || j < 0 || i >= this.W || j >= this.D) continue;
+          const k = this.colFind(j * this.W + i, y, 0.6);
+          if (k < 0) continue;
+          const d = (this.nx[k] - x) ** 2 + (this.nz[k] - z) ** 2;
+          if (d < bd) { bd = d; best = k; }
         }
       }
     }
-    return -1;
+    return best;
   },
-  update(x, z) {
-    const t = this.nearestWalk(x, z);
-    if (t === this.target || t < 0) return;
-    this.target = t;
-    const W = this.w, D = this.d, dist = this.dist, q = this.queue, walk = this.walk;
+  // p: the player's position. Throttled to ten solves a second unless the player changes layer.
+  update(p, time) {
+    const t = this.bodyNode(p.x, p.y, p.z, true);
+    if (t < 0 || t === this.target) return;
+    if (time - this.lastT < 0.1 && this.target >= 0 && Math.abs(this.ny[t] - this.ny[this.target]) < 0.5) return;
+    this.target = t; this.lastT = time;
+    this.solve(t);
+  },
+  // seeds: also start from lower nodes near the player (off for reachability checks)
+  solve(t, seeds = true) {
+    const dist = this.dist, K = this.heapK, V = this.heapV;
     dist.fill(-1);
-    let head = 0, tail = 0;
-    dist[t] = 0; q[tail++] = t;
-    while (head < tail) {
-      const c = q[head++], ci = c % W, cj = (c / W) | 0, nd = dist[c] + 1;
-      for (let dj = -1; dj <= 1; dj++) {
-        for (let di = -1; di <= 1; di++) {
-          if (!di && !dj) continue;
-          const i = ci + di, j = cj + dj;
-          if (i < 0 || j < 0 || i >= W || j >= D) continue;
-          const k = j * W + i;
-          if (!walk[k] || dist[k] >= 0) continue;
-          // no cutting corners past a blocked cell
-          if (di && dj && (!walk[cj * W + i] || !walk[j * W + ci])) continue;
-          dist[k] = nd; q[tail++] = k;
+    let n = 0;
+    const push = (k, v) => {
+      let i = n++;
+      while (i > 0) { const p = (i - 1) >> 1; if (K[p] <= k) break; K[i] = K[p]; V[i] = V[p]; i = p; }
+      K[i] = k; V[i] = v;
+    };
+    const pop = () => {
+      const k = K[--n], v = V[n];
+      let i = 0;
+      for (;;) {
+        let c = 2 * i + 1;
+        if (c >= n) break;
+        if (c + 1 < n && K[c + 1] < K[c]) c++;
+        if (K[c] >= k) break;
+        K[i] = K[c]; V[i] = V[c]; i = c;
+      }
+      K[i] = k; V[i] = v;
+    };
+    // seeds: the player's node, and lower nodes within 8 m at a cost for the height and distance
+    const C = this.CELL, xt = this.nx[t], yt = this.ny[t], zt = this.nz[t], R = Math.ceil(8 / C);
+    const it = Math.round((xt - this.x0) / C - 0.5), jt = Math.round((zt - this.z0) / C - 0.5);
+    dist[t] = 0; push(0, t);
+    for (let j = jt - R; j <= jt + R && seeds; j++) {
+      for (let i = it - R; i <= it + R; i++) {
+        if (i < 0 || j < 0 || i >= this.W || j >= this.D) continue;
+        const c = j * this.W + i;
+        for (let k = this.colStart[c]; k < this.colStart[c + 1]; k++) {
+          const dy = yt - this.ny[k];
+          if (dy <= this.STEP) continue;
+          const v = Math.round(10 * (Math.hypot(this.nx[k] - xt, this.nz[k] - zt) * 4 + dy * 6));
+          if (dist[k] < 0 || v < dist[k]) { dist[k] = v; push(v, k); }
         }
       }
     }
-  },
-  // unit direction downhill from (x, z) toward the target, or null off the field
-  dir(x, z) {
-    const c = this.cellOf(x, z);
-    if (c < 0 || this.dist[c] < 0) return null;
-    const W = this.w, ci = c % W, cj = (c / W) | 0;
-    let best = this.dist[c], bi = ci, bj = cj;
-    for (let dj = -1; dj <= 1; dj++) {
-      for (let di = -1; di <= 1; di++) {
-        const i = ci + di, j = cj + dj;
-        if (i < 0 || j < 0 || i >= W || j >= this.d) continue;
-        const v = this.dist[j * W + i];
-        if (v >= 0 && v < best) { best = v; bi = i; bj = j; }
+    while (n > 0) {
+      const d = K[0], u = V[0];
+      pop();
+      if (d > dist[u]) continue;
+      // about 60 m of travel; anything further walks straight at the player until it's in range
+      if (d > this.MAX_COST) break;
+      for (let e = this.rStart[u]; e < this.rStart[u + 1]; e++) {
+        const a = this.rFrom[e], v = d + this.rCost[e];
+        if (dist[a] < 0 || v < dist[a]) { dist[a] = v; push(v, a); }
       }
     }
-    if (bi === ci && bj === cj) return null;
-    const tx = this.x0 + (bi + 0.5) * this.CELL - x, tz = this.z0 + (bj + 0.5) * this.CELL - z, l = Math.hypot(tx, tz) || 1;
-    return { x: tx / l, z: tz / l };
+  },
+  // The best link out of node a toward the player for a body that can jump `climb` metres, or -1 when
+  // a is off the field or already where it should be.
+  bestLink(a, climb) {
+    let best = -1, bv = this.dist[a];
+    for (let e = this.eStart[a]; e < this.eStart[a + 1]; e++) {
+      const b = this.eTo[e], db = this.dist[b];
+      if (db < 0 || db >= this.dist[a] || (this.eKind[e] === this.JUMP && this.eRise[e] > climb)) continue;
+      if (db + this.eCost[e] < bv || best < 0) { bv = db + this.eCost[e]; best = e; }
+    }
+    return best;
+  },
+  // Where a body should head next: { x, z } a unit direction on the ground, kind (WALK, JUMP or DROP),
+  // and to, the link's far node. Walking looks a few nodes ahead so paths don't zigzag between cells.
+  steer(body, climb = this.CLIMB) {
+    if (!this.dist) return null;
+    const a = this.bodyNode(body.pos.x, body.pos.y, body.pos.z, false);
+    if (a < 0 || this.dist[a] < 0) return null;
+    const e = this.bestLink(a, climb);
+    if (e < 0) return null;
+    const kind = this.eKind[e];
+    let b = this.eTo[e], aim = b;
+    if (kind === this.WALK) {
+      for (let s = 0; s < 3; s++) {
+        const e2 = this.bestLink(aim, climb);
+        if (e2 < 0 || this.eKind[e2] !== this.WALK || Math.abs(this.eRise[e2]) > 0.3) break;
+        aim = this.eTo[e2];
+      }
+    }
+    const dx = this.nx[aim] - body.pos.x, dz = this.nz[aim] - body.pos.z, l = Math.hypot(dx, dz) || 1;
+    const via = kind === this.JUMP && !isNaN(this.eVx[e]) ? { x: this.eVx[e], z: this.eVz[e] } : null;
+    return { x: dx / l, z: dz / l, kind, to: { x: this.nx[b], y: this.ny[b], z: this.nz[b] }, via };
   },
 };
 
@@ -261,6 +465,8 @@ const STREET = (() => {
     const a = L + ((R - L) * i) / fronts.length, b = L + ((R - L) * (i + 1)) / fronts.length;
     B(a, 0, FRONT, b, 32 + (i % 3) * 2, FRONT + 3, fronts[i], { kind: 'bound', top: 'roof' });
   }
+  // the boundary walls go on up unseen, so a zip from a high roof can't land on top of one and leave the arena
+  for (const b of boxes.filter((b) => b.kind === 'bound')) B(b.min.x, b.max.y, b.min.z, b.max.x, 120, b.max.z, b.style, { kind: 'bound', hidden: true });
   // the 2D buildings: (x, top, w, style)
   for (const [x, top, w, style] of [[110, 335, 140, 'shop'], [380, 205, 160, 'brick'], [860, 335, 120, 'shop2'], [1130, 175, 180, 'panel'], [1580, 255, 140, 'brick2'], [1960, 205, 160, 'concrete']]) {
     B(X(x), 0, -15, X(x + w), H(top), BACK, style, { kind: 'building', top: 'roof' });
@@ -281,9 +487,13 @@ const STREET = (() => {
   for (const [x, y, w] of [[990, 335, 70], [1040, 270, 60], [1780, 335, 100]]) P(x, y, w, 'scaffold', -7, -4);
   P(1400, 300, 140, 'sign', -7.5, -5.5);
 
-  // sniper perches: ledges high enough to need a tether, low enough to see the street (the 2D rule)
-  const perches = boxes.filter((b) => b.plat && b.max.y >= H(300) && b.max.y <= H(220) && b.max.x - b.min.x >= X(40))
-    .map((b) => ({ x: (b.min.x + b.max.x) / 2, y: b.max.y, z: (b.min.z + b.max.z) / 2 }));
+  // sniper perches: ledges high enough to need a tether, low enough to see the street (the 2D rule). A
+  // sniper stands at an edge, so its own ledge doesn't block the shot: the middle of each side, 0.6 m in.
+  const perches = [];
+  for (const b of boxes.filter((b) => b.plat && b.max.y >= H(300) && b.max.y <= H(220) && b.max.x - b.min.x >= X(40))) {
+    const cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
+    for (const [x, z] of [[b.min.x + 0.6, cz], [b.max.x - 0.6, cz], [cx, b.min.z + 0.6], [cx, b.max.z - 0.6]]) perches.push({ x, y: b.max.y, z });
+  }
   const zs = [-4, 3, -2, 4, 0, -3, 2, -5, 1, 5, -1, 3];
   const ground = [70, 270, 470, 700, 900, 1060, 1250, 1450, 1650, 1850, 2050, 2280].map((x, i) => ({ x: X(x), y: 0, z: zs[i] }));
   const high = [[180, 335, -11], [460, 205, -11], [730, 320, 0], [920, 335, -11], [1220, 175, -11], [1470, 300, -6.5], [1650, 255, -11], [2040, 205, -11], [735, 250, 0], [1490, 225, 0], [1830, 270, 0]]

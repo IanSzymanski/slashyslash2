@@ -156,7 +156,8 @@ class Player {
     this.canSlide = !this.attack && !this.sheathe;
 
     const reeled = this.rebounding() || this.zipping();
-    if (this.dashT > 0) Controller.moveDash(this, dt);
+    this.dashRechargeExtra = Game.has('emberWake') ? 0.25 : 0;
+    if (this.dashT > 0) { Controller.moveDash(this, dt); if (Game.has('emberWake') && this.dashHits) this.emberWake(); }
     else if (this.iaido) this.moveIaido(dt);
     else if (this.rebounding()) this.moveRebound(dt);
     else if (this.zipping()) this.moveZip(dt);
@@ -280,6 +281,19 @@ class Player {
     if (!Controller.tryDash(this, dx, dz)) return;
     this.iframes = Math.max(this.iframes, PC.DASH_IFRAMES);
     this.yaw = yawOf(dx, dz);
+    this.dashHits = new Set();
+  }
+  // Ember Wake: a dash cuts what it passes through
+  emberWake() {
+    const c = this.center();
+    for (const e of Game.enemies) {
+      if (e.dead || e.spawning || this.dashHits.has(e) || !bodiesTouch(this, e, 0.35)) continue;
+      this.dashHits.add(e);
+      const dl = Math.hypot(this.dashVX, this.dashVZ) || 1, ux = this.dashVX / dl, uz = this.dashVZ / dl;
+      hurtEnemy(e, 20, { kv: { x: ux * 7.3, y: 5.5, z: uz * 7.3 }, dir: { x: ux, y: 0.2, z: uz }, cause: 'dash', stagger: 0.3, hitstop: 0.02 });
+      FX.sparks(e.center(), 8, { x: ux, y: 0.2, z: uz }, 1, 5.5, 18.2, { c0: '#ffffff', c1: '#ffb040', c2: '#ff3048' });
+    }
+    if (Math.random() < 0.7) FX.embers(c, 1);
   }
 
   // ---------- melee ----------

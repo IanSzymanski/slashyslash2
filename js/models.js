@@ -69,6 +69,44 @@ const MODELS = {
       { bone: 'handR', size: [0.1, 0.1, 0.1], at: [0, -0.13, 0], color: '#4af0ff', glow: true, plain: true, tag: 'orb' },
     ],
   }),
+  // riot-shield trooper in steel blue with a gold-banded shield on its left arm (the shield bone rides the chest)
+  shielder: humanoidModel(0.95, {
+    body: '#3a4250', dark: '#2a3038', vest: '#3a4250', limb: '#6a7a8a', boot: '#16121a', eye: '#ffd040', bulk: 1.08,
+    bones: [['shield', 'chest', -0.06, -0.02, -0.44]],
+    extra: [
+      { bone: 'head', size: [0.29, 0.1, 0.3], at: [0, 0.25, -0.02], color: '#6a7a8a' },
+      { bone: 'head', size: [0.05, 0.08, 0.26], at: [0, 0.32, 0.0], color: '#2a3038' },
+      { bone: 'chest', size: [0.48, 0.2, 0.3], at: [0, 0.26, 0.02], color: '#6a7a8a' },
+      { bone: 'shield', size: [0.66, 1.2, 0.07], at: [0, 0, 0], color: '#2a3038' },
+      { bone: 'shield', size: [0.56, 1.08, 0.03], at: [0, 0, -0.045], color: '#4a5464' },
+      { bone: 'shield', size: [0.04, 1.1, 0.05], at: [0.31, 0, -0.03], color: '#9aaaba' },
+      { bone: 'shield', size: [0.56, 0.1, 0.02], at: [0, -0.1, -0.065], color: '#d8b040' },
+      { bone: 'shield', size: [0.24, 0.045, 0.02], at: [0, 0.33, -0.065], color: '#1a2028' },
+      { bone: 'shield', size: [0.06, 0.06, 0.02], at: [0, 0.33, -0.07], color: '#ffd040', glow: true, plain: true, tag: 'slit' },
+    ],
+  }),
+  // rooftop marksman in maroon with a hood, a long rifle with a red scope, and a grapple on the left wrist
+  sniper: humanoidModel(0.95, {
+    body: '#5a2a3a', dark: '#2a1a24', vest: '#3a1a24', limb: '#5a2a3a', boot: '#16121a', eye: '#ff3a52',
+    extra: [
+      { bone: 'head', size: [0.3, 0.14, 0.32], at: [0, 0.2, 0.01], color: '#3a1a24', taper: 0.8 },
+      { bone: 'head', size: [0.3, 0.2, 0.06], at: [0, 0.08, 0.15], color: '#3a1a24' },
+      { bone: 'chest', size: [0.44, 0.56, 0.06], at: [0, -0.06, 0.17], color: '#3a1a24' },
+      { bone: 'spine', size: [0.38, 0.4, 0.05], at: [0, -0.2, 0.15], color: '#2a1a24', taper: 1.2 },
+      { bone: 'foreL', size: [0.12, 0.1, 0.13], at: [0, -0.2, 0], color: '#6a6a76' },
+      { bone: 'foreL', size: [0.04, 0.03, 0.06], at: [0, -0.2, -0.08], color: '#ff3a52', glow: true, plain: true },
+      // the rifle runs down the weapon bone from the right hand: stock, body, scope, long barrel, muzzle
+      { bone: 'weapon', size: [0.07, 0.26, 0.13], at: [0, 0.1, 0.02], color: '#1a1a20' },
+      { bone: 'weapon', size: [0.08, 0.5, 0.1], at: [0, -0.25, 0], color: '#1a1a20' },
+      { bone: 'weapon', size: [0.05, 0.24, 0.05], at: [0, -0.24, -0.09], color: '#2a2a30' },
+      { bone: 'weapon', size: [0.045, 0.02, 0.045], at: [0, -0.37, -0.09], color: '#ff3a52', glow: true, plain: true, tag: 'scope' },
+      { bone: 'weapon', size: [0.035, 0.76, 0.035], at: [0, -0.86, -0.02], color: '#6a6a76' },
+      { bone: 'weapon', size: [0.05, 0.05, 0.05], at: [0, -1.25, -0.02], color: '#ff3a52', glow: true, plain: true, tag: 'muzzle' },
+    ],
+  }),
+  brute: bruteModel(),
+  crawler: crawlerModel(),
+  drone: droneModel(),
   // red fuel barrel: slash it to light the fuse, tether it to throw
   barrel: {
     bones: [['root', null, 0, 0, 0]],
@@ -89,7 +127,7 @@ const MODELS = {
 function humanoidModel(scale, c) {
   const k = c.bulk || 1;
   return {
-    bones: HUMANOID, scale,
+    bones: c.bones ? HUMANOID.concat(c.bones) : HUMANOID, scale,
     parts: [
       { bone: 'hips', size: [0.32 * k, 0.18, 0.22], at: [0, -0.02, 0], color: c.dark },
       { bone: 'spine', size: [0.34 * k, 0.3, 0.24], at: [0, 0.14, 0], color: c.body, taper: 1.08 },
@@ -112,6 +150,94 @@ function humanoidModel(scale, c) {
       { bone: 'footR', size: [0.13, 0.08, 0.26], at: [0, -0.02, -0.05], color: c.boot },
     ].concat(c.extra || []),
   };
+}
+
+// The brute: a hunched scrap giant 2.8 m tall, wide in the shoulders, with a furnace glowing in its chest
+// and fists like engine blocks. Its head sits low between the shoulders (poses lower the head bone).
+function bruteModel() {
+  const T = '#3c3c48', TOP = '#6e6e7a', DK = '#24242c', LIMB = '#5e5e6a', BACK = '#2a2a32', RUST = '#7a3e28', FIRE = '#ff7a2a';
+  const parts = [
+    { bone: 'hips', size: [0.44, 0.2, 0.32], at: [0, -0.02, 0], color: DK },
+    { bone: 'spine', size: [0.5, 0.32, 0.36], at: [0, 0.14, 0], color: T, taper: 1.3 },
+    { bone: 'chest', size: [0.82, 0.42, 0.48], at: [0, 0.14, 0.02], color: T, taper: 1.12 },
+    { bone: 'chest', size: [0.88, 0.1, 0.5], at: [0, 0.36, 0.02], color: TOP },
+    { bone: 'chest', size: [0.5, 0.36, 0.08], at: [0, 0.1, 0.27], color: DK },
+    { bone: 'chest', size: [0.24, 0.2, 0.04], at: [0.1, 0.13, -0.25], color: '#141016' },
+    { bone: 'chest', size: [0.12, 0.06, 0.03], at: [-0.22, 0.02, -0.25], color: RUST },
+    { bone: 'chest', size: [0.08, 0.04, 0.03], at: [0.3, 0.3, -0.25], color: RUST },
+    { bone: 'head', size: [0.26, 0.22, 0.28], at: [0, 0.04, -0.08], color: BACK },
+    { bone: 'head', size: [0.26, 0.04, 0.28], at: [0, 0.15, -0.08], color: LIMB },
+    { bone: 'head', size: [0.16, 0.035, 0.03], at: [0, -0.03, -0.225], color: '#141016' },
+    { bone: 'head', size: [0.045, 0.035, 0.02], at: [-0.06, 0.06, -0.225], color: '#ffb040', glow: true, plain: true, tag: 'eye' },
+    { bone: 'head', size: [0.045, 0.035, 0.02], at: [0.06, 0.06, -0.225], color: '#ffb040', glow: true, plain: true, tag: 'eye' },
+  ];
+  for (const y of [0.07, 0.13, 0.19]) parts.push({ bone: 'chest', size: [0.18, 0.025, 0.02], at: [0.1, y, -0.27], color: FIRE, glow: true, plain: true, tag: 'furnace' });
+  for (const [s, x, col] of [['L', -1, BACK], ['R', 1, LIMB]]) {
+    parts.push(
+      { bone: 'arm' + s, size: [0.32, 0.16, 0.34], at: [x * 0.03, 0.03, 0], rot: [0, 0, -x * 0.2], color: '#8a8a96' },
+      { bone: 'arm' + s, shape: 'hex', size: [0.2, 0.3, 0.2], at: [0, -0.15, 0], color: col },
+      { bone: 'fore' + s, shape: 'hex', size: [0.18, 0.27, 0.18], at: [0, -0.13, 0], color: col, taper: 1.2 },
+      { bone: 'hand' + s, size: [0.27, 0.25, 0.27], at: [0, -0.09, 0], color: x > 0 ? TOP : DK },
+      { bone: 'hand' + s, size: [0.28, 0.04, 0.06], at: [0, -0.12, -0.12], color: RUST },
+      { bone: 'thigh' + s, shape: 'hex', size: [0.3, 0.43, 0.3], at: [0, -0.21, 0], color: LIMB },
+      { bone: 'shin' + s, shape: 'hex', size: [0.26, 0.42, 0.26], at: [0, -0.21, 0], color: BACK, taper: 1.2 },
+      { bone: 'shin' + s, size: [0.3, 0.14, 0.3], at: [0, -0.02, 0], color: '#8a8a96' },
+      { bone: 'foot' + s, size: [0.3, 0.14, 0.42], at: [0, -0.03, -0.06], color: DK },
+    );
+  }
+  return { bones: HUMANOID, scale: 1.45, parts };
+}
+
+// The armoured crawler: a low shell 1.4 m long on six legs, a red eye and mandibles at the front, and
+// seams between its plates that glow once the armour cracks.
+function crawlerModel() {
+  const SHELL = '#4a4a56', TOP = '#8a8a96', BELLY = '#2e2e38', LEG = '#2a2a32';
+  const bones = [['body', null, 0, 0.4, 0], ['head', 'body', 0, 0.02, -0.7]];
+  const parts = [
+    { bone: 'body', size: [1.0, 0.36, 1.3], at: [0, 0.05, 0], color: SHELL, taper: 0.8 },
+    { bone: 'body', size: [0.9, 0.08, 1.2], at: [0, -0.15, 0], color: BELLY },
+    { bone: 'head', size: [0.42, 0.3, 0.36], at: [0, 0, -0.1], color: '#3a3a44' },
+    { bone: 'head', size: [0.22, 0.05, 0.03], at: [0, 0.05, -0.29], color: '#ff3a3a', glow: true, plain: true, tag: 'eye' },
+    { bone: 'head', size: [0.06, 0.06, 0.24], at: [-0.12, -0.1, -0.34], color: '#6a6a76' },
+    { bone: 'head', size: [0.06, 0.06, 0.24], at: [0.12, -0.1, -0.34], color: '#6a6a76' },
+  ];
+  for (const z of [-0.42, 0, 0.42]) parts.push({ bone: 'body', size: [0.78, 0.08, 0.36], at: [0, 0.25, z], color: TOP, taper: 0.85 });
+  for (const z of [-0.21, 0.21]) parts.push({ bone: 'body', size: [0.66, 0.03, 0.05], at: [0, 0.29, z], color: '#24242c', glow: true, plain: true, tag: 'crack' });
+  parts.push({ bone: 'body', size: [0.04, 0.03, 0.9], at: [0, 0.3, 0], color: '#24242c', glow: true, plain: true, tag: 'crack' });
+  [-0.45, 0, 0.45].forEach((z, i) => {
+    for (const [s, x] of [['L', -1], ['R', 1]]) {
+      bones.push(['leg' + i + s, 'body', x * 0.42, -0.05, z], ['foot' + i + s, 'leg' + i + s, 0, -0.32, 0]);
+      parts.push(
+        { bone: 'leg' + i + s, shape: 'hex', size: [0.09, 0.34, 0.09], at: [0, -0.15, 0], color: LEG },
+        { bone: 'foot' + i + s, shape: 'hex', size: [0.07, 0.34, 0.07], at: [0, -0.15, 0], color: LEG, taper: 0.5 },
+      );
+    }
+  });
+  return { bones, scale: 1, parts };
+}
+
+// The drone: a small hull with a lens at the front, rotors on two arms and a thruster underneath.
+function droneModel() {
+  const bones = [['body', null, 0, 0.42, 0], ['rotL', 'body', -0.55, 0.13, 0], ['rotR', 'body', 0.55, 0.13, 0]];
+  const parts = [
+    { bone: 'body', size: [0.62, 0.3, 0.5], at: [0, 0, 0], color: '#5a5a66' },
+    { bone: 'body', size: [0.5, 0.06, 0.42], at: [0, 0.18, 0], color: '#8a8a96' },
+    { bone: 'body', size: [0.5, 0.06, 0.42], at: [0, -0.18, 0], color: '#3a3a44' },
+    { bone: 'body', size: [0.2, 0.14, 0.04], at: [0, 0.0, -0.265], color: '#3a3a44' },
+    { bone: 'body', size: [0.14, 0.09, 0.03], at: [0, 0.0, -0.285], color: '#ffd040', glow: true, plain: true, tag: 'eye' },
+    { bone: 'body', size: [0.16, 0.04, 0.16], at: [0, -0.23, 0.08], color: '#ff9030', glow: true, plain: true, tag: 'jet' },
+    { bone: 'body', size: [0.5, 0.05, 0.07], at: [-0.32, 0.07, 0], rot: [0, 0, 0.3], color: '#3a3a44' },
+    { bone: 'body', size: [0.5, 0.05, 0.07], at: [0.32, 0.07, 0], rot: [0, 0, -0.3], color: '#3a3a44' },
+    { bone: 'body', size: [0.02, 0.22, 0.02], at: [0.16, 0.3, 0.12], color: '#8a8a96' },
+  ];
+  for (const s of ['L', 'R']) {
+    parts.push(
+      { bone: 'rot' + s, shape: 'hex', size: [0.1, 0.08, 0.1], at: [0, 0, 0], color: '#3a3a44' },
+      { bone: 'rot' + s, size: [0.72, 0.015, 0.07], at: [0, 0.05, 0], color: '#9a9aa6', plain: true },
+      { bone: 'rot' + s, size: [0.07, 0.015, 0.72], at: [0, 0.05, 0], color: '#9a9aa6', plain: true },
+    );
+  }
+  return { bones, scale: 1, parts };
 }
 
 // The cyborg swordsman from the concept sheets: charcoal plate armour with a pixel-noise finish, a red
@@ -338,6 +464,133 @@ const Poses = {
     B.armR.rotation.x = arm; B.foreR.rotation.x = fore;
     Rig.tint(r, 'eye', e.windingUp() ? '#ffffff' : '#4af0ff');
     Rig.tint(r, 'orb', e.state === 'throwWind' && ((e.t * 16) | 0) % 2 ? '#ffffff' : '#4af0ff');
+  },
+  // the shield rides in front of the chest and the left arm reaches it with IK; a bash thrusts it out,
+  // a broken guard leaves it hanging low at the side
+  shielder(r, e) {
+    Rig.reset(r);
+    const B = r.bones, S = r.scale, st = e.state, moving = Math.min(1, Math.hypot(e.vel.x, e.vel.z) / 3.5);
+    this.walk(r, e.walk, moving, !e.onGround && e.stun <= 0);
+    const sh = B.shield, rest = r.rest.shield, broken = e.guardBrokenT > 0;
+    let dz = 0, dy = 0;
+    B.spine.rotation.x = -0.12;
+    if (broken) {
+      sh.position.set(rest.x - 0.3 * S, rest.y - 0.62 * S, rest.z + 0.36 * S);
+      sh.rotation.set(0.5, 0.4, 0.55);
+      B.spine.rotation.x = 0.1;
+    } else {
+      if (st === 'bashWind') { const k = easeOutCubic(clamp(e.st / e.tele(0.5), 0, 1)); dz = 0.14 * k; dy = -0.06 * k; B.spine.rotation.x = lerp(-0.12, 0.08, k); B.hips.position.y -= 0.08 * k; }
+      else if (st === 'bash') { dz = -0.3; B.spine.rotation.x = -0.4; }
+      else if (st === 'recover') dz = -0.1;
+      sh.position.set(rest.x, rest.y + dy * S, rest.z + dz * S);
+    }
+    if (e.stun > 0 && !broken) this.stunned(r, e);
+    const T = this._t || (this._t = [0, 1, 2].map(() => new THREE.Vector3()));
+    r.mesh.updateMatrixWorld();
+    sh.updateWorldMatrix(true, false);
+    sh.localToWorld(T[0].set(0.04, -0.06, 0.09));
+    r.mesh.localToWorld(T[1].set(-0.9, 1.0, 0.5));
+    Rig.ik(r, 'armL', 'foreL', 'handL', T[0], T[1], 1);
+    B.armR.rotation.x = 0.2 + Math.sin(e.walk) * 0.3 * moving; B.foreR.rotation.x = 0.5; B.armR.rotation.z = 0.12;
+    Rig.tint(r, 'eye', e.windingUp() ? '#ffffff' : '#ffd040');
+    Rig.tint(r, 'slit', broken ? (((e.t * 8) | 0) % 2 ? '#ffffff' : '#ff9a3a') : e.windingUp() ? '#ffffff' : '#ffd040');
+  },
+  // rifle shouldered along its aim while it aims; the left arm thrown up at the grapple line while it zips
+  sniper(r, e) {
+    Rig.reset(r);
+    const B = r.bones, aiming = e.state === 'aim' || e.state === 'cool' || e.state === 'perch';
+    this.walk(r, 0, 0, !e.onGround && e.stun <= 0 && e.state !== 'zip');
+    if (e.stun > 0) { this.stunned(r, e); Rig.tint(r, 'eye', '#ff3a52'); return; }
+    const pitch = aiming ? Math.asin(clamp(e.aimDir.y, -0.9, 0.9)) : -0.6;
+    B.armR.rotation.x = Math.PI / 2 + pitch - 0.25; B.foreR.rotation.x = 0.25; B.armR.rotation.z = 0.15;
+    B.armL.rotation.x = Math.PI / 2 + pitch - 0.05; B.armL.rotation.z = -0.5; B.foreL.rotation.x = 0.3;
+    B.chest.rotation.y = 0.12; B.spine.rotation.x = e.state === 'aim' ? 0.02 : -0.08;
+    B.head.rotation.x = -pitch * 0.5;
+    if (e.state === 'zip') {
+      B.armL.rotation.x = 2.7; B.armL.rotation.z = -0.2; B.foreL.rotation.x = 0;
+      B.armR.rotation.x = 0.4; B.thighL.rotation.x = 1.1; B.shinL.rotation.x = -1.6; B.thighR.rotation.x = 0.5; B.shinR.rotation.x = -1.2;
+    }
+    if (e.state === 'cool' && e.st < 0.15) B.armR.rotation.x -= 0.3 * (1 - e.st / 0.15);
+    const lit = e.laser() === 2 ? (((e.t * 30) | 0) % 2 ? '#ffffff' : '#ff3a52') : '#ff3a52';
+    Rig.tint(r, 'eye', e.windingUp() ? '#ffffff' : '#ff3a52');
+    Rig.tint(r, 'scope', lit); Rig.tint(r, 'muzzle', lit);
+  },
+  // Hunched, head sunk. The punch draws the right fist back and drives it out; the slam raises both fists
+  // overhead and brings them down. The furnace flares through every wind-up.
+  brute(r, e) {
+    Rig.reset(r);
+    const B = r.bones, st = e.state, moving = Math.min(1, Math.hypot(e.vel.x, e.vel.z) / 2.2);
+    this.walk(r, e.walk, moving * 0.8, !e.onGround && e.stun <= 0);
+    // head sunk between shoulders set wide of the torso
+    B.head.position.y = r.rest.head.y * 0.5;
+    B.armL.position.x = r.rest.armL.x * 1.8; B.armR.position.x = r.rest.armR.x * 1.8;
+    B.armL.rotation.z = -0.28; B.armR.rotation.z = 0.28;
+    let lean = -0.38, aR = 0.15 + Math.sin(e.walk) * 0.3 * moving, fR = 0.45, aL = 0.15 - Math.sin(e.walk) * 0.3 * moving, fL = 0.45, twist = 0;
+    if (st === 'punchWind') {
+      const k = easeOutCubic(clamp(e.st / e.tele(0.55), 0, 1));
+      aR = lerp(0.2, -1.1, k); fR = lerp(0.45, 1.7, k); twist = -0.5 * k; lean = lerp(-0.38, -0.1, k);
+    } else if (st === 'punch') {
+      const k = easeOutCubic(clamp(e.st / 0.08, 0, 1));
+      aR = lerp(-1.1, 1.55, k); fR = lerp(1.7, 0.1, k); twist = lerp(-0.5, 0.45, k); lean = -0.6;
+    } else if (st === 'slamWind') {
+      const k = easeOutCubic(clamp(e.st / e.tele(0.85), 0, 1));
+      aR = aL = lerp(0.2, -2.8, k); fR = fL = lerp(0.45, 0.35, k); lean = lerp(-0.38, 0.15, k);
+      B.armL.rotation.z = lerp(-0.28, -0.1, k); B.armR.rotation.z = lerp(0.28, 0.1, k);
+    } else if (st === 'slam') {
+      const k = easeOutCubic(clamp(e.st / 0.08, 0, 1));
+      aR = aL = lerp(-2.8, 1.3, k); fR = fL = 0.2; lean = lerp(0.15, -0.75, k);
+      B.hips.position.y -= 0.12 * k;
+    } else if (st === 'recover') { aR = aL = 0.9; fR = fL = 0.3; lean = -0.6; }
+    B.spine.rotation.x = lean; B.chest.rotation.y = twist; B.head.rotation.x = -lean * 0.7;
+    B.armR.rotation.x = aR; B.foreR.rotation.x = fR; B.armL.rotation.x = aL; B.foreL.rotation.x = fL;
+    if (e.stun > 0) this.stunned(r, e);
+    const hot = e.windingUp();
+    Rig.tint(r, 'eye', hot ? '#ffffff' : '#ffb040');
+    Rig.tint(r, 'furnace', hot ? (((e.t * 16) | 0) % 2 ? '#ffffff' : '#ffe080') : '#ff7a2a');
+  },
+  // A tripod gait: front and back legs on one side step with the middle leg on the other. The lunge
+  // rears the head up, then throws the body forward with the legs trailing.
+  crawler(r, e) {
+    Rig.reset(r);
+    const B = r.bones, st = e.state, moving = Math.min(1, Math.hypot(e.vel.x, e.vel.z) / 2.5), air = !e.onGround && e.stun <= 0;
+    // legs splay out sideways from the shell and bend down at the knee, spider-like
+    let pitch = 0, roll = 0, drop = 0, swing = 0.4 * moving, splay = 1.35;
+    if (st === 'lungeWind') { const k = easeOutCubic(clamp(e.st / e.tele(0.45), 0, 1)); pitch = 0.35 * k; drop = 0.1 * k; splay = 1.35 + 0.15 * k; swing = 0; }
+    else if (st === 'lunge') { pitch = -0.25; swing = 0; splay = 0.9; }
+    else if (st === 'recover') { pitch = -0.1; drop = 0.04; }
+    if (e.stun > 0) { roll = 0.3 * Math.sin(e.t * 20); splay = 1.5; swing = 0; }
+    B.body.rotation.set(pitch, 0, roll);
+    B.body.position.y = r.rest.body.y - drop + (e.onGround ? Math.abs(Math.sin(e.walk * 1.5)) * 0.03 : 0);
+    for (let i = 0; i < 3; i++) {
+      for (const [s, x] of [['L', -1], ['R', 1]]) {
+        const grp = (i + (x > 0 ? 1 : 0)) % 2, ph = e.walk * 2 + grp * Math.PI;
+        const lift = swing ? Math.max(0, Math.cos(ph)) * 0.35 : 0;
+        const leg = B['leg' + i + s], foot = B['foot' + i + s];
+        leg.rotation.set(air || st === 'lunge' ? -0.6 : Math.sin(ph) * swing, 0, x * (splay + lift));
+        foot.rotation.set(0, 0, -x * (splay - 0.7 + lift * 0.5));
+      }
+    }
+    const cracked = e.crackT > 0;
+    Rig.tint(r, 'eye', e.windingUp() ? '#ffffff' : '#ff3a3a');
+    Rig.tint(r, 'crack', cracked ? (((e.t * 10) | 0) % 2 ? '#ffd080' : '#ff7a2a') : '#24242c');
+  },
+  // Rotors spin; the hull tips toward where it flies and noses down into a dive. The lens blinks red
+  // through the wind-up.
+  drone(r, e) {
+    Rig.reset(r);
+    const B = r.bones, v = e.vel, f = e.fwd();
+    const fwdV = v.x * f.x + v.z * f.z, sideV = v.x * -f.z + v.z * f.x;
+    let pitch = -clamp(fwdV * 0.04, -0.4, 0.4), roll = clamp(sideV * 0.04, -0.4, 0.4);
+    if (e.state === 'dive') { const s = Math.hypot(v.x, v.y, v.z) || 1; pitch = Math.asin(clamp(v.y / s, -1, 1)); roll = 0; }
+    if (e.state === 'tele') { pitch = 0.25; roll = Math.sin(e.t * 50) * 0.06; }
+    if (e.stun > 0) roll = Math.sin(e.t * 25) * 0.5;
+    B.body.rotation.set(pitch, 0, roll);
+    B.body.position.y = r.rest.body.y + (e.state === 'hover' ? Math.sin(e.t * 6) * 0.05 : 0);
+    const spin = Game.realTime * (e.stun > 0 ? 12 : 40);
+    B.rotL.rotation.y = spin; B.rotR.rotation.y = -spin;
+    const blink = e.state === 'tele' && ((e.st * 16) | 0) % 2;
+    Rig.tint(r, 'eye', e.state === 'tele' || e.state === 'dive' ? (blink ? '#ffffff' : '#ff3030') : '#ffd040');
+    Rig.tint(r, 'jet', ((e.t * 20) | 0) % 2 ? '#ff9030' : '#ffd080');
   },
 };
 

@@ -2,14 +2,15 @@
 // Runs the character controller headless on the street and prints movement in metres: run speed,
 // jump and double-jump apex, dash, slide. Then checks the arena: every raised walkable surface must be
 // reachable from the one below it with a double jump plus a mantle, and the clearance rules must hold.
-// Exits 1 on a failed check. Usage: node tools/feel-check.js
+// Last, the nav graph: the street is one piece, enemies can climb the fire escapes, and every surface
+// has a way back down. Exits 1 on a failed check. Usage: node tools/feel-check.js
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
-const ctx = vm.createContext({ console, Math, JSON, Object, Array, Set, Map, Infinity, Int32Array, Uint8Array, Float32Array });
+const ctx = vm.createContext({ console, Math, JSON, Object, Array, Set, Map, Infinity, Int32Array, Uint8Array, Int8Array, Float32Array });
 for (const f of ['js/util.js', 'js/world.js', 'js/controller.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
 const run = (code) => vm.runInContext(code, ctx);
 run('var PC = { HEIGHT: MOVE.H }; World.build(STREET);');
@@ -172,6 +173,38 @@ let minAlley = Infinity;
 for (let i = 1; i < row.length; i++) { const g = row[i].min.x - row[i - 1].max.x; if (g > 0.01) minAlley = Math.min(minAlley, g); }
 console.log(`Narrowest alley: ${fmt(minAlley)} m (rule: at least 6)`);
 check(minAlley >= 6, 'an alley is narrower than 6 m');
+
+// ---------- navigation: where enemies can follow you ----------
+const nav = run('Nav.stats');
+console.log(`\nNav graph: ${nav.nodes} nodes on ${nav.surfaces} surfaces, ${nav.jumps} jump links, ${nav.drops} drop links`);
+const nr = run(`(() => {
+  const cap = Nav.MAX_COST; Nav.MAX_COST = 1e9;
+  const street = Nav.bodyNode(STREET.playerStart.x, 0, STREET.playerStart.z, true);
+  const surf = new Map();
+  for (let k = 0; k < Nav.N; k++) if (!surf.has(Nav.nbox[k])) surf.set(Nav.nbox[k], k);
+  // every street node reaches the middle of the street, and every surface has a way down to it
+  Nav.solve(street, false);
+  let cut = 0, stuck = [];
+  for (let k = 0; k < Nav.N; k++) if (World.boxes[Nav.nbox[k]].kind === 'ground' && Nav.dist[k] < 0) cut++;
+  for (const [b, k] of surf) if (Nav.dist[k] < 0) stuck.push(World.boxes[b].kind + ' at ' + World.boxes[b].max.y.toFixed(1));
+  // which raised surfaces an enemy on the street can climb to
+  const up = [];
+  for (const [b, k] of surf) {
+    const box = World.boxes[b];
+    if (box.kind === 'ground' || box.kind === 'car') continue;
+    Nav.solve(k, false);
+    up.push({ kind: box.kind, y: box.max.y, ok: Nav.dist[street] >= 0 });
+  }
+  Nav.MAX_COST = cap;
+  return { cut, stuck, up };
+})()`);
+const climbable = nr.up.filter((u) => u.ok);
+console.log(`Street nodes cut off from the rest: ${nr.cut}`);
+console.log(`Raised surfaces an enemy can climb to: ${climbable.length} of ${nr.up.length} (jumps up to ${run('Nav.CLIMB')} m)`);
+console.log(`  climbable: ${[...new Set(climbable.map((u) => u.kind))].join(', ')}; highest ${fmt(Math.max(...climbable.map((u) => u.y)))} m`);
+check(nr.cut === 0, `${nr.cut} street nodes can't reach the middle of the street`);
+check(nr.stuck.length === 0, `no way down from: ${nr.stuck.join(', ')}`);
+check(nr.up.filter((u) => u.kind === 'fire').every((u) => u.ok), 'enemies cannot climb every fire escape tier');
 
 console.log(failed ? '\nFAILED' : '\nOK');
 process.exit(failed ? 1 : 0);

@@ -4,13 +4,13 @@
 // player's afterimages. Every material is made once here and compiled in Render.prewarm.
 
 const Views = {
-  map: new Map(), mats: null, geos: null, ghosts: [], lasers: [], arcs: [], zones: [], tetherMesh: null,
-  GHOSTS: 10, LASERS: 6, ARCS: 4, ZONES: 8, LASER_N: 40, ARC_N: 28,
+  map: new Map(), mats: null, geos: null, ghosts: [], lasers: [], arcs: [], zones: [], zips: [], beams: [], tetherMesh: null,
+  GHOSTS: 10, LASERS: 6, ARCS: 4, ZONES: 8, ZIPS: 3, BEAMS: 8, LASER_N: 40, ARC_N: 28,
 
   init() {
     const add = (color, o = {}) => new THREE.MeshBasicMaterial(Object.assign({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }, o));
     this.mats = {
-      boltH: add('#ff7a2a'), boltF: add('#ff2a48'), boltCore: add('#fff4d0'),
+      boltH: add('#ff7a2a'), boltF: add('#ff2a48'), boltS: add('#ff3a52'), boltCore: add('#fff4d0'),
       shell: Gfx.litMaterial({ color: '#1c2a30' }, 'feet', FX.gibFeet),
       gFly: new THREE.MeshBasicMaterial({ color: '#4af0ff' }), gCaught: new THREE.MeshBasicMaterial({ color: '#ffd070' }),
       gKick: new THREE.MeshBasicMaterial({ color: '#ff5a6a' }), white: new THREE.MeshBasicMaterial({ color: '#ffffff' }),
@@ -19,6 +19,9 @@ const Views = {
     this.geos = {
       bolt: new THREE.BoxGeometry(0.08, 0.08, 0.8), boltCore: new THREE.BoxGeometry(0.035, 0.035, 0.55), rock: new THREE.BoxGeometry(1, 1, 1),
       sphere: new THREE.SphereGeometry(1, 8, 6), ring: new THREE.RingGeometry(0.8, 1, 32), flatRing: new THREE.RingGeometry(0.9, 1, 48).rotateX(-Math.PI / 2),
+      // the brute's ground wave: an open band 1 m tall standing on the ground
+      band: new THREE.CylinderGeometry(1, 1, 1, 48, 1, true).translate(0, 0.5, 0),
+      beam: new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
     };
     // afterimages share the player's geometry; each has its own skeleton of loose bones posed by copying
     const src = Render.playerRig.mesh;
@@ -31,6 +34,14 @@ const Views = {
       this.ghosts.push({ mesh: m, fx: null });
     }
     this.tetherMesh = FX.stripMesh(24);
+    for (let i = 0; i < this.ZIPS; i++) this.zips.push(FX.stripMesh(24));
+    // spawn beams: a column of light where an enemy is arriving
+    for (let i = 0; i < this.BEAMS; i++) {
+      const b = new THREE.Mesh(this.geos.beam, add('#ff6a3a'));
+      b.visible = false; b.renderOrder = 2;
+      Gfx.scene.add(b);
+      this.beams.push(b);
+    }
     for (let i = 0; i < this.LASERS; i++) this.lasers.push(FX.stripMesh(this.LASER_N));
     for (let i = 0; i < this.ARCS; i++) this.arcs.push(FX.stripMesh(this.ARC_N));
     for (let i = 0; i < this.ZONES; i++) {
@@ -39,27 +50,31 @@ const Views = {
       Gfx.scene.add(z);
       this.zones.push(z);
     }
-    for (const m of [this.tetherMesh, ...this.lasers, ...this.arcs]) m.visible = false;
+    for (const m of [this.tetherMesh, ...this.zips, ...this.lasers, ...this.arcs]) m.visible = false;
   },
   // everything once, visible, for the shader compile
   prewarmShow(group) {
     const add = (m) => { group.add(m); return m; };
+    const add_wave = () => this.waveMat();
     add(new THREE.Mesh(this.geos.bolt, this.mats.boltH));
     add(new THREE.Mesh(this.geos.sphere, this.mats.shell));
     add(new THREE.Mesh(this.geos.sphere, this.mats.gFly));
     add(new THREE.Mesh(this.geos.ring, this.mats.halo));
+    add(new THREE.Mesh(this.geos.band, add_wave()));
+    this.beams[0].visible = true;
     add(new THREE.Mesh(this.geos.rock, FX.gibMaterial('#5c5464', false)));
     this.ghosts[0].mesh.visible = true;
     this.zones[0].visible = true;
     this.tetherMesh.visible = true;
   },
   prewarmHide() {
-    this.ghosts[0].mesh.visible = false; this.zones[0].visible = false; this.tetherMesh.visible = false;
+    this.ghosts[0].mesh.visible = false; this.zones[0].visible = false; this.tetherMesh.visible = false; this.beams[0].visible = false;
   },
+  waveMat() { return new THREE.MeshBasicMaterial({ color: '#ff7a2a', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }); },
 
   sync() {
     const t = Game.realTime, live = new Set();
-    for (const list of [Game.projectiles, Game.props]) {
+    for (const list of [Game.projectiles, Game.props, Game.hazards]) {
       for (const o of list) {
         if (o.dead) continue;
         live.add(o);
@@ -71,12 +86,19 @@ const Views = {
     for (const [o, v] of this.map) if (!live.has(o)) { this.dispose(v); this.map.delete(o); }
     this.syncGhosts();
     this.syncTether();
+    this.syncZips();
+    this.syncBeams(t);
     this.syncTells(t);
   },
   make(o) {
     const M = this.mats, G = this.geos, g = new THREE.Group();
     if (o.kind === 'bolt') {
-      g.add(new THREE.Mesh(G.bolt, o.hostile ? M.boltH : M.boltF), new THREE.Mesh(G.boltCore, M.boltCore));
+      g.add(new THREE.Mesh(G.bolt, this.boltMat(o)), new THREE.Mesh(G.boltCore, M.boltCore));
+    } else if (o.kind === 'wave') {
+      const band = new THREE.Mesh(G.band, this.waveMat());
+      band.renderOrder = 2;
+      g.add(band);
+      g.userData = { band };
     } else if (o.kind === 'rock') {
       g.add(new THREE.Mesh(G.rock, FX.gibMaterial(o.color, false)));
       g.scale.setScalar(o.size);
@@ -113,7 +135,13 @@ const Views = {
       if (!this._z) { this._z = new THREE.Vector3(0, 0, 1); this._d = new THREE.Vector3(); }
       this._d.set(o.vel.x / s, o.vel.y / s, o.vel.z / s);
       g.quaternion.setFromUnitVectors(this._z, this._d);
-      g.children[0].material = o.hostile ? this.mats.boltH : this.mats.boltF;
+      g.children[0].material = this.boltMat(o);
+    } else if (o.kind === 'wave') {
+      // a band of light that shrinks as it runs out: clear its top to get over it
+      const k = o.t / o.dur, r = o.radius(), band = g.userData.band;
+      band.scale.set(r, 0.65 * (1 - k * 0.6), r);
+      band.material.opacity = 0.9 * (1 - k * k);
+      band.material.color.set(((o.t * 24) | 0) % 2 ? '#ffd080' : '#ff7a2a');
     } else if (o.kind === 'rock') {
       const k = 1.2 - o.life;
       g.rotation.set(o.spin.x * k, o.spin.y * k, o.spin.z * k);
@@ -131,7 +159,9 @@ const Views = {
     if (v.rig) { Gfx.scene.remove(v.rig.mesh); v.rig.geo.dispose(); v.rig.mat.dispose(); v.rig.outline.material.dispose(); return; }
     Gfx.scene.remove(v.group);
     if (v.group.userData.halo) v.group.userData.halo.material.dispose();
+    if (v.group.userData.band) v.group.userData.band.material.dispose();
   },
+  boltMat(o) { return !o.hostile ? this.mats.boltF : o.col && o.col.outer === '#ff3a52' ? this.mats.boltS : this.mats.boltH; },
 
   // Afterimages: each new request copies the player's current bone matrices into a free pool mesh.
   syncGhosts() {
@@ -171,6 +201,34 @@ const Views = {
     }, n);
   },
 
+  // A sniper reeling itself to another perch: its grapple line from the left hand to where it's going.
+  syncZips() {
+    let zi = 0;
+    for (const e of Game.enemies) {
+      if (e.dead || e.state !== 'zip' || !e.zipTo || !e.model || zi >= this.zips.length) continue;
+      const m = this.zips[zi++], h = Rig.boneWorld(e.model, 'handL', this._zh || (this._zh = new THREE.Vector3()));
+      const b = { x: e.zipTo.x, y: e.zipTo.y + 0.3, z: e.zipTo.z }, n = 12, pts = [];
+      for (let i = 0; i < n; i++) { const k = i / (n - 1), j = i && i < n - 1 ? 0.06 * Math.sin(k * Math.PI) : 0; pts.push({ x: lerp(h.x, b.x, k) + rand(-j, j), y: lerp(h.y, b.y, k) + rand(-j, j), z: lerp(h.z, b.z, k) + rand(-j, j) }); }
+      const outer = hexLinear('#a01828'), core = hexLinear('#ffd0d8');
+      m.visible = true;
+      FX.writeStrip(m, pts.concat(pts.slice().reverse()), 0.05, Gfx.camera.position, (i, out) => { const c = i < n ? outer : core; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; }, n);
+    }
+    for (; zi < this.zips.length; zi++) this.zips[zi].visible = false;
+  },
+  // Where an enemy is arriving: a column of light that narrows until it steps out.
+  syncBeams(t) {
+    let bi = 0;
+    for (const e of Game.enemies) {
+      if (!e.spawning || e.dead || bi >= this.beams.length) continue;
+      const b = this.beams[bi++], k = 1 - e.spawnT / 0.75, w = Math.max(0.06, (1 - k) * 0.5);
+      const base = e.pos.y, top = e.flying ? e.pos.y + 7 : World.groundAt(e.pos.x, e.pos.z, 200) > base + 1 ? base + 9 : base + 30;
+      b.visible = ((t * 30) | 0) % 3 !== 0;
+      b.position.set(e.pos.x, base, e.pos.z);
+      b.scale.set(w, top - base, w);
+      b.material.opacity = 0.35 + 0.4 * k;
+    }
+    for (; bi < this.beams.length; bi++) this.beams[bi].visible = false;
+  },
   // Enemy tells in the world: the gunner's laser (dashed while it tracks, solid white once locked), the
   // grenadier's arc with its landing zone, and the blast zone under every hostile grenade in flight.
   syncTells(t) {
@@ -191,8 +249,8 @@ const Views = {
       const L = e.laser ? e.laser() : 0;
       if (L && li < this.lasers.length) {
         const m = this.lasers[li++], o = e.muzzle(), d = e.aimDir, P = Game.player;
-        const hit = World.raycast(o, d, 36);
-        let len = hit ? hit.t : 36;
+        const far = e.type === 'sniper' ? 48 : 36, hit = World.raycast(o, d, far);
+        let len = hit ? hit.t : far;
         // it ends on you when it reaches you
         if (P && !P.dead) {
           const c = P.chest(), tp = (c.x - o.x) * d.x + (c.y - o.y) * d.y + (c.z - o.z) * d.z;
@@ -200,9 +258,10 @@ const Views = {
         }
         const N = this.LASER_N, pts = [];
         for (let i = 0; i < N; i++) { const k = (i / (N - 1)) * len; pts.push({ x: o.x + d.x * k, y: o.y + d.y * k, z: o.z + d.z * k }); }
-        const on = hexLinear(L === 2 ? (((t * 30) | 0) % 2 ? '#ffffff' : '#ffd0a0') : '#ff7a3a'), off = [0, 0, 0];
+        const sn = e.type === 'sniper';
+        const on = hexLinear(L === 2 ? (((t * 30) | 0) % 2 ? '#ffffff' : sn ? '#ff3a52' : '#ffd0a0') : sn ? '#ff3a52' : '#ff7a3a'), off = [0, 0, 0];
         m.visible = true;
-        FX.writeStrip(m, pts, L === 2 ? 0.05 : 0.035, cp, (i, out) => { const c = L === 2 || ((i >> 1) % 2 === 0) ? on : off; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; });
+        FX.writeStrip(m, pts, L === 2 ? 0.05 : 0.035, cp, (i, out) => { const c = L === 2 || (sn ? (i >> 1) % 3 !== 2 : (i >> 1) % 2 === 0) ? on : off; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; });
       }
       if (e.type === 'grenadier' && e.state === 'throwWind' && e.plan && ai < this.arcs.length) {
         const m = this.arcs[ai++], P = e.plan, N = this.ARC_N, pts = [];
