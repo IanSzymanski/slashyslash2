@@ -6,7 +6,7 @@ const Sound = (() => {
   let comp, master, lowpass, sfxBus, musicBus, reverbIn, noiseBuf, crackleBuf;
   let focusMute = 1;
   const last = {};
-  const GAP = { hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08 };
+  const GAP = { hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08, scrape: 0.12, grab: 0.1 };
 
   function makeNoise(sec) {
     const n = (ac.sampleRate * sec) | 0, b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0);
@@ -357,6 +357,31 @@ const Sound = (() => {
       noise({ dur: 0.34, vol: 0.32, f0: 1800, f1: 600, q: 1.2 });
       crackle(0.28, 0.22, { f: 900 });
       tone({ type: 'square', f0: 140, f1: 60, dur: 0.2, vol: 0.08 });
+    },
+    // a gauntlet dragged over concrete: a skid turn's hand, a cling sliding down a wall
+    scrape(p) {
+      noise({ dur: 0.3 * (p.len || 1), vol: 0.2, f0: 2200, f1: 900, q: 1.6 });
+      crackle(0.26 * (p.len || 1), 0.16, { f: 1600 });
+    },
+    // fingers driven into a wall
+    grab() {
+      noise({ dur: 0.07, vol: 0.28, type: 'lowpass', f0: 1400, f1: 300 });
+      crackle(0.1, 0.18, { f: 1100 });
+      tone({ type: 'square', f0: 220, f1: 90, dur: 0.06, vol: 0.05 });
+    },
+    // a street lamp cut: the clang of the pole, the power arcing out
+    lampCut() {
+      tone({ type: 'triangle', f0: 880, f1: 620, dur: 0.5, vol: 0.09, rev: 0.4 });
+      tone({ type: 'triangle', f0: 1320, f1: 1100, dur: 0.35, vol: 0.05, rev: 0.4 });
+      crackle(0.4, 0.22, { f: 2200 });
+      noise({ dur: 0.12, vol: 0.2, type: 'highpass', f0: 3000 });
+    },
+    // the lamp's top hitting the street: metal, then glass
+    lampCrash() {
+      tone({ type: 'sine', f0: 140, f1: 45, dur: 0.3, vol: 0.55 });
+      noise({ dur: 0.25, vol: 0.35, type: 'lowpass', f0: 1200, f1: 200 });
+      for (let i = 0; i < 6; i++) tone({ type: 'sine', f0: 3000 + Math.random() * 3000, dur: 0.08, vol: 0.04, delay: 0.03 + i * 0.025 });
+      noise({ dur: 0.2, vol: 0.18, type: 'highpass', f0: 5000, delay: 0.02 });
     },
     rocks() {
       for (let i = 0; i < 5; i++) noise({ dur: 0.05, vol: 0.18, type: 'lowpass', f0: 900 + Math.random() * 1200, delay: i * 0.03 + Math.random() * 0.02 });

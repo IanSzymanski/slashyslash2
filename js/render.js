@@ -9,7 +9,7 @@ const Render = {
   init(glCanvas, hudCanvas) {
     Gfx.init(glCanvas);
     FX.init(Gfx.scene);
-    this._v = new THREE.Vector3();
+    this._v = new THREE.Vector3(); this._pv = new THREE.Vector3();
     this.hud = hudCanvas;
     hudCanvas.width = VIEW_W; hudCanvas.height = VIEW_H;
     this.ctx = hudCanvas.getContext('2d');
@@ -150,9 +150,11 @@ const Render = {
     const P = Game.player, R = this.playerRig;
     R.mesh.visible = !!P;
     if (P) {
-      const p = P.rp || P.pos;
-      R.mesh.position.set(p.x, p.y, p.z);
+      const p = P.rp || P.pos, py = P.pivotY || 0;
       R.mesh.rotation.set(P.tilt || 0, P.yaw, P.bank || 0);
+      // the body tips and rolls about a point pivotY up (the feet on the ground, its middle in the air)
+      const v = this._pv.set(0, py, 0).applyEuler(R.mesh.rotation);
+      R.mesh.position.set(p.x - v.x, p.y + py - v.y, p.z - v.z);
       PlayerPose.apply(R, P);
       const want = Camera.curDist < 1 ? clamp(Camera.curDist - 0.4, 0, 1) / 0.6 : 1;
       const blink = P.blinkT > 0 && P.hurtT <= 0 && ((Game.realTime * 30) | 0) % 2 ? 0.55 : 1;
@@ -178,6 +180,7 @@ const Render = {
     this.fps = lerp(this.fps, 1 / Math.max(realDt, 0.001), 0.05);
     const G = Game, t = G.realTime;
     Gfx.flicker(t, realDt);
+    Gfx.processRebake();
     this.syncModels(realDt);
     Views.sync();
     FX.sync(Gfx.camera);

@@ -670,13 +670,14 @@ const PlayerPose = {
         o.hB = [-3, -6];
         o.lean = a.type === 'slam' ? 0.15 + 0.5 * u : 0.25 + (big ? 0.25 * Math.sin(u * Math.PI) : 0);
       }
-      o.bladeW = this.arcDir(a.yaw, a.tilt, th);
+      o.bladeW = this.arcDir(a.yaw, a.tilt, th, a.pa || 0);
       // the edge leads: the arc's tangent in the direction of the sweep
-      const e = this.arcDir(a.yaw, a.tilt, th + Math.PI / 2);
+      const e = this.arcDir(a.yaw, a.tilt, th + Math.PI / 2, a.pa || 0);
       o.edgeW = { x: e.x * a.dir, y: e.y * a.dir, z: e.z * a.dir };
       // the chest turns with a level swing
       o.twist = Math.abs(a.tilt) < 1 ? clamp(-th * 0.35, -0.7, 0.7) : 0;
-      if (p.onGround) { o.fF = [5, -1]; o.fB = [-4, -1]; o.hipY = a.heavy ? -8 : -9; } else { o.fF = [3, -4]; o.fB = [-3, -2]; }
+      if (p.onGround) { o.fF = [5, -1]; o.fB = [-4, -1]; o.hipY = a.heavy ? -8 : -9; o.lean += clamp(-(a.pa || 0), -0.8, 0.8) * 0.7; }
+      else { o.fF = [3, -4]; o.fB = [-3, -2]; }
       return o;
     }
     if (p.dashT > 0) {
@@ -698,6 +699,13 @@ const PlayerPose = {
       return o;
     }
     const P = p.atkPend;
+    if (P && !P.dash && P.t > 0.05 && !p.onGround && Input.isDown('attack')) {
+      // holding in the air: the blade turns point down over the head, ready to drive down
+      const k = clamp((P.t - 0.05) / (PC.PLUNGE_HOLD - 0.05), 0, 1);
+      o.lean = 0.1; o.hipY = -11; o.fF = [3, -6]; o.fB = [-2, -4]; o.hF = [1, -15 - 2 * k]; o.hB = [2, -14];
+      o.swordAng = lerp(2.4, Math.PI / 2, easeOutCubic(k)); o.tremble = k >= 1 ? 1 : 0;
+      return o;
+    }
     if (P && !P.dash && P.t > 0.05 && !p.sliding && Input.isDown('attack')) {
       // holding for a heavy: the blade draws back over the shoulder
       const k = clamp((P.t - 0.05) / (PC.HEAVY_HOLD - 0.05), 0, 1);
@@ -727,19 +735,35 @@ const PlayerPose = {
       o.lean = -0.35; o.hF = [4, -16]; o.hB = [-5, -15]; o.fF = [3, -2]; o.fB = [-3, -1]; o.swordAng = -1;
       return o;
     }
+    if (p.skid) {
+      // a skid turn: dropped low and leaning onto the free hand dug into the street at the side, braced toward
+      // the push-off, the trailing leg out along the slide, the blade held back for balance
+      const S = p.skid, Y = yawOf(S.ux, S.uz), fx = fwdX(Y), fz = fwdZ(Y), rx = Math.cos(Y), rz = -Math.sin(Y), q = p.rp || p.pos;
+      o.cat = 'skidTurn'; o.lean = 0.5; o.hipY = -4; o.hF = [-4, -10]; o.swordAng = Math.PI + 0.55;
+      o.plantW = p.skidHand();
+      o.fFW = { x: q.x + fx * 0.35 + rx * 0.22, y: q.y + 0.08, z: q.z + fz * 0.35 + rz * 0.22 };
+      o.fBW = { x: q.x - fx * 0.6 - rx * 0.05, y: q.y + 0.08, z: q.z - fz * 0.6 - rz * 0.05 };
+      return o;
+    }
     if (p.sliding) {
       o.cat = 'slide'; o.lean = -0.45; o.hipY = -4; o.fF = [8, -1]; o.fB = [1, -1]; o.hB = [-6, -1]; o.swordAng = -2.4; o.hF = [3, -11];
       return o;
     }
     if (p.vault) {
-      // a speed vault: the free hand plants on the top, the legs tuck and sweep over, the blade trails
-      const k = clamp(p.vault.t / p.vault.dur, 0, 1);
-      o.cat = 'vault'; o.lean = 0.6; o.hipY = -9.5; o.fF = [5, -9 + 3 * k]; o.fB = [1, -8 + 3 * k];
-      o.plantW = p.vault.plant; o.hF = [-5, -10]; o.swordAng = Math.PI + 0.3;
+      // a side vault: the free hand plants on the top and the body rolls over onto its side (render.js rolls
+      // it), knees tucked and swung out the far side, the blade trailing
+      const k = clamp(p.vault.t / p.vault.dur, 0, 1), up = Math.sin(k * Math.PI);
+      o.cat = 'vault'; o.lean = 0.35; o.hipY = -9.5; o.fF = [4, -9 + 2 * k]; o.fB = [1, -7 + 2 * k]; o.footSide = 0.3 * up;
+      o.plantW = k < 0.8 ? p.vault.plant : null; o.hB = [-2, -8]; o.hF = [-5, -12]; o.swordAng = Math.PI + 0.4;
       return o;
     }
-    if (p.wallSliding) {
-      o.lean = -0.1; o.fF = [3, -3]; o.fB = [-3, -1]; o.hB = [-5, -14]; o.hF = [4, -9]; o.swordAng = 2.6;
+    if (p.cling) {
+      // side on to the wall, the left hand dug in above the shoulder, the left boot braced on the face, the
+      // other leg loose; sliding, the body sags lower under the hand
+      const n = p.cling.n, q = p.rp || p.pos, sl = p.cling.sliding ? 1 : 0;
+      o.cat = 'cling'; o.lean = 0.05; o.hipY = -10 + sl; o.fF = [3, -4 - sl]; o.hF = [3, -8]; o.swordAng = 2.0;
+      o.plantW = p.clingHand(n);
+      o.fBW = { x: q.x - n.x * (p.r + 0.02) + fwdX(p.yaw) * 0.1, y: q.y + 0.5, z: q.z - n.z * (p.r + 0.02) + fwdZ(p.yaw) * 0.1 };
       return o;
     }
     if (p.mantle) {
@@ -832,11 +856,15 @@ const PlayerPose = {
     }
     p._pose = { cat: o.cat, rot: o.rot, hipY: o.hipY, lean: o.lean, swordAng: o.swordAng, twist: o.twist, fF: o.fF && o.fF.slice(), fB: o.fB && o.fB.slice(), hF: Array.isArray(o.hF) ? o.hF.slice() : o.hF, hB: Array.isArray(o.hB) ? o.hB.slice() : o.hB };
   },
-  // world direction along a swing's arc at angle th: the same plane FX.swoosh draws its trail in
-  arcDir(yaw, tilt, th) {
+  // world direction along a swing's arc at angle th: the same plane FX.swoosh draws its trail in, pitched
+  // up or down along the aim
+  arcDir(yaw, tilt, th, pitch = 0) {
     const fx = fwdX(yaw), fz = fwdZ(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw), ct = Math.cos(tilt), st = Math.sin(tilt);
-    const c = Math.cos(th), s = Math.sin(th);
-    return { x: fx * c + rx * ct * s, y: st * s, z: fz * c + rz * ct * s };
+    const cp = Math.cos(pitch), sp = Math.sin(pitch), c = Math.cos(th), s = Math.sin(th);
+    // forward along the aim, and the arc's up tipped back with it
+    const Fx = fx * cp, Fy = sp, Fz = fz * cp, Ux = -fx * sp, Uy = cp, Uz = -fz * sp;
+    const ax = rx * ct + Ux * st, ay = Uy * st, az = rz * ct + Uz * st;
+    return { x: Fx * c + ax * s, y: Fy * c + ay * s, z: Fz * c + az * s };
   },
 
   apply(r, p) {
@@ -878,12 +906,18 @@ const PlayerPose = {
     B.sheath.updateMatrixWorld(true);
     // legs: feet on their targets, knees forward, soles level with the body
     for (const [side, foot, s] of [['R', o.fF, 0.12], ['L', o.fB, -0.12]]) {
-      if (side === 'R' && o.kickW) T.set(o.kickW.x, o.kickW.y, o.kickW.z);
-      else L(foot[0], foot[1], s, T);
+      const fw = side === 'R' ? o.kickW || o.fFW : o.fBW;
+      if (fw) T.set(fw.x, fw.y, fw.z);
+      else L(foot[0], foot[1], s + (o.footSide || 0), T);
       L(30, -6, s, P);
       Rig.ik(r, 'thigh' + side, 'shin' + side, 'foot' + side, T, P, -1);
-      U.set(0, 1, 0).applyAxisAngle(this.X || (this.X = new THREE.Vector3(1, 0, 0)), -o.rot).applyQuaternion(M.quaternion);
-      F.set(0, 0, -1).applyAxisAngle(this.X, -o.rot).applyQuaternion(M.quaternion);
+      if (fw && !o.kickW) {
+        // planted in the world: sole level, toe along the facing
+        U.set(0, 1, 0); F.set(fwdX(p.yaw), 0, fwdZ(p.yaw));
+      } else {
+        U.set(0, 1, 0).applyAxisAngle(this.X || (this.X = new THREE.Vector3(1, 0, 0)), -o.rot).applyQuaternion(M.quaternion);
+        F.set(0, 0, -1).applyAxisAngle(this.X, -o.rot).applyQuaternion(M.quaternion);
+      }
       Rig.orient(B['foot' + side], U, F);
     }
     // the blade: a world direction from the swing, or the side-plane angle, or into the sheath
@@ -923,6 +957,9 @@ const PlayerPose = {
       M.updateMatrixWorld(true);
       A.set(-0.06, 0.31, 0.15);
       B.chest.localToWorld(A);
+      // the cloth simulation hangs from here next tick, relative to where the body was drawn
+      const q = p.rp || p.pos, pin = p.scarfPin || (p.scarfPin = {});
+      pin.x = A.x; pin.y = A.y; pin.z = A.z; pin.px = q.x; pin.py = q.y; pin.pz = q.z;
       for (let i = 0; i < SCARF_N; i++) {
         const a = i === 0 ? A : T.set(sc[i].x, sc[i].y, sc[i].z), b = sc[i + 1] || null;
         const bone = B['scarf' + i];

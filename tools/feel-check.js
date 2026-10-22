@@ -32,7 +32,7 @@ function simulate(seconds, start, script) {
     if (I.dash) Controller.tryDash(c, I.mx, I.mz);
     if (c.dashT > 0) Controller.moveDash(c, DT); else if (!c.mantle && !c.vault) Controller.moveNormal(c, DT, I);
     Controller.integrate(c, DT, I);
-    trace.push({ t, x: c.pos.x, y: c.pos.y, z: c.pos.z, v: Math.hypot(c.vel.x, c.vel.z), vy: c.vel.y, g: c.onGround, slide: c.sliding, mantle: !!c.mantle, vault: !!c.vault, skid: c.skidding, wall: c.wallSliding });
+    trace.push({ t, x: c.pos.x, y: c.pos.y, z: c.pos.z, v: Math.hypot(c.vel.x, c.vel.z), vy: c.vel.y, g: c.onGround, slide: c.sliding, mantle: !!c.mantle, vault: !!c.vault, skid: c.skidding, skidTurn: !!c.skid, wall: c.wallSliding, cling: !!c.cling });
   }
   return trace;
 }
@@ -60,8 +60,9 @@ rows.push(['90 degree turn at a sprint', turned ? `${fmt(turned.t - 1.5)} s to c
 check(turned && slowest > MOVE.RUN * 0.9, 'a turn at a sprint loses too much speed');
 tr = simulate(2.5, start, (t) => ({ mx: t < 1.5 ? 1 : -1 }));
 const skids = tr.filter((s) => s.skid).length * DT, back = tr.slice(turnI).find((s, i, a) => i > 0 && s.x < a[i - 1].x);
-rows.push(['Reversal at a sprint', `${fmt(skids)} s skid`, back ? `moving back after ${fmt(back.t - 1.5)} s` : 'never came back']);
-check(skids > 0.1 && back, 'a reversal at a sprint does not skid and come back');
+const onHand = tr.some((s) => s.skidTurn), backI = back ? tr.indexOf(back) : -1, push = backI >= 0 ? Math.max(...tr.slice(backI, backI + 3).map((s) => s.v)) : 0;
+rows.push(['Reversal at a sprint', `${fmt(skids)} s skid${onHand ? ' turn on the hand' : ''}`, back ? `moving back after ${fmt(back.t - 1.5)} s, pushing off at ${fmt(push)} m/s` : 'never came back']);
+check(skids > 0.1 && back && onHand && push >= MOVE.RUN * MOVE.SKID_PUSH - 0.01, 'a reversal at a sprint does not skid on the hand and push off');
 
 // single jump, held: apex and air time
 tr = simulate(1.5, start, (t) => ({ jump: t < DT, jumpHeld: true }));
@@ -102,20 +103,29 @@ const bjApex = Math.max(...tr.slice(bjI).map((s) => s.y));
 rows.push(['Bullet jump (aim 30 deg up)', `${fmt(bjL.x - bj.x)} m`, `apex ${fmt(bjApex)} m, air ${fmt(bjL.t - 1.3)} s`]);
 check(bjL.x - bj.x > 10, 'bullet jump carries less than 10 m');
 
-// wall kick: jump beside a building's front wall, slide down it pushing in, then kick off
+// wall cling and kick: jump beside a building's front wall pushing in. The hand digs in near the top of the
+// jump and holds a second, then the slide builds slowly; a jump 0.8 s into the slide kicks off.
 const bld = STREET.boxes.find((b) => b.kind === 'building' && b.max.y > 12);
 const wz = bld.max.z + MOVE.R + 0.05, wx = (bld.min.x + bld.max.x) / 2;
-let kickT = null, slideV = 0;
-tr = simulate(2.2, { x: wx, y: 0, z: wz }, (t, c) => {
-  if (c.wallSliding) slideV = Math.min(slideV, c.vel.y);
-  if (kickT === null && c.wallSliding && t > 0.7) kickT = t;
+let kickT = null, slideV = 0, slideT = null;
+tr = simulate(3.4, { x: wx, y: 0, z: wz }, (t, c) => {
+  if (c.wallSliding) { slideV = Math.min(slideV, c.vel.y); if (slideT === null) slideT = t; }
+  if (kickT === null && slideT !== null && t >= slideT + 0.8) kickT = t;
   return { mz: kickT === null ? -1 : 0, jump: t < DT || (kickT !== null && Math.abs(t - kickT) < DT / 2), jumpHeld: true };
 });
+const cI = tr.findIndex((s) => s.cling), hold = tr.filter((s) => s.cling && !s.wall);
+const holdDrift = hold.length ? Math.max(...hold.map((s) => s.y)) - Math.min(...hold.map((s) => s.y)) : 0;
 const kI = tr.findIndex((s) => kickT !== null && s.t >= kickT);
 const kickApex = kI >= 0 ? Math.max(...tr.slice(kI).map((s) => s.y)) - tr[kI].y : 0;
 const kickOut = kI >= 0 ? Math.max(...tr.slice(kI).map((s) => s.z)) - wz : 0;
-rows.push(['Wall kick', kickT === null ? 'no wall slide' : `+${fmt(kickApex)} m up, ${fmt(kickOut)} m out`, `wall slide at ${fmt(-slideV)} m/s`]);
-check(kickT !== null && kickApex > 2.5, 'could not slide down and kick off a wall');
+rows.push(['Wall cling', cI >= 0 ? `at ${fmt(tr[cI].y)} m, held ${fmt(hold.length * DT)} s` : 'never clung', `slide ${fmt(-slideV)} m/s after 0.8 s`]);
+rows.push(['Wall kick', kickT === null ? 'no wall slide' : `+${fmt(kickApex)} m up, ${fmt(kickOut)} m out`, '']);
+check(cI >= 0 && Math.abs(hold.length * DT - MOVE.CLING_HOLD) < 0.05 && holdDrift < 0.01, 'a cling does not hold still for CLING_HOLD');
+check(slideV < -2 && slideV > -MOVE.WALL_SLIDE, 'the slide after a cling does not build slowly');
+check(kickT !== null && kickApex > 2.5, 'could not cling, slide and kick off a wall');
+// without a cling there's no kick: a jump near a wall that isn't pushed into is a double jump
+tr = simulate(1.2, { x: wx, y: 0, z: wz }, (t) => ({ mx: 0.2, jump: t < DT || Math.abs(t - 0.45) < DT / 2, jumpHeld: true }));
+check(!tr.some((s) => s.cling) && Math.max(...tr.map((s) => s.z)) - wz < 2, 'a jump beside a wall kicks off it without a cling');
 
 // vaults: run at a wrecked car end-on (onto its 1.55 m roof) and side-on (over it), without breaking stride
 const car = STREET.boxes.find((b) => b.kind === 'car' && b.min.y > 0);
@@ -142,7 +152,7 @@ rows.push([`Mantle onto the ${fmt(girder.max.y)} m girder`, endM.y >= girder.max
 check(endM.y >= girder.max.y - 0.01 && tr.some((s) => s.mantle), 'double jump plus mantle could not reach the highest climb');
 
 console.log('Movement (metres)');
-for (const r of rows) console.log(`  ${r[0].padEnd(34)}${r[1].padEnd(26)}${r[2]}`);
+for (const r of rows) console.log(`  ${r[0].padEnd(34)}${r[1].padEnd(34)}${r[2]}`);
 
 // ---------- arenas: reach, clearance rules and navigation, from each arena's box list ----------
 const reach = apex2 + MOVE.MANTLE_UP;
@@ -157,7 +167,8 @@ for (const id of run('Object.keys(ARENAS)')) {
   const walkable = boxes.filter((b) => b.kind !== 'bound' && b.kind !== 'ground');
   let worst = 0;
   for (const s of walkable) {
-    if (s.kind === 'car' || s.kind === 'prop') continue;
+    // cars and props are climbed over, not onto; the crane is reached by tether; pillar and beam tops aren't floors
+    if (s.kind === 'car' || s.kind === 'prop' || s.kind === 'crane' || Math.min(s.max.x - s.min.x, s.max.z - s.min.z) < 0.8) continue;
     let from = def.groundY, fromName = 'the ground';
     for (const o of walkable) {
       if (o === s || o.max.y >= s.max.y - 0.3 || gap(o, s) > 3) continue;
@@ -235,7 +246,9 @@ for (const id of run('Object.keys(ARENAS)')) {
   check(nr.cut === 0, `${id}: ${nr.cut} ground nodes can't reach the player's start`);
   check(nr.stuck.length === 0, `${id}: no way down from: ${nr.stuck.join(', ')}`);
   check(nr.up.filter((u) => u.kind === 'fire').every((u) => u.ok), `${id}: enemies cannot climb every fire escape tier`);
-  if (id === 'crossroads') check(nr.up.filter((u) => u.kind === 'building').every((u) => u.ok), `${id}: some roof can't be reached by a climbing enemy`);
+  if (id === 'crossroads') check(nr.up.filter((u) => u.kind === 'building' || u.kind === 'frame').every((u) => u.ok), `${id}: some roof or frame floor can't be reached by a climbing enemy`);
+  const notUp = nr.up.filter((u) => !u.ok).map((u) => `${u.kind} ${fmt(u.y)}`);
+  if (notUp.length) console.log(`  Not climbable by enemies (tether or jump only): ${notUp.join(', ')}`);
 }
 
 console.log(failed ? '\nFAILED' : '\nOK');
