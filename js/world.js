@@ -8,6 +8,10 @@ const World = {
   // the Blackout modifier switches the street lamps off; flick scales the flickering lights (render.js sets it)
   blackout: false, flick: { fire: 1, buzz: 1 },
   STEP_SUB: 0.25, EPS: 1e-4,
+  // Round colliders, vertical cylinders { x, z, r, y0, y1, on, owner, top }: street lamps, fire barrels,
+  // bins and hydrants from the arena (round), and the red barrels, set each tick (dyn). Bodies slide round
+  // them; top says whether one can be stood on.
+  round: [], dyn: [],
 
   build(def) {
     this.def = def;
@@ -27,6 +31,9 @@ const World = {
       }
     }
     for (const l of def.lights) l.lin = hexLinear(l.color);
+    this.round = []; this.dyn = [];
+    for (const L of def.lamps || []) this.round.push((L.q = { x: L.x, z: L.z, r: 0.16, y0: L.y0, y1: L.y0 + 5.6, on: true, top: false, lamp: L }));
+    for (const q of def.round || []) this.round.push(Object.assign({ on: true, top: true, y1: q.y0 + q.h }, q));
     // perches a sniper can't stand on (inside a wall beside the ledge) are dropped
     if (!def.perchesChecked) { def.perches = def.perches.filter((q) => this.boxFree(q.x, q.y + 0.02, q.z, 0.5, 1.8)); def.perchesChecked = true; }
     Nav.build();
@@ -70,7 +77,50 @@ const World = {
     }
     return best || this.overlap(x, y, z, r, h);
   },
-  boxFree(x, y, z, r, h) { return !this.overlap(x, y, z, r, h); },
+  boxFree(x, y, z, r, h) { return !this.overlap(x, y, z, r, h) && !this.roundHit(x, y, z, r, h); },
+  // the first round collider a body hull at (x, y, z) overlaps (treated as a circle of 0.9 r), skipping skip's own
+  roundHit(x, y, z, r, h, skip = null) {
+    for (const L of [this.round, this.dyn]) {
+      for (const q of L) {
+        if (!q.on || q.owner === skip || y >= q.y1 - 0.01 || y + h <= q.y0 + 0.01) continue;
+        const R = q.r + r * 0.9, dx = x - q.x, dz = z - q.z;
+        if (dx * dx + dz * dz < R * R) return q;
+      }
+    }
+    return null;
+  },
+  // a round top a body coming down from fromY to y lands on: its middle over the top
+  roundLand(b, y, fromY) {
+    for (const L of [this.round, this.dyn]) {
+      for (const q of L) {
+        if (!q.on || !q.top || q.owner === b || fromY < q.y1 - 1e-4 || y > q.y1) continue;
+        const R = q.r + b.r * 0.5, dx = b.pos.x - q.x, dz = b.pos.z - q.z;
+        if (dx * dx + dz * dz < R * R) return q;
+      }
+    }
+    return null;
+  },
+  // Pushes a body out of round colliders along the line from the axis, so it slides round a pole instead of
+  // stopping on it, and takes away the speed it had into it. Where that would put it in a wall, it goes back.
+  pushRound(b, c, x0, z0) {
+    const p = b.pos, v = b.vel;
+    for (const L of [this.round, this.dyn]) {
+      for (const q of L) {
+        if (!q.on || q.owner === b || p.y >= q.y1 - 0.01 || p.y + b.h <= q.y0 + 0.01) continue;
+        const R = q.r + b.r * 0.9, dx = p.x - q.x, dz = p.z - q.z, d2 = dx * dx + dz * dz;
+        if (d2 >= R * R) continue;
+        let ux, uz;
+        if (d2 > 1e-8) { const d = Math.sqrt(d2); ux = dx / d; uz = dz / d; }
+        else { const l = Math.hypot(x0 - q.x, z0 - q.z); ux = l > 1e-4 ? (x0 - q.x) / l : 1; uz = l > 1e-4 ? (z0 - q.z) / l : 0; }
+        const nx = q.x + ux * R, nz = q.z + uz * R;
+        if (!this.overlap(nx, p.y, nz, b.r, b.h)) { p.x = nx; p.z = nz; } else { p.x = x0; p.z = z0; }
+        const vn = v.x * ux + v.z * uz;
+        if (vn < 0) { v.x -= vn * ux; v.z -= vn * uz; }
+        c.round = q;
+        if (q.owner && q.owner.bump) q.owner.bump(b, -vn, ux, uz);
+      }
+    }
+  },
   // top of the highest box under (x, z) at or below fromY
   groundAt(x, z, fromY) {
     let best = -Infinity;
@@ -85,15 +135,15 @@ const World = {
     for (const s of this.near(p.x - r, p.z - r, p.x + r, p.z + r)) {
       if (Math.abs(s.max.y - p.y) < 0.05 && s.max.x > p.x - r + E && s.min.x < p.x + r - E && s.max.z > p.z - r + E && s.min.z < p.z + r - E) return true;
     }
-    return false;
+    return !!this.roundLand(b, p.y - 0.05, p.y + 0.05);
   },
 
   // ---------- body physics: the 2D moveBody on three axes ----------
   // b: { pos, vel, r, h, onGround, col }. opt.step lets a grounded body walk up lips (cars, kerbs).
   moveBody(b, dt, opt = {}) {
     const c = b.col || (b.col = {});
-    c.ground = false; c.ceil = false; c.wall = false; c.wallX = 0; c.wallZ = 0; c.wallBox = null; c.landed = null;
-    const p = b.pos, v = b.vel, r = b.r, E = this.EPS;
+    c.ground = false; c.ceil = false; c.wall = false; c.wallX = 0; c.wallZ = 0; c.wallBox = null; c.landed = null; c.round = null;
+    const p = b.pos, v = b.vel, r = b.r, E = this.EPS, x0 = p.x, z0 = p.z;
     for (const ax of ['x', 'z']) {
       const d = v[ax] * dt;
       if (d === 0) continue;
@@ -114,6 +164,7 @@ const World = {
         }
       }
     }
+    if (this.round.length || this.dyn.length) this.pushRound(b, c, x0, z0);
     const dy = v.y * dt;
     if (dy !== 0) {
       const steps = Math.max(1, Math.ceil(Math.abs(dy) / this.STEP_SUB)), s = dy / steps;
@@ -127,6 +178,8 @@ const World = {
           v.y = 0;
           break;
         }
+        const q = s < 0 ? this.roundLand(b, p.y, p.y - s) : null;
+        if (q) { p.y = q.y1; c.ground = true; v.y = 0; break; }
       }
     }
     if (!c.ground && v.y <= 0) c.ground = this.standing(b);
@@ -146,7 +199,7 @@ const World = {
     for (let i = 0; i < 3; i++) { out[i] = (A[i] + K[i] * up) * amb; fire[i] = 0; buzz[i] = 0; }
     const ox = nx === undefined ? x : x + nx * 0.05, oy = ny === undefined ? y : y + ny * 0.05, oz = nz === undefined ? z : z + nz * 0.05;
     for (const L of D.lights) {
-      if (dark && L.street) continue;
+      if (L.off || (dark && L.street)) continue;
       const dx = L.x - ox, dy = L.y - oy, dz = L.z - oz, d2 = dx * dx + dy * dy + dz * dz;
       if (d2 > L.range * L.range) continue;
       const d = Math.sqrt(d2) || 1e-3;
@@ -464,6 +517,7 @@ const Arena = {
     World.build(def);
     if (typeof Gfx !== 'undefined' && Gfx.renderer) Gfx.buildLevel(def);
     this.id = id;
+    if (typeof Props !== 'undefined') Props.reset();
     return true;
   },
   // the Blackout modifier: the street lamps go out (a rebake), and back on when the wave ends
@@ -477,6 +531,8 @@ const Arena = {
   center() { const b = World.def.bounds; return { x: (b.minX + b.maxX) / 2, y: World.def.groundY, z: (b.minZ + b.maxZ) / 2 }; },
   spawnPoints(kind) { return World.def.spawn[kind] || []; },
   perches() { return World.def.perches; },
+  // points the tether can reach a long way to (the crane)
+  anchors() { return (World.def && World.def.anchors) || []; },
   barrelSpots() { return World.def.barrelSpots; },
   playerStart() { return World.def.playerStart; },
   // nearest ground-level point to (x, z) (the street or a kerb-high surface like the plaza) where a body of
@@ -552,16 +608,17 @@ const STREET = (() => {
   const barrelSpots = [[240, G, -3], [700, 320, 0], [1020, G, 4], [1480, G, 2], [1990, G, -4], [1250, 175, -11], [2230, G, 3]]
     .map(([x, y, z]) => ({ x: X(x), y: H(y), z }));
 
-  // static lights for the bake, and the glowing shapes that show where they come from
-  const lights = [], emitters = [];
+  // static lights for the bake, and the glowing shapes that show where they come from; lamps (props.js
+  // cuts them down) and fire barrels collide
+  const lights = [], emitters = [], lamps = [], round = [];
   for (const x of [330, 760, 1240, 1600, 2010, 2290]) {
-    const buzz = x === 1600;
-    emitters.push({ min: { x: X(x) - 0.1, y: 0, z: -6.4 }, max: { x: X(x) + 0.1, y: 5.6, z: -6.2 }, color: '#26222c' });
-    emitters.push({ min: { x: X(x) - 0.45, y: 5.45, z: -6.6 }, max: { x: X(x) + 0.45, y: 5.65, z: -5.6 }, color: '#ffd8a0', glow: true, lamp: true, buzz });
-    lights.push({ x: X(x), y: 5.2, z: -6.0, color: '#ffb060', intensity: 2.4, range: 17, street: true, group: buzz ? 'buzz' : 'lamp' });
+    const buzz = x === 1600, light = { x: X(x), y: 5.2, z: -6.2, color: '#ffb060', intensity: 2.4, range: 17, street: true, group: buzz ? 'buzz' : 'lamp' };
+    lights.push(light);
+    lamps.push({ x: X(x), z: -6.3, y0: 0, buzz, light });
   }
   for (const [x, top, z] of [[140, G, 4.5], [940, G, 5], [1700, G, 4], [1200, 175, -11], [2160, G, 5]]) {
     const y = H(top);
+    round.push({ kind: 'fire', x: X(x), z, y0: y, r: 0.36, h: 1.05 });
     emitters.push({ min: { x: X(x) - 0.35, y, z: z - 0.35 }, max: { x: X(x) + 0.35, y: y + 0.9, z: z + 0.35 }, color: '#3a2a26' });
     emitters.push({ min: { x: X(x) - 0.3, y: y + 0.9, z: z - 0.3 }, max: { x: X(x) + 0.3, y: y + 1.05, z: z + 0.3 }, color: '#ffb040', glow: true, fire: true });
     lights.push({ x: X(x), y: y + 1.3, z, color: '#ff7a2a', intensity: 2.2, range: 12, group: 'fire' });
@@ -571,12 +628,13 @@ const STREET = (() => {
     emitters.push({ min: { x: X(x) - w / 2, y: cy - h / 2, z: BACK }, max: { x: X(x) + w / 2, y: cy + h / 2, z: BACK + 0.12 }, color, glow: true, buzz: true });
     lights.push({ x: X(x), y: cy, z: BACK + 0.8, color, intensity: 1.8, range: 11, group: 'buzz' });
   }
+  for (const x of [600, 1500, 2100]) round.push({ kind: 'bin', x: X(x), z: -6.4, y0: 0, r: 0.34, h: 1.0 });
   // clearance rules (feel-check.js): the street, and the alleys between the back-row blocks
   const row = boxes.filter((b) => b.kind === 'building').sort((a, b) => a.min.x - b.min.x);
   const alleys = [];
   for (let i = 1; i < row.length; i++) alleys.push({ min: { x: row[i - 1].max.x, z: -15 }, max: { x: row[i].min.x, z: BACK } });
   return {
-    name: 'The 2D Street', boxes, groundY: 0, emitters, lights,
+    name: 'The 2D Street', boxes, groundY: 0, emitters, lights, lamps, round,
     ambient: [0.022, 0.018, 0.032], sky: [0.05, 0.04, 0.075],
     bounds: { minX: L, maxX: R, minZ: -15, maxZ: FRONT },
     playerStart: { x: X(1200), y: 0, z: 0, yaw: -Math.PI / 2 },
@@ -593,7 +651,7 @@ const STREET = (() => {
 // ring of facades too tall to climb. Clearance rules: streets 18 m wide, 5 m under anything you walk
 // under, alleys 6 m, no way into a building.
 const CROSSROADS = (() => {
-  const boxes = [], lights = [], emitters = [];
+  const boxes = [], lights = [], emitters = [], lamps = [], round = [];
   const B = (x0, y0, z0, x1, y1, z1, style, o = {}) => {
     const b = Object.assign({ min: { x: Math.min(x0, x1), y: y0, z: Math.min(z0, z1) }, max: { x: Math.max(x0, x1), y: y1, z: Math.max(z0, z1) }, style }, o);
     boxes.push(b);
@@ -613,14 +671,16 @@ const CROSSROADS = (() => {
   const FOOT = { A: [10, 20, 10, 20], B: [26, 35, 9, 20], C: [9, 20, 26, 35], D: [26, 35, 26, 35] };
   // fire escapes: which face (axis and whether it faces toward or away from the centre) and where along it
   const FIRE = { A: ['z', -1, 14, 17], B: ['x', -1, 12, 15], C: ['z', -1, 12, 15], D: ['x', -1, 29, 32] };
+  // the south-east block is a construction site instead (below)
   const QUADS = [
-    { sx: 1, sz: 1, h: { A: 6, B: 12, C: 9, D: 16 }, st: { A: 'shop', B: 'brick', C: 'panel', D: 'concrete' } },
+    { sx: 1, sz: 1, site: true },
     { sx: -1, sz: 1, h: { A: 7, B: 9, C: 9, D: 14 }, st: { A: 'shop2', B: 'concrete', C: 'brick2', D: 'panel' } },
     { sx: -1, sz: -1, h: { A: 6, B: 9, C: 12, D: 18 }, st: { A: 'shop', B: 'panel', C: 'brick', D: 'brick2' } },
     { sx: 1, sz: -1, h: { A: 7, B: 7, C: 12, D: 15 }, st: { A: 'shop2', B: 'brick2', C: 'concrete', D: 'brick' } },
   ];
   const roofs = [];
   for (const q of QUADS) {
+    if (q.site) continue;
     for (const k of ['A', 'B', 'C', 'D']) {
       const [a0, a1, b0, b1] = FOOT[k], h = q.h[k];
       const b = B(q.sx * a0, 0, q.sz * b0, q.sx * a1, h, q.sz * b1, q.st[k], { kind: 'building', top: 'roof' });
@@ -654,6 +714,88 @@ const CROSSROADS = (() => {
   B(-31.5, 8.6, -9, -29, 9, 9, 'metal', { kind: 'girder', plat: true });
   B(20, 6.6, -19, 26, 7, -16.5, 'metal', { kind: 'girder', plat: true });
 
+  // ---------- the construction site, x 9-35, z 9-35 ----------
+  // Plywood hoarding along both streets with three gates; a tower crane by the plaza corner whose jib runs out
+  // over the east street (tether to it: def.anchors); a three-storey steel frame in the south-west of the
+  // block; scaffolding carrying the overpass on into the site and a stack of materials stepping down from it;
+  // an excavator, a dirt pile, beams, pipes, bricks, a mixer, site offices, port-a-potties and floodlights.
+  const site = (x0, y0, z0, x1, y1, z1, style, o = {}) => B(x0, y0, z0, x1, y1, z1, style, Object.assign({ kind: 'site' }, o));
+  const furniture = [];
+  for (const [a0, a1] of [[9.3, 16], [21, 27], [33, 35]]) site(a0, 0, 9.3, a1, 2.4, 9.5, 'hoarding', { kind: 'fence' });
+  for (const [a0, a1] of [[9.5, 16], [21, 35]]) site(9.3, 0, a0, 9.5, 2.4, a1, 'hoarding', { kind: 'fence' });
+  // the tower crane: footing, mast, turntable, cab, the jib north over the street, counter-jib and weights
+  const CX = 12.5, CZ = 12.5, JY = 25;
+  site(10.8, 0, 10.8, 14.2, 0.5, 14.2, 'slab');
+  site(CX - 0.9, 0.5, CZ - 0.9, CX + 0.9, 24, CZ + 0.9, 'crane', { kind: 'crane' });
+  site(CX - 1.5, 24, CZ - 1.5, CX + 1.5, JY, CZ + 1.5, 'yellow', { kind: 'crane' });
+  site(CX + 1.5, 24, CZ - 0.9, CX + 3.1, 26.2, CZ + 1.1, 'cab', { kind: 'crane' });
+  site(CX - 0.3, JY, CZ - 0.3, CX + 0.3, 31, CZ + 0.3, 'crane', { kind: 'crane' });
+  site(CX - 0.7, JY, -16, CX + 0.7, JY + 1.2, CZ - 1.5, 'crane', { kind: 'crane', plat: true });
+  site(CX - 0.8, JY, CZ + 1.5, CX + 0.8, JY + 1, 22, 'crane', { kind: 'crane', plat: true });
+  site(CX - 1.1, 22.6, 19.4, CX + 1.1, JY, 22, 'slab', { kind: 'crane' });
+  // the trolley out over the street, its hook, and a bundle of beams hanging from it
+  const HZ = -2;
+  site(CX - 0.6, JY - 0.5, HZ - 0.6, CX + 0.6, JY, HZ + 0.6, 'yellow', { kind: 'crane' });
+  site(CX - 0.4, 11.4, HZ - 0.4, CX + 0.4, 12.4, HZ + 0.4, 'yellow', { kind: 'crane' });
+  site(CX - 2, 10.2, HZ - 0.6, CX + 2, 10.8, HZ + 0.6, 'steel', { kind: 'crane', plat: true });
+  // pendant lines from the apex to both ends, the hoist rope, the load's slings
+  furniture.push({ shape: 'line', a: [CX, 31, CZ], b: [CX, JY + 1.2, -15.5], r: 0.05, color: '#8a8478' }, { shape: 'line', a: [CX, 31, CZ], b: [CX, JY + 1, 21.5], r: 0.05, color: '#8a8478' });
+  furniture.push({ shape: 'line', a: [CX, JY - 0.5, HZ], b: [CX, 12.4, HZ], r: 0.03, color: '#6a645c' });
+  for (const sx of [-1.4, 1.4]) furniture.push({ shape: 'line', a: [CX, 11.4, HZ], b: [CX + sx, 10.8, HZ], r: 0.03, color: '#6a645c' });
+  // the steel frame: columns, floors at 5.4, 10.8 and 16.2 m (5.1 m clear under each), bare beams where the
+  // second floor isn't poured yet, rebar out of the top columns
+  for (const x of [10, 15, 20]) for (const z of [26.2, 30.5, 34.6]) site(x - 0.2, 0, z - 0.2, x + 0.2, x === 20 ? 10.8 : x === 15 ? 12.2 : 17.6, z + 0.2, 'steel', { kind: 'frame' });
+  site(9.8, 5.1, 29.5, 20.2, 5.4, 34.8, 'slab', { kind: 'frame', plat: true });
+  site(9.8, 5.1, 26, 16, 5.4, 29.5, 'slab', { kind: 'frame', plat: true });
+  site(9.8, 10.5, 26, 15.6, 10.8, 34.8, 'slab', { kind: 'frame', plat: true });
+  site(9.8, 15.9, 30.2, 13.2, 16.2, 34.8, 'slab', { kind: 'frame', plat: true });
+  for (const [x0, z0, x1, z1] of [[15.6, 26, 20.2, 26.3], [15.6, 34.5, 20.2, 34.8], [19.9, 26.3, 20.2, 34.5]]) site(x0, 10.5, z0, x1, 10.8, z1, 'steel', { kind: 'frame' });
+  for (const z of [30.6, 34.4]) for (const x of [10.1, 12.9]) furniture.push({ shape: 'line', a: [x, 16.2, z], b: [x + 0.1, 17.6, z], r: 0.025, color: '#7a4a30' });
+  // scaffolding carrying the overpass into the site, and a stack of timber and blocks stepping down from it
+  site(27, 6.7, 9, 33, 7, 12.4, 'metal', { kind: 'scaffold', plat: true });
+  for (const [x, z] of [[27.1, 9.7], [32.9, 9.7], [27.1, 12.3], [32.9, 12.3]]) round.push({ kind: 'pole', x, z, y0: 0, r: 0.06, h: 6.7 });
+  site(27, 0, 12.4, 33, 3.6, 15.6, 'timber', { kind: 'stack' });
+  // the excavator: tracks, body, cab, the boom reaching out to its bucket
+  site(16.5, 0, 13.6, 21, 0.9, 16.4, 'tread', { kind: 'machine' });
+  site(17, 0.9, 13.8, 20.4, 2.2, 16.2, 'yellow', { kind: 'machine' });
+  site(17.1, 2.2, 14, 18.7, 3.5, 15.6, 'cab', { kind: 'machine' });
+  site(23.6, 0, 14.4, 24.8, 1.2, 15.6, 'yellow', { kind: 'machine' });
+  furniture.push({ shape: 'line', a: [20.2, 2, 15], b: [22.9, 4.4, 15], r: 0.26, color: '#c8a020' }, { shape: 'line', a: [22.9, 4.4, 15], b: [24.2, 1.2, 15], r: 0.2, color: '#c8a020' });
+  // a dirt pile in three steps, beams, pipes, pallets of bricks
+  site(22, 0, 16.8, 28, 0.8, 21.8, 'dirt', { kind: 'pile' });
+  site(23, 0.8, 17.8, 27, 1.6, 20.8, 'dirt', { kind: 'pile' });
+  site(24, 1.6, 18.8, 26, 2.4, 19.8, 'dirt', { kind: 'pile' });
+  site(13, 0, 20.6, 19.5, 0.9, 21.8, 'steel', { kind: 'prop' });
+  site(13.5, 0.9, 20.8, 19, 1.3, 21.6, 'steel', { kind: 'prop' });
+  site(13, 0, 23.4, 19, 0.75, 24.6, 'metal', { kind: 'prop', hidden: true });
+  for (const z of [23.7, 24.3]) furniture.push({ shape: 'cyl', x: 13, y: 0.3, z, r: 0.3, h: 6, axis: 'x', color: '#5a5e68' });
+  furniture.push({ shape: 'cyl', x: 13, y: 0.75 - 0.3 + 0.3, z: 24, r: 0.25, h: 6, axis: 'x', color: '#4a4e58' });
+  for (const [x0, z0, y0] of [[22.5, 10.4, 0], [23.8, 10.4, 0], [25.1, 10.4, 0], [23.1, 10.4, 1]]) site(x0, y0, z0, x0 + 1.2, y0 + 1, z0 + 1.2, 'bricks', { kind: 'prop' });
+  // a mixer, a generator, a dumpster, two port-a-potties, the site offices stacked by the back wall
+  round.push({ kind: 'mixer', x: 21.4, z: 11.8, y0: 0, r: 0.8, h: 1.8 });
+  furniture.push({ shape: 'line', a: [20.9, 0.95, 11.8], b: [22, 1.75, 11.8], r: 0.6, color: '#d06a20' }, { shape: 'box', x: 21.4, y: 0, z: 11.8, w: 1.2, d: 1.0, h: 0.75, color: '#5a5048' });
+  site(33, 0, 11.6, 34.6, 1.3, 13.2, 'yellow', { kind: 'prop' });
+  site(29.6, 0, 17, 32.6, 1.5, 18.8, 'dumpster', { kind: 'prop' });
+  for (const z0 of [22, 23.5]) site(33.4, 0, z0, 34.7, 2.4, z0 + 1.3, 'potty', { kind: 'prop' });
+  site(25.5, 0, 32.4, 31.5, 2.6, 34.9, 'container', { kind: 'container' });
+  site(26, 2.6, 32.4, 32, 5.2, 34.9, 'container', { kind: 'container' });
+  // traffic cones at the gates, out in the street
+  for (const [x, z] of [[8.6, 16.4], [8.6, 20.6], [16.4, 8.6], [20.6, 8.6], [27.4, 8.6], [32.6, 8.6]]) round.push({ kind: 'cone', x, z, y0: 0, r: 0.18, h: 0.6 });
+  // floodlight towers: cold white light over the site
+  for (const [x, z] of [[20.6, 10.2], [33.8, 29.5]]) {
+    round.push({ kind: 'pole', x, z, y0: 0, r: 0.12, h: 8.4 });
+    emitters.push({ min: { x: x - 0.6, y: 8.2, z: z - 0.25 }, max: { x: x + 0.6, y: 8.8, z: z + 0.25 }, color: '#e8f0ff', glow: true, lamp: true });
+    lights.push({ x, y: 7.8, z, color: '#c8d8ff', intensity: 3.4, range: 25, street: true, group: 'lamp' });
+  }
+  // red warning lights on the crane's apex and jib tip
+  for (const [x, y, z] of [[CX, 31.2, CZ], [CX, JY + 1.4, -15.8]]) emitters.push({ min: { x: x - 0.15, y: y - 0.15, z: z - 0.15 }, max: { x: x + 0.15, y: y + 0.15, z: z + 0.15 }, color: '#ff2030', glow: true, blink: true });
+  // tether points: under the jib, its tip, and the hook; small amber lights mark them
+  const anchors = [];
+  for (const z of [6, 0, -6, -12, -15.6]) anchors.push({ x: CX, y: JY - 0.35, z, top: JY + 1.2, w: 0.7, kind: 'jib' });
+  // the load on the hook: a big target, landing on the beams beside the hook
+  anchors.push({ x: CX, y: 10.5, z: HZ, top: 10.8, w: 2, ar: 2.2, landDx: 1.3, kind: 'hook' });
+  for (const A of anchors) if (A.kind === 'jib') emitters.push({ min: { x: A.x - 0.12, y: JY - 0.12, z: A.z - 0.12 }, max: { x: A.x + 0.12, y: JY, z: A.z + 0.12 }, color: '#ffb040', glow: true });
+
   // wrecked cars, vaulted over at a run: body and roof
   const car = (x, z, alongX, y0 = 0) => {
     const [x1, z1] = alongX ? [x + 3.45, z + 1.8] : [x + 1.8, z + 3.45];
@@ -671,23 +813,27 @@ const CROSSROADS = (() => {
     cont(xf, 0, -9, xb, -3); cont(xf, 0, -2.6, xb, 3.4); cont(xf, 0, 3.8, xb, 9); cont(xf, 2.6, -2.6, xb, 3.4);
   }
 
-  // street lamps: the plaza's corners and staggered down each street; two of them failing
+  // street lamps: the plaza's corners and staggered down each street; two of them failing. props.js cuts them.
   const lamp = (x, z, y0 = 0, buzz = false) => {
-    emitters.push({ min: { x: x - 0.1, y: y0, z: z - 0.1 }, max: { x: x + 0.1, y: y0 + 5.6, z: z + 0.1 }, color: '#26222c' });
-    emitters.push({ min: { x: x - 0.45, y: y0 + 5.45, z: z - 0.45 }, max: { x: x + 0.45, y: y0 + 5.65, z: z + 0.45 }, color: '#ffd8a0', glow: true, lamp: true, buzz });
-    lights.push({ x, y: y0 + 5.2, z, color: '#ffb060', intensity: 2.4, range: 17, street: true, group: buzz ? 'buzz' : 'lamp' });
+    const light = { x, y: y0 + 5.2, z, color: '#ffb060', intensity: 2.4, range: 17, street: true, group: buzz ? 'buzz' : 'lamp' };
+    lights.push(light);
+    lamps.push({ x, z, y0, buzz, light });
   };
   for (const [x, z] of [[8.6, 8.6], [-8.6, 8.6], [-8.6, -8.6], [8.6, -8.6]]) lamp(x, z, 0.15);
   for (const [x, z, b] of [[15, -8.2], [29, 8.2, true], [-15, 8.2], [-29, -8.2], [8.2, 15], [-8.2, 29], [-8.2, -15, true], [8.2, -29]]) lamp(x, z, 0, !!b);
   // barrel fires in the alley crossings and by two barricades
   for (const [x, z] of [[23, 23], [-23, 23], [-23, -23], [23, -23], [6, -30.5], [-30.5, 6]]) {
+    round.push({ kind: 'fire', x, z, y0: 0, r: 0.36, h: 1.05 });
     emitters.push({ min: { x: x - 0.35, y: 0, z: z - 0.35 }, max: { x: x + 0.35, y: 0.9, z: z + 0.35 }, color: '#3a2a26' });
     emitters.push({ min: { x: x - 0.3, y: 0.9, z: z - 0.3 }, max: { x: x + 0.3, y: 1.05, z: z + 0.3 }, color: '#ffb040', glow: true, fire: true });
     lights.push({ x, y: 1.3, z, color: '#ff7a2a', intensity: 2.2, range: 12, group: 'fire' });
   }
+  // street furniture at the kerbs: bins and hydrants, round colliders drawn by gfx.js
+  for (const [x, z] of [[8.3, 18.5], [-8.3, -18.5], [18.5, -8.3], [-18.5, 8.3], [-8.3, 21.5], [21.5, 8.3]]) round.push({ kind: 'bin', x, z, y0: 0, r: 0.34, h: 1.0 });
+  for (const [x, z] of [[8.4, -12], [-8.4, 12], [-12, -8.4], [12, 8.4]]) round.push({ kind: 'hydrant', x, z, y0: 0, r: 0.17, h: 0.78 });
   // neon signs on faces toward the plaza and streets: (x, y, z, normal axis, normal sign, text, colour, vertical)
   for (const [x, y, z, ax, sg, text, color, vert] of [
-    [10, 4.2, 14, 'x', -1, 'HOTEL', '#ff3ad0', true], [-30, 5.5, 9, 'z', -1, 'RAMEN', '#3af0ff'], [9, 5, -30, 'x', -1, 'BAR', '#7dff5a'],
+    [9.3, 1.7, 12.6, 'x', -1, 'KEEP OUT', '#ffb03a'], [-30, 5.5, 9, 'z', -1, 'RAMEN', '#3af0ff'], [9, 5, -30, 'x', -1, 'BAR', '#7dff5a'],
     [-15, 3.6, -10, 'z', 1, 'OPEN', '#ff5a5a'], [15, 3.6, -10, 'z', 1, '24H', '#ffd03a'], [-10, 4.2, 15, 'x', 1, 'NOODLE', '#ff9a3a', true],
     [-9, 6, -30, 'x', 1, 'PAWN', '#5a8aff'],
   ]) {
@@ -706,11 +852,11 @@ const CROSSROADS = (() => {
   }
   const ground = [[5, -29], [-5, -29], [5, 29], [-5, 29], [29, -5], [28.5, 7], [-29, 5], [-29, -5], [23, 32], [-23, 32], [23, -32], [-23, -32], [32, 23], [-32, 23], [32, -23], [-32, -23]]
     .map(([x, z]) => ({ x, y: 0, z }));
-  const high = roofs.filter((b) => b.max.y <= 12).map((b) => ({ x: b.min.x + 2, y: b.max.y, z: b.min.z + 2 }));
-  const barrelSpots = [[6.5, 0.15, -6.5], [-6.5, 0.15, 6.5], [16, 0, -3], [-16, 0, 3], [3, 0, 22], [-3, 0, -22], [15, 6, 15], [30, 7, -4]]
+  const high = roofs.filter((b) => b.max.y <= 12).map((b) => ({ x: b.min.x + 2, y: b.max.y, z: b.min.z + 2 })).concat([{ x: 12, y: 5.4, z: 33 }, { x: 11, y: 10.8, z: 33 }]);
+  const barrelSpots = [[6.5, 0.15, -6.5], [-6.5, 0.15, 6.5], [16, 0, -3], [-16, 0, 3], [3, 0, 22], [-3, 0, -22], [12, 5.4, 32], [30, 7, -4]]
     .map(([x, y, z]) => ({ x, y, z }));
   return {
-    name: 'The Crossroads', boxes, groundY: 0, emitters, lights,
+    name: 'The Crossroads', boxes, groundY: 0, emitters, lights, lamps, round, furniture, anchors,
     ambient: [0.022, 0.018, 0.032], sky: [0.05, 0.04, 0.075],
     bounds: { minX: -E, maxX: E, minZ: -E, maxZ: E },
     playerStart: { x: 0, y: 0.15, z: 6, yaw: 0 },

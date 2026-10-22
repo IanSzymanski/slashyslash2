@@ -272,11 +272,21 @@ async function run(browser, file, errors) {
     T.press('Mouse2'); T.frame(60); T.release('Mouse2');
     ok(e.hp <= 500 - 22 && Math.abs(p.shield - sh0) < 0.01, `a zip strike hits (${500 - e.hp}) and refunds the tether`);
 
-    // plunge from the air onto a scrapper below
+    // plunge: holding attack in the air drives down onto a scrapper below; a tap in the air is a slash
     p = T.fresh(); e = T.enemy('scrapper', 0.3, 0, { hp: 500, frozen: true });
     p.vel.y = 22; p.onGround = false; T.frame(15);
-    T.press('KeyC'); T.tap('Mouse0'); T.frame(60); T.release('KeyC');
-    ok(e.hp < 475, `a plunge lands a shockwave on a scrapper below (${500 - e.hp})`);
+    T.press('Mouse0'); T.frame(16); const plunged = !!p.plunge; T.release('Mouse0'); T.frame(50);
+    ok(plunged && e.hp < 475, `holding attack in the air plunges, landing a shockwave on a scrapper below (${500 - e.hp})`);
+    p = T.fresh(); p.vel.y = 22; p.onGround = false; T.frame(10);
+    T.press('KeyC'); T.tap('Mouse0'); T.frame(4); T.release('KeyC');
+    ok(!p.plunge && !!p.attack, 'crouch and a tap in the air slashes instead of plunging');
+    T.frame(40);
+
+    // slashes follow the aim up and down: a drone well above, a crawler below a ledge
+    p = T.fresh(); e = T.enemy('drone', 1.6, 0, { hp: 500, frozen: true }); e.pos.y = p.pos.y + 4.4; e.flying = true; T.frame(1);
+    p.vel.y = 9; p.onGround = false; T.frame(6); T.aimAt(e.center()); T.tap('Mouse0'); T.frame(10);
+    ok(e.hp < 500 && p.attack && p.attack.pa > 0.6, `a slash aimed up reaches a drone above (${500 - e.hp}, pitched ${p.attack ? p.attack.pa.toFixed(2) : '-'} rad)`);
+    T.frame(30);
 
     // slide attacks: a light one throws rubble and cuts, a heavy one launches you and the scrapper
     p = T.fresh(); T.face(p.pos.x + 10, p.pos.z); T.press('KeyW'); T.frame(30); T.press('KeyC'); T.frame(3);
@@ -311,12 +321,23 @@ async function run(browser, file, errors) {
     const bullet = p.bulletT > 0 && p.vel.y > 8;
     T.release('KeyC'); T.release('KeyW'); T.frame(40);
     ok(bullet && Math.hypot(p.pos.x - bx, p.pos.z - bz) > 8, `crouch-slide plus jump bullet-jumps (${Math.hypot(p.pos.x - bx, p.pos.z - bz).toFixed(1)} m)`);
+    // wall cling: jumping into a wall digs a hand in and holds a second, then slides; jumping kicks off
     p = T.fresh(); p.pos.z = p.prev.z = -7 + 0.42; Camera.yaw = 0; T.frame(2);
-    T.press('KeyW'); T.press('Space'); T.frame(55);
-    const wallSlid = p.wallSliding;
-    T.release('Space'); T.frame(1); T.press('Space'); T.frame(2);
-    ok(wallSlid && p.vel.z > 10 && p.vel.y > 15, `pushing into a wall slides down it, and jumping kicks off (out ${p.vel.z.toFixed(1)}, up ${p.vel.y.toFixed(1)})`);
+    T.press('KeyW'); T.tap('Space');
+    for (let i = 0; i < 50 && !p.cling; i++) T.frame(1);
+    const cy0 = p.pos.y; T.frame(45);
+    const clungStill = !!p.cling && Math.abs(p.pos.y - cy0) < 0.01; T.frame(40);
+    const clingSlid = !!p.cling && p.cling.sliding && p.pos.y < cy0 - 0.2 && FX.decals.length > 0;
+    T.press('Space'); T.frame(2);
+    ok(clungStill && clingSlid && p.vel.z > 10 && p.vel.y > 15, `a wall cling holds, then slides down scoring the wall, and a jump kicks off (out ${p.vel.z.toFixed(1)}, up ${p.vel.y.toFixed(1)})`);
     T.release('KeyW'); T.release('Space');
+    // skid turn: reversing at a sprint drops a hand to the street, carving a mark, then pushes off the other way
+    p = T.fresh(); Camera.yaw = yawOf(1, 0); T.press('KeyW'); T.frame(45); T.release('KeyW'); T.press('KeyS');
+    const marks0 = FX.decals.length; let onHand = false;
+    for (let i = 0; i < 10; i++) { T.frame(1); onHand = onHand || !!p.skid; }
+    T.frame(16);
+    ok(onHand && FX.decals.length > marks0 && p.vel.x < -6, `a reversal at a sprint skids on the hand, leaves marks and pushes off (${p.vel.x.toFixed(1)} m/s back)`);
+    T.release('KeyS');
 
     // a dash leaves afterimages
     p = T.fresh(); T.tap('ShiftLeft'); T.frame(6);
@@ -401,7 +422,7 @@ async function run(browser, file, errors) {
     ok(e.hp === 999, 'a crawler\'s armour shrugs off a slash');
     p = T.fresh(); e = T.enemy('crawler', 0.3, 0, { hp: 999, frozen: true });
     p.vel.y = 22; p.onGround = false; T.frame(15);
-    T.press('KeyC'); T.tap('Mouse0'); T.frame(60); T.release('KeyC');
+    T.press('Mouse0'); T.frame(16); T.release('Mouse0'); T.frame(50);
     ok(e.crackT > 0 && e.hp < 999, `a plunge cracks its armour (${999 - e.hp})`);
     const hpc = e.hp; e.stun = 0; e.pos.x = p.pos.x + 2.2; e.pos.z = p.pos.z; T.face(e.pos.x, e.pos.z); T.frame(20);
     T.tap('Mouse0'); T.frame(16);
@@ -485,6 +506,48 @@ async function run(browser, file, errors) {
     const y0 = Array.from(Views.rain.geometry.attributes.position.array.slice(0, 30)); T.frame(3);
     const moved = Views.rain.geometry.attributes.position.array.slice(0, 30).some((v, i) => Math.abs(v - y0[i]) > 1e-4);
     ok(Views.rain.visible && Views.ash.visible && moved, 'rain and ash fall');
+    // props: a lamp pole stops you (you slide round it); a slash cuts it, it falls and smashes, its light is
+    // gone and it no longer collides; a barrel blast takes another down; a new run stands them up again
+    Game.toMenu(); UI.act('test'); T.frame(2);
+    p = Game.player;
+    const lampA = World.def.lamps.find((l) => Math.abs(l.x - 15) < 0.1), lampB = World.def.lamps.find((l) => Math.abs(l.x + 15) < 0.1);
+    p.pos.x = p.prev.x = lampA.x - 4; p.pos.z = p.prev.z = lampA.z; p.pos.y = p.prev.y = 0; Camera.yaw = yawOf(1, 0); T.frame(1);
+    let minD = 9;
+    T.press('KeyW'); for (let i = 0; i < 40; i++) { T.frame(1); minD = Math.min(minD, Math.hypot(p.pos.x - lampA.x, p.pos.z - lampA.z)); } T.release('KeyW');
+    ok(minD > 0.16 + p.r * 0.9 - 0.02, `running into a lamp post stops at it (closest ${minD.toFixed(2)} m)`);
+    const ul = { x: lampA.x, y: 1, z: lampA.z + 2 }, litL0 = World.lightAt(ul.x, ul.y, ul.z).reduce((a, b) => a + b, 0);
+    p.pos.x = p.prev.x = lampA.x - 1.6; p.pos.z = p.prev.z = lampA.z; T.face(lampA.x, lampA.z, -0.05);
+    T.tap('Mouse0'); T.frame(4);
+    const falling = lampA.state === 'falling'; T.frame(70);
+    const litL1 = World.lightAt(ul.x, ul.y, ul.z).reduce((a, b) => a + b, 0);
+    ok(falling && lampA.state === 'down' && !lampA.q.on && litL1 < litL0 * 0.6 && !World.roundHit(lampA.x, 0, lampA.z, 0.3, 1.8), `a slash cuts a lamp down: it falls, smashes, goes dark (light ${litL0.toFixed(2)} to ${litL1.toFixed(2)}) and stops colliding`);
+    const bar = new Barrel({ x: lampB.x + 1.2, y: 0, z: lampB.z }); Game.props.push(bar); T.frame(2);
+    bar.explode(); T.frame(80);
+    ok(lampB.state === 'down', 'a barrel blast beside a lamp brings it down');
+    // a barrel collides: running into one shoves it rather than passing through
+    const brl = new Barrel({ x: p.pos.x + 3, y: 0, z: p.pos.z }); Game.props.push(brl); Camera.yaw = yawOf(1, 0); T.frame(2);
+    const bx0 = brl.pos.x; let overlapB = false;
+    T.press('KeyW'); for (let i = 0; i < 30; i++) { T.frame(1); overlapB = overlapB || Math.hypot(p.pos.x - brl.pos.x, p.pos.z - brl.pos.z) < brl.r * 0.9; } T.release('KeyW');
+    ok(!overlapB && brl.pos.x > bx0 + 0.3, `running into a barrel shoves it (${(brl.pos.x - bx0).toFixed(1)} m) and never passes through`);
+    Game.toMenu(); UI.act('test'); T.frame(2);
+    ok(lampA.state === 'up' && lampA.q.on && !lampA.light.off && Gfx.lampMats.length >= World.def.lamps.length, 'a new run stands every lamp up again');
+
+    // the construction site's crane: holding the tether on a jib point hauls you up onto the jib; a tap flings
+    // you up and over onto it
+    for (const [hold, label, kind] of [[60, 'holding the tether on the crane hauls you up onto the jib', 'jib'], [2, 'a tap of the tether flings you up onto the crane', 'jib'], [60, 'holding the tether on the crane\'s hook hauls you onto it', 'hook']]) {
+      Game.toMenu(); UI.act('test'); T.frame(2);
+      p = Game.player; S.gameplay.invincible = true;
+      const A = Arena.anchors().find((q) => q.kind === kind && (kind === 'hook' || Math.abs(q.z) < 0.1));
+      p.pos.x = p.prev.x = 4; p.pos.z = p.prev.z = 0; p.pos.y = p.prev.y = 0.15; T.frame(2);
+      T.aimAt(A);
+      T.press('Mouse2'); T.frame(hold); T.release('Mouse2');
+      // wait until it settles somewhere above the street (the haul may already be done)
+      let top = 0;
+      for (let i = 0; i < 220; i++) { if (p.onGround && !p.mantle && p.pos.y > 1) { top = p.pos.y; break; } T.frame(1); }
+      ok(Math.abs(top - (A.top || 0)) < 0.05, `${label} (landed at ${top.toFixed(2)} m, top ${A.top} m)`);
+    }
+    S.gameplay.invincible = false;
+
     // Retro renders at the 2D game's 480x270
     S.visuals.retro = true; Render.resize();
     const gl = Gfx.renderer.getContext(), retro = [gl.drawingBufferWidth, gl.drawingBufferHeight];

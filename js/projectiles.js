@@ -192,6 +192,7 @@ class PulseGrenade {
     if (this.dead) return;
     this.dead = true;
     const R = this.R, P = Game.player, owner = this.owner, c = { x: this.pos.x, y: this.pos.y, z: this.pos.z };
+    if (!o.blocked) Props.blast(c, R * 0.8);
     if (o.blocked) {
       FX.ring(c, 0.3, 2.7, 0.3, { c: '#ffd070', flat: false });
       FX.sparks(c, 20, null, TAU, 5.5, 20, { c0: '#ffffff', c1: '#ffe080', c2: '#145e6a' });
@@ -244,6 +245,14 @@ class Barrel {
     this.r = 0.45; this.h = 1.27; this.grabR = 0.82;
     this.fuse = -1; this.dead = false; this.thrown = 0; this.tethered = false; this.isEnemy = false; this.heavy = false;
     this.onGround = false; this.towed = false; this.col = null; this.yaw = rand(0, TAU); this.spin = 0;
+    // its round collider: bodies slide round it, can stand on it, and shove it when they run into it
+    this.q = { x: pos.x, z: pos.z, r: 0.42, y0: pos.y, y1: pos.y + this.h, on: true, top: true, owner: this };
+  }
+  bump(b, vn, ux, uz) {
+    if (vn < 2 || this.towed) return;
+    const k = Math.min(vn, 12) * 0.55;
+    this.vel.x -= ux * k; this.vel.z -= uz * k; this.vel.y = Math.max(this.vel.y, 1.5); this.spin = 6;
+    if (vn > 5) Sound.play('barrelHit', {}, this.center());
   }
   center() { return { x: this.pos.x, y: this.pos.y + this.h / 2, z: this.pos.z }; }
   hit(dmg, o = {}) {
@@ -280,6 +289,8 @@ class Barrel {
     const B = Arena.bounds();
     this.pos.x = clamp(this.pos.x, B.minX + 1, B.maxX - 1); this.pos.z = clamp(this.pos.z, B.minZ + 1, B.maxZ - 1);
     if (this.pos.y < -20) { this.dead = true; return; }
+    const Q = this.q;
+    Q.x = this.pos.x; Q.z = this.pos.z; Q.y0 = this.pos.y; Q.y1 = this.pos.y + this.h; Q.on = !this.towed && this.thrown <= 0;
     if (this.thrown > 0) {
       this.thrown -= dt;
       if (Math.hypot(this.vel.x, this.vel.y, this.vel.z) > 10.9) {
@@ -296,6 +307,7 @@ class Barrel {
     if (this.dead) return;
     this.dead = true;
     const c = this.center(), R = 5.3;
+    Props.blast(c, R * 0.8);
     for (const e of Game.enemies) {
       if (e.dead || e.spawning) continue;
       const ec = e.center(), d = dist3(c, ec);

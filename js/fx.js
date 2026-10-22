@@ -210,22 +210,41 @@ const FX = {
     return g;
   },
   light(pos, color, intensity, distance, dur = 0.2) { this.lights.push({ x: pos.x, y: pos.y, z: pos.z, color, intensity, distance, t: 0, dur }); },
-  // A mark on the ground where it lies under pos: 'gouge' (o.len metres along o.yaw), 'crack' (o.len across)
-  // or 'scorch' (o.r radius). Marks start glowing hot, cool, and fade over their last second.
+  // A mark on the ground where it lies under pos: 'gouge' (o.len metres along o.yaw, o.w wide), 'crack'
+  // (o.len across) or 'scorch' (o.r radius). With o.wall (an outward normal) it's a gouge standing on a
+  // wall instead, o.len tall. Marks start glowing hot, cool, and fade over their last second.
   decal(kind, pos, o = {}) {
-    const g = World.groundAt(pos.x, pos.z, pos.y + 0.5);
+    const wall = o.wall;
+    const g = wall ? pos.y : World.groundAt(pos.x, pos.z, pos.y + 0.5);
     if (g === -Infinity || pos.y - g > 1) return;
     if (this.decals.length >= this.MAX_DECALS) this.drop(this.decals.shift());
     const d = Object.assign({ t: 0, dur: 6 }, o);
-    const m = new THREE.Mesh(this.decalGeo || (this.decalGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)), Gfx.decalMaterial(kind, { x: pos.x, y: g, z: pos.z }));
-    m.position.set(pos.x, g + 0.012, pos.z);
-    if (kind === 'gouge') { m.scale.set(0.7, 1, Math.abs(d.len || 2)); m.rotation.y = d.yaw || 0; }
-    else { const s = kind === 'scorch' ? (d.r || 1.5) * 2 : (d.len || 2.5); m.scale.set(s, 1, s); m.rotation.y = rand(0, TAU); }
+    const geo = wall ? this.wallGeo || (this.wallGeo = new THREE.PlaneGeometry(1, 1)) : this.decalGeo || (this.decalGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2));
+    const m = new THREE.Mesh(geo, Gfx.decalMaterial(kind, { x: pos.x + (wall ? wall.x * 0.3 : 0), y: g, z: pos.z + (wall ? wall.z * 0.3 : 0) }));
+    d.mesh = m; d.ownMat = true; d.y = g;
+    if (wall) { m.rotation.y = Math.atan2(wall.x, wall.z); this.stretchDecal(d, pos, pos); }
+    else if (kind === 'gouge') { m.position.set(pos.x, g + 0.012, pos.z); m.scale.set(d.w || 0.7, 1, Math.abs(d.len || 2)); m.rotation.y = d.yaw || 0; }
+    else { m.position.set(pos.x, g + 0.012, pos.z); const s = kind === 'scorch' ? (d.r || 1.5) * 2 : (d.len || 2.5); m.scale.set(s, 1, s); m.rotation.y = rand(0, TAU); }
     m.renderOrder = -1;
-    d.mesh = m; d.ownMat = true;
     this.group.add(m);
     this.decals.push(d);
     return d;
+  },
+  // Lays a gouge from a to b: along the ground, or down a wall for a wall mark. Keeps the mark hot while it grows.
+  stretchDecal(d, a, b) {
+    const m = d.mesh;
+    if (!m) return;
+    if (d.wall) {
+      const n = d.wall, top = Math.max(a.y, b.y), bot = Math.min(a.y, b.y), len = Math.max(0.25, top - bot);
+      m.position.set(a.x + n.x * 0.015, (top + bot) / 2, a.z + n.z * 0.015);
+      m.scale.set(d.w || 0.16, len, 1);
+    } else {
+      const dx = b.x - a.x, dz = b.z - a.z, len = Math.max(0.3, Math.hypot(dx, dz));
+      m.position.set((a.x + b.x) / 2, d.y + 0.012, (a.z + b.z) / 2);
+      if (Math.hypot(dx, dz) > 0.01) m.rotation.y = yawOf(dx, dz);
+      m.scale.set(d.w || 0.7, 1, len);
+    }
+    d.t = Math.min(d.t, 0.05);
   },
   // an afterimage of the player's current pose; render.js takes the snapshot
   ghost(color, dur, alpha) { if (this.ghosts.length < 24) this.ghosts.push({ color, dur, alpha, t: 0, slot: null }); },
@@ -264,6 +283,24 @@ const FX = {
       });
     }
   },
+  // Breaks an object into boxes: pieces [{ size: [w, h, d], at: [x, y, z] in obj's space, color }] thrown off
+  // with velocity kv plus some scatter, tumbling and settling like gibs.
+  shatter(obj, pieces, kv = { x: 0, y: 0, z: 0 }) {
+    obj.updateMatrixWorld(true);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3();
+    for (const pc of pieces) {
+      const key = pc.size.map((v) => Math.max(0.05, Math.round(v * 20) / 20)).join(',');
+      const geo = this.boxGeos.get(key) || this.boxGeos.set(key, new THREE.BoxGeometry(...key.split(',').map(Number))).get(key);
+      m.makeTranslation(pc.at[0], pc.at[1], pc.at[2]).premultiply(obj.matrixWorld);
+      m.decompose(p, q, sc);
+      const mesh = new THREE.Mesh(geo, this.gibMaterial(pc.color, !!pc.glow));
+      mesh.position.copy(p); mesh.quaternion.copy(q);
+      this.group.add(mesh);
+      const a = rand(0, TAU), out = rand(0.8, 2.6);
+      this.gibList.push({ mesh, t: 0, dur: rand(2.2, 3.2), vx: kv.x + Math.cos(a) * out, vy: kv.y + rand(1, 4), vz: kv.z + Math.sin(a) * out, ax: rand(-6, 6), ay: rand(-6, 6), az: rand(-6, 6), rest: false });
+    }
+  },
+  boxGeos: new Map(),
   gibMaterial(color, glow) {
     const k = color + (glow ? ':g' : '');
     let mat = this.gibMats.get(k);
@@ -395,16 +432,18 @@ const FX = {
   syncSwoosh(s, col) {
     let cx = s.x, cy = s.y, cz = s.z;
     if (s.follow) { const p = s.follow.rp || s.follow.pos; cx = p.x; cy = p.y + s.oy; cz = p.z; }
-    const fx = fwdX(s.yaw), fz = fwdZ(s.yaw), rx = Math.cos(s.yaw), rz = -Math.sin(s.yaw);
+    // forward pitched along the swing's aim, and the up tipped back with it (PlayerPose.arcDir's plane)
+    const pa = s.pitch || 0, cp = Math.cos(pa), sp = Math.sin(pa), yx = fwdX(s.yaw), yz = fwdZ(s.yaw);
+    const fx = yx * cp, fy = sp, fz = yz * cp, rx = Math.cos(s.yaw), rz = -Math.sin(s.yaw);
     const ct = Math.cos(s.tilt), st = Math.sin(s.tilt);
     // sweep axis: the right vector tipped toward up by the tilt
-    const ax = rx * ct, ay = st, az = rz * ct;
+    const ax = rx * ct - yx * sp * st, ay = cp * st, az = rz * ct - yz * sp * st;
     const P = s.mesh.geometry.attributes.position, C = s.mesh.geometry.attributes.color;
     const k = Math.min(1, s.t / s.sweep), fade = s.t < s.sweep ? 1 : 1 - (s.t - s.sweep) / Math.max(0.01, s.dur - s.sweep);
     const r1 = s.r, r0 = s.r * (1 - s.thick);
     for (let i = 0; i <= s.N; i++) {
       const u = i / s.N, th = s.dir * (u - 0.5) * s.span, c = Math.cos(th), sn = Math.sin(th);
-      const dx = fx * c + ax * sn, dy = ay * sn, dz = fz * c + az * sn;
+      const dx = fx * c + ax * sn, dy = fy * c + ay * sn, dz = fz * c + az * sn;
       P.setXYZ(i * 2, cx + dx * r0, cy + dy * r0, cz + dz * r0);
       P.setXYZ(i * 2 + 1, cx + dx * r1, cy + dy * r1, cz + dz * r1);
       const lit = u <= k ? clamp(1 - (k - u) / Math.max(0.05, s.trail), 0, 1) * fade : 0;
