@@ -321,6 +321,19 @@ async function run(browser, file, errors) {
     p = T.fresh(); T.tap('ShiftLeft'); T.frame(6);
     ok(Views.ghosts.some((g) => g.mesh.visible), 'a dash leaves afterimages');
 
+    // movement: a sprint pitches the body well forward, and running at a wrecked car vaults it in stride
+    p = T.fresh(); Camera.yaw = yawOf(1, 0); T.press('KeyW'); T.frame(60);
+    ok(p._pose && p._pose.cat === 'run' && p._pose.lean > 0.6 && Controller.hspeed(p) > PC.SPRINT - 0.5, `a sprint leans the body forward (${p._pose ? p._pose.lean.toFixed(2) : '-'} rad at ${Controller.hspeed(p).toFixed(1)} m/s)`);
+    T.release('KeyW');
+    const midCar = World.boxes.filter((b) => b.kind === 'car' && b.min.y === 0).sort((a, b) => Math.abs(a.min.z - 0.5) - Math.abs(b.min.z - 0.5))[0];
+    p = T.fresh(); p.pos.x = p.prev.x = (midCar.min.x + midCar.max.x) / 2; p.pos.z = p.prev.z = midCar.max.z + 4; Camera.snap(p);
+    Camera.yaw = yawOf(0, -1); T.frame(2);
+    T.press('KeyW');
+    let vaulted = false, past = null;
+    for (let i = 0; i < 90 && !past; i++) { T.frame(1); vaulted = vaulted || !!p.vault; if (p.pos.z < midCar.min.z - 0.5 && p.onGround) past = Controller.hspeed(p); }
+    T.release('KeyW');
+    ok(vaulted && past > 8, `running at a wrecked car vaults over it without stopping (${past ? past.toFixed(1) + ' m/s after' : 'did not get past'})`);
+
     // ---------- Phase 3: navigation, the other enemies, the wave modes ----------
     // a scrapper on the street climbs onto the 5.9 m roof you stand on, and one on a roof comes down to you
     const roof = World.boxes.find((b) => b.kind === 'building' && Math.abs(b.max.y - 5.91) < 0.05);

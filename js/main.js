@@ -25,7 +25,7 @@
         Render.interp();
         const p = Game.player;
         Camera.follow(p, realDt);
-        Camera.update(realDt, S.camera.distance, p.dashT > 0 || !!p.iaido);
+        Camera.update(realDt, S.camera.distance, p.dashT > 0 || p.iaido ? 8 : 5 * clamp((Controller.hspeed(p) - PC.RUN) / (PC.SPRINT - PC.RUN), 0, 1));
       } else if (Game.state === 'menu') {
         Camera.orbit(Arena.center(), Game.realTime);
         Camera.update(realDt, 9);

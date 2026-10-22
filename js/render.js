@@ -16,6 +16,8 @@ const Render = {
     this.ctx.imageSmoothingEnabled = false;
     this.playerRig = Rig.build(MODELS.player);
     this.playerRig.mesh.visible = false;
+    // yaw last, so the body's forward tilt and bank are about its own axes
+    this.playerRig.mesh.rotation.order = 'YXZ';
     Gfx.scene.add(this.playerRig.mesh);
     this.pickupGeo = Gfx.boxGeometry([{ min: { x: -0.08, y: -0.22, z: -0.08 }, max: { x: 0.08, y: 0.22, z: 0.08 } }, { min: { x: -0.22, y: -0.08, z: -0.08 }, max: { x: 0.22, y: 0.08, z: 0.08 } }]);
     this.pickupMat = new THREE.MeshBasicMaterial({ color: '#5aff7a' });
@@ -148,7 +150,7 @@ const Render = {
     if (P) {
       const p = P.rp || P.pos;
       R.mesh.position.set(p.x, p.y, p.z);
-      R.mesh.rotation.y = P.yaw;
+      R.mesh.rotation.set(P.tilt || 0, P.yaw, P.bank || 0);
       PlayerPose.apply(R, P);
       const want = Camera.curDist < 1 ? clamp(Camera.curDist - 0.4, 0, 1) / 0.6 : 1;
       const blink = P.blinkT > 0 && P.hurtT <= 0 && ((Game.realTime * 30) | 0) % 2 ? 0.55 : 1;

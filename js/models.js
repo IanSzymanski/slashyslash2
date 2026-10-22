@@ -728,7 +728,14 @@ const PlayerPose = {
       return o;
     }
     if (p.sliding) {
-      o.lean = -0.45; o.hipY = -4; o.fF = [8, -1]; o.fB = [1, -1]; o.hB = [-6, -1]; o.swordAng = -2.4; o.hF = [3, -11];
+      o.cat = 'slide'; o.lean = -0.45; o.hipY = -4; o.fF = [8, -1]; o.fB = [1, -1]; o.hB = [-6, -1]; o.swordAng = -2.4; o.hF = [3, -11];
+      return o;
+    }
+    if (p.vault) {
+      // a speed vault: the free hand plants on the top, the legs tuck and sweep over, the blade trails
+      const k = clamp(p.vault.t / p.vault.dur, 0, 1);
+      o.cat = 'vault'; o.lean = 0.6; o.hipY = -9.5; o.fF = [5, -9 + 3 * k]; o.fB = [1, -8 + 3 * k];
+      o.plantW = p.vault.plant; o.hF = [-5, -10]; o.swordAng = Math.PI + 0.3;
       return o;
     }
     if (p.wallSliding) {
@@ -736,7 +743,7 @@ const PlayerPose = {
       return o;
     }
     if (p.mantle) {
-      o.lean = 0.5; o.hipY = -9; o.fF = [3, -6]; o.fB = [-2, -3]; o.hF = [5, -17]; o.hB = [5, -17]; o.swordAng = 2.6;
+      o.cat = 'mantle'; o.lean = 0.5; o.hipY = -9; o.fF = [3, -6]; o.fB = [-2, -3]; o.hF = [5, -17]; o.hB = [5, -17]; o.swordAng = 2.6;
       return o;
     }
     if (!p.onGround) {
@@ -745,35 +752,85 @@ const PlayerPose = {
         o.rot = k * TAU; o.fF = [3, -7]; o.fB = [-1, -6]; o.hipY = -11; o.hF = [3, -9]; o.hB = [1, -10]; o.swordAng = 2.6; o.lean = 0.3;
         return o;
       }
-      if (p.vel.y > 0) { o.fF = [3, -5]; o.fB = [-2, -2]; o.lean = 0.12; o.hF = [4, -12]; o.hB = [-4, -14]; o.swordAng = 2.6; }
-      else { o.fF = [2, 0]; o.fB = [-3, -1]; o.lean = 0.05; o.hF = [5, -15]; o.hB = [-5, -16]; o.swordAng = 2.2; o.hipY = -10.5; }
+      // the faster the jump, the more it keeps the sprint's shape: leaning in, legs split, blade trailing
+      const k = clamp((Controller.hspeed(p) - 3) / (PC.SPRINT - 3), 0, 1);
+      o.cat = 'air';
+      if (p.vel.y > 0) {
+        o.fF = [3 + 3 * k, -5 - k]; o.fB = [-2 - 4 * k, -2 - 2 * k]; o.lean = 0.12 + 0.3 * k;
+        o.hF = [4 - 8 * k, -12 + 2 * k]; o.hB = [-4 + 7 * k, -14 + 3 * k]; o.swordAng = 2.6 + 0.9 * k;
+      } else {
+        o.fF = [2 + 2 * k, -k]; o.fB = [-3 - 2 * k, -1 - k]; o.lean = 0.05 + 0.25 * k; o.hipY = -10.5;
+        o.hF = [5 - 9 * k, -15 + 5 * k]; o.hB = [-5 + 7 * k, -16 + 5 * k]; o.swordAng = 2.2 + 1.2 * k;
+      }
+      return o;
+    }
+    if (p.rollT > 0) {
+      // a forward roll out of a hard landing at a run, tucked tight
+      const k = 1 - p.rollT / p.rollDur;
+      o.cat = 'roll'; o.rot = easeInOutQuad(k) * TAU; o.hipY = -7; o.lean = 1.25 * Math.sin(k * Math.PI);
+      o.fF = [3, -5]; o.fB = [-1, -4]; o.hF = [2, -8]; o.hB = [3, -9]; o.swordAng = Math.PI - 0.2;
+      return o;
+    }
+    if (p.skidding) {
+      // braced against a reversal: leaning back, the lead foot dug in, the free arm out for balance
+      o.cat = 'skid'; o.lean = -0.3; o.hipY = -8; o.fF = [7, -1]; o.fB = [0, -1]; o.hF = [-3, -10]; o.hB = [5, -12]; o.swordAng = Math.PI - 0.4;
       return o;
     }
     if (p.crouching) {
-      o.hipY = -6; o.fF = [4, -1]; o.fB = [-4, -1]; o.lean = 0.4; o.hF = [5, -7]; o.hB = [-1, -6]; o.swordAng = 2.8;
+      o.cat = 'crouch'; o.hipY = -6; o.fF = [4, -1]; o.fB = [-4, -1]; o.lean = 0.4; o.hF = [5, -7]; o.hB = [-1, -6]; o.swordAng = 2.8;
       return o;
     }
     const sp = Controller.hspeed(p);
     if (sp > 1.4) {
-      const ph = p.runPhase, stride = clamp(sp / 13.6, 0.3, 1.2);
-      o.lean = 0.28 * stride;
-      o.hipY = -10 + Math.abs(Math.cos(ph)) * 1.1 - 0.5;
-      o.fF = [Math.sin(ph) * 5 * stride + 1, -1 - Math.max(0, Math.cos(ph)) * 3.5 * stride];
-      o.fB = [Math.sin(ph + Math.PI) * 5 * stride + 1, -1 - Math.max(0, Math.cos(ph + Math.PI)) * 3.5 * stride];
-      o.hF = [-5, -9]; o.swordAng = Math.PI - 0.15;
-      o.hB = [Math.sin(ph) * 3 + 1, -9];
+      // From a jog to a full sprint the body pitches well forward (about 45 degrees at full pace), strides
+      // lengthen, the back heel kicks up and the front knee drives. The sword arm trails the blade behind,
+      // the free arm pumps. Hips sit lowest at mid-stance and rise through each flight.
+      const ph = p.runPhase, k = clamp((sp - 3) / (PC.SPRINT - 3), 0, 1);
+      o.cat = 'run';
+      o.lean = 0.2 + 0.6 * k + p.accF * 0.25;
+      o.hipY = -10 + 0.5 * k + (0.4 + 0.8 * k) * Math.abs(Math.cos(ph));
+      const A = 3 + 4.5 * k, H = 2.5 + 3 * k, K = 1 + 4.5 * k, fwd = 1 + 1.5 * k;
+      const foot = (f) => {
+        const sn = Math.sin(f), cs = Math.max(0, Math.cos(f));
+        return [sn * A + fwd, -1 - cs * H - cs * Math.max(0, -sn) * K * 2];
+      };
+      o.fF = foot(ph); o.fB = foot(ph + Math.PI);
+      // hands are placed from the shoulder, which the lean carries forward and down
+      const sh = [Math.sin(o.lean) * 7, o.hipY - Math.cos(o.lean) * 7];
+      o.hF = [sh[0] - 4 - 2 * k, sh[1] + 4 - k + Math.sin(ph) * 0.6];
+      o.swordAng = Math.PI + 0.05 + 0.35 * k;
+      // elbow bent near a right angle, the hand driving forward and up, then back past the hip
+      o.hB = [sh[0] + 0.5 + Math.sin(ph) * (1 + 1.5 * k), sh[1] + 3.5 - Math.max(0, Math.sin(ph)) * 3 * k];
       return o;
     }
     // at rest a while, the blade goes back in its sheath and the left hand rests on it (the concept sheet's stance)
     const br = Math.sin(t * 3) > 0 ? 0 : 1;
     if (p.idleT > 2.5) {
-      o.hipY = -10 + br * 0.6; o.lean = 0.04; o.fF = [1.5, -1]; o.fB = [-1.5, -1];
+      o.cat = 'rest'; o.hipY = -10 + br * 0.6; o.lean = 0.04; o.fF = [1.5, -1]; o.fB = [-1.5, -1];
       o.sword = 'sheathed'; o.hF = [0.5, -8.5 + br * 0.5]; o.hB = 'hilt';
       return o;
     }
     // idle with breathing
-    o.hipY = -10 + br * 0.6; o.hF = [5, -8 + br * 0.5]; o.hB = [-2, -8 + br * 0.5]; o.swordAng = 2.45;
+    o.cat = 'idle'; o.hipY = -10 + br * 0.6; o.hF = [5, -8 + br * 0.5]; o.hB = [-2, -8 + br * 0.5]; o.swordAng = 2.45;
     return o;
+  },
+  // Movement poses (run, idle, air, slide, vault...) fade into each other over 0.12 s instead of snapping;
+  // combat poses and flips come in exactly as the 2D game times them.
+  crossfade(p, o) {
+    const now = Game.realTime, dt = clamp(now - (p._poseT === undefined ? now : p._poseT), 0, 0.1);
+    p._poseT = now;
+    const prev = p._pose;
+    if (!o.cat || o.rot || (prev && prev.rot)) p._fade = null;
+    else if (prev && prev.cat && prev.cat !== o.cat) p._fade = { from: prev, t: 0 };
+    const F = p._fade;
+    if (F) {
+      F.t += dt;
+      const w = easeOutQuad(clamp(F.t / 0.12, 0, 1)), a = F.from;
+      if (w >= 1) p._fade = null;
+      for (const k of ['hipY', 'lean', 'swordAng', 'twist']) if (typeof a[k] === 'number' && typeof o[k] === 'number') o[k] = lerp(a[k], o[k], w);
+      for (const k of ['fF', 'fB', 'hF', 'hB']) if (Array.isArray(a[k]) && Array.isArray(o[k])) o[k] = [lerp(a[k][0], o[k][0], w), lerp(a[k][1], o[k][1], w)];
+    }
+    p._pose = { cat: o.cat, rot: o.rot, hipY: o.hipY, lean: o.lean, swordAng: o.swordAng, twist: o.twist, fF: o.fF && o.fF.slice(), fB: o.fB && o.fB.slice(), hF: Array.isArray(o.hF) ? o.hF.slice() : o.hF, hB: Array.isArray(o.hB) ? o.hB.slice() : o.hB };
   },
   // world direction along a swing's arc at angle th: the same plane FX.swoosh draws its trail in
   arcDir(yaw, tilt, th) {
@@ -786,6 +843,7 @@ const PlayerPose = {
     if (!this._v) this._v = [0, 1, 2, 3, 4, 5, 6, 7].map(() => new THREE.Vector3());
     const [T, P, D, E, U, F, A, W] = this._v;
     const o = this.pose2D(p), B = r.bones, M = r.mesh, X = PX;
+    this.crossfade(p, o);
     Rig.reset(r);
     const tr = () => (o.tremble ? rand(-0.012, 0.012) * o.tremble : 0);
     // the body: hip height, a roll about the hips for flips and falls, lean shared by spine and chest
@@ -812,7 +870,8 @@ const PlayerPose = {
     };
     // sheath: hangs back from the left hip, or swings level behind for the draw
     // the concept art wears it steeper than the 2D sprite's 2.75
-    const sa = o.sheathAng !== null ? o.sheathAng : 2.2 - o.lean * 0.5;
+    // as the body pitches forward the sheath swings back with the hips, never down into the street
+    const sa = o.sheathAng !== null ? o.sheathAng : clamp(2.2 + o.lean * 0.6, 2.0, 2.85);
     U.set(-0.25, -Math.sin(sa + o.rot), -Math.cos(sa + o.rot)).normalize().applyQuaternion(M.quaternion);
     F.set(0, 0, -1).applyQuaternion(M.quaternion);
     Rig.orient(B.sheath, U.negate(), F);
@@ -842,6 +901,7 @@ const PlayerPose = {
     Rig.ik(r, 'armR', 'foreR', 'handR', T, P, 1);
     Rig.boneWorld(r, 'armL', A);
     if (o.hB === 'hilt') T.setFromMatrixPosition(B.sheath.matrixWorld).addScaledVector(F.set(0, 0, -1).applyQuaternion(M.quaternion), 0.05);
+    else if (o.plantW) T.set(o.plantW.x, o.plantW.y + 0.03, o.plantW.z);
     else if (o.reachW) T.set(o.reachW.x - A.x, o.reachW.y - A.y, o.reachW.z - A.z).setLength(0.6).add(A);
     else L((o.hB || [-2, -8])[0], (o.hB || [-2, -8])[1], -0.2, T);
     P.set(-0.7, -0.35, 0.8).applyQuaternion(M.quaternion).add(A);

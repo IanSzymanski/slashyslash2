@@ -29,9 +29,9 @@ function simulate(seconds, start, script) {
     Controller.timers(c, DT);
     Controller.buffer(c, I);
     if (I.dash) Controller.tryDash(c, I.mx, I.mz);
-    if (c.dashT > 0) Controller.moveDash(c, DT); else if (!c.mantle) Controller.moveNormal(c, DT, I);
+    if (c.dashT > 0) Controller.moveDash(c, DT); else if (!c.mantle && !c.vault) Controller.moveNormal(c, DT, I);
     Controller.integrate(c, DT, I);
-    trace.push({ t, x: c.pos.x, y: c.pos.y, z: c.pos.z, v: Math.hypot(c.vel.x, c.vel.z), vy: c.vel.y, g: c.onGround, slide: c.sliding, mantle: !!c.mantle, wall: c.wallSliding });
+    trace.push({ t, x: c.pos.x, y: c.pos.y, z: c.pos.z, v: Math.hypot(c.vel.x, c.vel.z), vy: c.vel.y, g: c.onGround, slide: c.sliding, mantle: !!c.mantle, vault: !!c.vault, skid: c.skidding, wall: c.wallSliding });
   }
   return trace;
 }
@@ -42,11 +42,25 @@ const rows = [];
 let failed = false;
 const check = (ok, msg) => { if (!ok) { failed = true; console.log('FAIL ' + msg); } };
 
-// run: hold forward (-z is forward at yaw 0; use +x along the street)
+// run: hold forward along the street. A quick start to the run speed, then the sprint builds.
 let tr = simulate(2, start, (t) => ({ mx: 1 }));
 const top = Math.max(...tr.map((s) => s.v));
-const t90 = tr.find((s) => s.v >= top * 0.9).t;
-rows.push(['Run speed', `${fmt(top)} m/s`, `90% after ${fmt(t90)} s`]);
+const tRun = tr.find((s) => s.v >= MOVE.RUN * 0.95).t, t90 = tr.find((s) => s.v >= top * 0.9).t;
+rows.push(['Run, building to a sprint', `${fmt(MOVE.RUN)} to ${fmt(top)} m/s`, `run in ${fmt(tRun)} s, 90% of the sprint in ${fmt(t90)} s`]);
+check(tRun < 0.25 && top >= MOVE.SPRINT - 0.01, 'the run is slow to start or never reaches the sprint');
+// a stop from a sprint, a 90 degree turn at a sprint (it carves, keeping speed), and a reversal (it skids)
+tr = simulate(3, start, (t) => ({ mx: t < 1.5 ? 1 : 0 }));
+const stopI = tr.findIndex((s) => s.t >= 1.5), stopEnd = tr.slice(stopI).find((s) => s.v < 0.05);
+rows.push(['Stop from a sprint', `${fmt(stopEnd.x - tr[stopI].x)} m`, `${fmt(stopEnd.t - 1.5)} s`]);
+tr = simulate(2.5, { x: start.x, y: 0, z: -5 }, (t) => (t < 1.5 ? { mx: 1 } : { mz: 1 }));
+const turnI = tr.findIndex((s) => s.t >= 1.5), turned = tr.slice(turnI).find((s, i, a) => i > 0 && Math.abs(Math.atan2(s.z - a[i - 1].z, s.x - a[i - 1].x) - Math.PI / 2) < 0.05);
+const slowest = Math.min(...tr.slice(turnI, turnI + 60).map((s) => s.v));
+rows.push(['90 degree turn at a sprint', turned ? `${fmt(turned.t - 1.5)} s to come round` : 'never came round', `slowest ${fmt(slowest)} m/s`]);
+check(turned && slowest > MOVE.RUN * 0.9, 'a turn at a sprint loses too much speed');
+tr = simulate(2.5, start, (t) => ({ mx: t < 1.5 ? 1 : -1 }));
+const skids = tr.filter((s) => s.skid).length * DT, back = tr.slice(turnI).find((s, i, a) => i > 0 && s.x < a[i - 1].x);
+rows.push(['Reversal at a sprint', `${fmt(skids)} s skid`, back ? `moving back after ${fmt(back.t - 1.5)} s` : 'never came back']);
+check(skids > 0.1 && back, 'a reversal at a sprint does not skid and come back');
 
 // single jump, held: apex and air time
 tr = simulate(1.5, start, (t) => ({ jump: t < DT, jumpHeld: true }));
@@ -102,12 +116,18 @@ const kickOut = kI >= 0 ? Math.max(...tr.slice(kI).map((s) => s.z)) - wz : 0;
 rows.push(['Wall kick', kickT === null ? 'no wall slide' : `+${fmt(kickApex)} m up, ${fmt(kickOut)} m out`, `wall slide at ${fmt(-slideV)} m/s`]);
 check(kickT !== null && kickApex > 2.5, 'could not slide down and kick off a wall');
 
-// step-up: walk into a wrecked car and over it (body 0.91 m, roof 1.55 m)
+// vaults: run at a wrecked car end-on (onto its 1.55 m roof) and side-on (over it), without breaking stride
 const car = STREET.boxes.find((b) => b.kind === 'car' && b.min.y > 0);
-tr = simulate(1.2, { x: car.min.x - 1.6, y: 0, z: (car.min.z + car.max.z) / 2 }, () => ({ mx: 1 }));
-const carTop = Math.max(...tr.map((s) => s.y));
-rows.push(['Walk over a wrecked car', `top ${fmt(carTop)} m`, carTop >= car.max.y - 0.01 ? 'stepped up' : 'blocked']);
-check(carTop >= car.max.y - 0.01, 'could not step onto a wrecked car');
+tr = simulate(1.2, { x: car.min.x - 4, y: 0, z: (car.min.z + car.max.z) / 2 }, () => ({ mx: 1 }));
+const carTop = Math.max(...tr.map((s) => s.y)), vI = tr.findIndex((s) => s.vault), vEnd = tr.slice(vI).find((s) => !s.vault);
+rows.push(['Vault onto a wrecked car', vI >= 0 ? `top ${fmt(carTop)} m in ${fmt(vEnd.t - tr[vI].t)} s` : 'blocked', vI >= 0 ? `${fmt(tr[vI - 1].v)} to ${fmt(vEnd.v)} m/s` : '']);
+check(vI >= 0 && carTop >= car.max.y - 0.01 && vEnd.v > 8, 'running at a wrecked car does not vault onto it at speed');
+// the car mid-street, run at from the front side so there's room to land beyond it
+const carBody = STREET.boxes.filter((b) => b.kind === 'car' && b.min.y === 0).sort((a, b) => Math.abs(a.min.z - 0.5) - Math.abs(b.min.z - 0.5))[0];
+tr = simulate(1.4, { x: (carBody.min.x + carBody.max.x) / 2, y: 0, z: carBody.max.z + 4 }, () => ({ mz: -1 }));
+const over = tr.find((s) => s.z < carBody.min.z - 0.5 && s.g);
+rows.push(['Vault over a wrecked car side-on', over ? `clear at ${fmt(over.t)} s` : 'blocked', over ? `${fmt(over.v)} m/s after` : '']);
+check(over && over.v > 8, 'running at a wrecked car side-on does not vault over it at speed');
 
 // mantle: the highest climb on the street is the 9.1 m girder; double jump beside it, push in once level with its edge
 const girder = STREET.boxes.filter((b) => b.kind === 'girder').sort((a, b) => a.max.y - b.max.y)[0];

@@ -130,7 +130,8 @@ const UI = {
   renderHowTo() {
     const rows = [
       ['Look (click the game to lock the mouse)', 'Mouse'],
-      ['Move (relative to the camera)', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
+      ['Move (relative to the camera); keep running and it builds to a sprint', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
+      ['Vault over cars and anything chest-high', 'Run into it'],
       ['Jump / double jump / wall kick', actionLabel('jump')],
       ['Crouch · slide while running', actionLabel('crouch')],
       ['Bullet jump (toward the crosshair)', `${actionLabel('crouch')} + ${actionLabel('jump')}`],
