@@ -6,7 +6,7 @@
 const Camera = {
   yaw: 0, pitch: -0.2, curDist: 5, fov: 62,
   pivot: { x: 0, y: 2.3, z: 0 }, base: null, pos: { x: 0, y: 0, z: 0 }, dir: { x: 0, y: 0, z: -1 }, aim: { x: 0, y: 0, z: -60 }, aimEnemy: null,
-  PIVOT_UP: 0.5, PITCH_MAX: (80 * Math.PI) / 180, RADIUS: 0.25, EASE_OUT: 0.3, SENS: 0.0022, AIM_FAR: 60,
+  PIVOT_UP: 0.5, PITCH_MAX: (80 * Math.PI) / 180, RADIUS: 0.25, EASE_OUT: 0.3, SENS: 0.0022, AIM_FAR: 60, TRAIL: 26,
   // threats more than this far off the view's centre count as unseen (the wind-up fairness rule)
   OFFVIEW: (75 * Math.PI) / 180,
 
@@ -20,26 +20,30 @@ const Camera = {
     this.pivot.x = p.pos.x; this.pivot.y = p.pos.y + PC.HEIGHT + this.PIVOT_UP; this.pivot.z = p.pos.z;
     this.yaw = p.yaw; this.pitch = -0.2; this.curDist = S.camera.distance;
   },
-  // Light smoothing on the vertical axis only, so jumps don't jerk the view; rp is the interpolated position.
+  // Smoothing on the vertical axis, so jumps don't jerk the view, and a slight trail on the horizontal, so
+  // speed reads (about half a metre behind at a sprint, more in a dash). rp is the interpolated position.
   // base is the top of the head: the pivot is kept in open space between it and where the smoothing wants it.
   follow(p, realDt) {
     const r = p.rp || p.pos;
-    this.pivot.x = r.x; this.pivot.z = r.z;
+    this.pivot.x = damp(this.pivot.x, r.x, this.TRAIL, realDt); this.pivot.z = damp(this.pivot.z, r.z, this.TRAIL, realDt);
+    if (Math.hypot(this.pivot.x - r.x, this.pivot.z - r.z) > 3) { this.pivot.x = r.x; this.pivot.z = r.z; }
     this.pivot.y = damp(this.pivot.y, r.y + PC.HEIGHT + this.PIVOT_UP, 12, realDt);
     this.base = { x: r.x, y: r.y + Math.max(0.5, p.h - 0.3), z: r.z };
   },
-  // the title screen's slow orbit around a point
-  orbit(c, realTime) {
+  // the title screen's slow orbit around a point, looking down at pitch, the pivot lifted by lift
+  orbit(c, realTime, pitch = -0.3, lift = 0) {
     this.base = null;
-    this.pivot.x = c.x; this.pivot.y = c.y + PC.HEIGHT + this.PIVOT_UP; this.pivot.z = c.z;
-    this.yaw = realTime * 0.12; this.pitch = -0.3;
+    this.pivot.x = c.x; this.pivot.y = c.y + PC.HEIGHT + this.PIVOT_UP + lift; this.pivot.z = c.z;
+    this.yaw = realTime * 0.06; this.pitch = pitch;
   },
-  update(realDt, distance = S.camera.distance, fovKick = false) {
+  // fovKick: degrees to widen the view by (dashes, drawn slashes, a sprint); true means a dash's 8
+  update(realDt, distance = S.camera.distance, fovKick = 0) {
     if (this.base) {
-      const b = this.base, dy = this.pivot.y - b.y, up = Math.abs(dy);
-      if (up > 0.01) {
-        const h = World.raycast(b, { x: 0, y: Math.sign(dy), z: 0 }, up, this.RADIUS);
-        if (h) this.pivot.y = b.y + Math.sign(dy) * Math.max(0, h.t - 0.02);
+      // sweep from the head to where the smoothing put the pivot, and stop short of anything between
+      const b = this.base, dx = this.pivot.x - b.x, dy = this.pivot.y - b.y, dz = this.pivot.z - b.z, L = Math.hypot(dx, dy, dz);
+      if (L > 0.01) {
+        const h = World.raycast(b, { x: dx / L, y: dy / L, z: dz / L }, L, this.RADIUS);
+        if (h) { const k = Math.max(0, h.t - 0.02) / L; this.pivot.x = b.x + dx * k; this.pivot.y = b.y + dy * k; this.pivot.z = b.z + dz * k; }
       }
     }
     const cp = Math.cos(this.pitch), d = this.dir;
@@ -58,8 +62,9 @@ const Camera = {
     const c3 = Gfx.camera;
     c3.position.set(p.x, p.y, p.z);
     c3.rotation.set(this.pitch + sp, this.yaw + sy, 0);
-    // a wider view on dashes and drawn slashes sells the speed (a comfort setting)
-    this.fov = damp(this.fov, Gfx.FOV + (fovKick && S.camera.fovKick ? 8 : 0), fovKick ? 18 : 6, realDt);
+    // a wider view on dashes, drawn slashes and at a sprint sells the speed (a comfort setting)
+    const kick = fovKick === true ? 8 : +fovKick || 0;
+    this.fov = damp(this.fov, Gfx.FOV + (S.camera.fovKick ? kick : 0), kick > 6 ? 18 : 6, realDt);
     if (Math.abs(c3.fov - this.fov) > 0.01) { c3.fov = this.fov; c3.updateProjectionMatrix(); }
     Sound.setListener(p, d);
     this.updateAim();

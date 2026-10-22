@@ -358,3 +358,37 @@ class SlamRing {
     }
   }
 }
+
+// ---------- the brute's ground wave ----------
+// The 2D slam sends a shockwave each way along the street. In 3D it's a ring running out over the ground
+// that hits you once if your feet are down as it passes: jump it, dash through it or parry it. Walls stop it.
+class GroundWave {
+  constructor(pos, speed, dmg, owner) {
+    this.kind = 'wave';
+    this.pos = { x: pos.x, y: pos.y, z: pos.z };
+    this.speed = speed; this.dmg = dmg; this.owner = owner;
+    this.t = 0; this.dur = 0.8; this.dead = false; this.hit = false;
+  }
+  radius() { return 0.6 + this.speed * this.t; }
+  update(dt) {
+    this.t += dt;
+    if (this.t > this.dur) { this.dead = true; return; }
+    const c = this.pos, r = this.radius();
+    for (let i = 0; i < 3; i++) {
+      const a = rand(0, TAU), x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
+      if (Math.abs(World.groundAt(x, z, c.y + 0.5) - c.y) < 0.1) {
+        FX.dust({ x, y: c.y, z }, 1, { smax: 2.7, rise: 2.7, c: '#6a5a5a' });
+        if (Math.random() < 0.4) FX.debris({ x, y: c.y + 0.1, z }, 1, ['#4a4252', '#5c5464'], 10.9);
+      }
+    }
+    const P = Game.player;
+    if (this.hit || P.dead) return;
+    const dx = P.pos.x - c.x, dz = P.pos.z - c.z, d = Math.hypot(dx, dz);
+    if (Math.abs(d - r) > 0.73 + P.r || P.pos.y > c.y + 0.64 || P.pos.y < c.y - 0.4) return;
+    const ux = d > 1e-3 ? dx / d : 1, uz = d > 1e-3 ? dz / d : 0;
+    if (d > 0.6 && World.raycast({ x: c.x, y: c.y + 0.4, z: c.z }, { x: ux, y: 0, z: uz }, d)) return;
+    const from = { x: c.x + ux * (r - 1), y: c.y + 0.4, z: c.z + uz * (r - 1) };
+    const res = P.takeHit({ dmg: this.dmg, from, kind: 'shockwave', source: this.owner && !this.owner.dead ? this.owner : null, knock: 18.2 });
+    if (res !== 'ignored') this.hit = true;
+  }
+}

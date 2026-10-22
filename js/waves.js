@@ -1,6 +1,7 @@
 'use strict';
 // Wave director for the scripted demo, endless survival, the rival fight and the melee duel test mode.
 // Spawns go through Arena (world.js); distances are in metres, converted from the 2D pixel values.
+// Until AEGIS-07 arrives in Phase 5, the demo ends after its sixth wave and endless has no rival waves.
 
 // Each wave introduces one problem that a specific move solves, so the rival tests practised skills.
 const DEMO_WAVES = [
@@ -30,38 +31,13 @@ const Director = {
   mode: 'demo', wave: 0, state: 'idle', queue: [], spawnT: 0, breakT: 0, waveName: '', total: 0, scale: { hp: 1, dmg: 1 }, bossWave: false, modifier: null,
 
   start(mode) {
-    this.mode = mode; this.wave = 0; this.state = mode === 'training' ? 'training' : mode === 'test' ? 'idle' : 'intro'; this.breakT = 1.4; this.queue = []; this.modifier = null;
-  },
-  // Phase 2 feel test: endless waves of the three types built so far (scrappers, then gunners from wave 2
-  // and grenadiers from wave 3), growing like endless waves, with no upgrades or rival.
-  buildStreet(n) {
-    this.bossWave = false;
-    const types = [
-      { type: 'scrapper', cost: 1, minWave: 1, weight: 4 },
-      { type: 'gunner', cost: 1.4, minWave: 2, weight: 2.4 },
-      { type: 'grenadier', cost: 1.8, minWave: 3, weight: 1.4 },
-    ].filter((d) => d.minWave <= n && (d.type === 'scrapper' || S.enemies[d.type] !== false));
-    let budget = (3 + n * 1.5) * S.enemies.count;
-    const out = [];
-    for (let guard = 0; budget > 0.5 && guard < 200; guard++) {
-      const opts = types.filter((d) => d.cost <= budget + 0.6);
-      if (!opts.length) break;
-      let r = Math.random() * opts.reduce((a, d) => a + d.weight, 0), k = 0;
-      while (r > opts[k].weight) { r -= opts[k].weight; k++; }
-      out.push(opts[k].type);
-      budget -= opts[k].cost;
-    }
-    // every wave from 2 on has at least one of the newest type, so the moves that answer it get used
-    const newest = types[types.length - 1].type;
-    if (n >= 2 && !out.includes(newest)) out[out.length - 1] = newest;
-    for (let i = out.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [out[i], out[j]] = [out[j], out[i]]; }
-    this.scale = { hp: 1 + (n - 1) * 0.07, dmg: 1 + (n - 1) * 0.035 };
-    this.waveName = ENDLESS_NAMES[(n - 1) % ENDLESS_NAMES.length];
-    return out.length ? out : ['scrapper'];
+    this.mode = mode; this.wave = 0; this.state = mode === 'training' ? 'training' : mode === 'test' || mode === 'street' ? 'idle' : 'intro'; this.breakT = 1.4; this.queue = []; this.modifier = null;
   },
   enabledTypes() { return ALL_TYPES.filter((t) => S.enemies[t]); },
+  rivalBuilt() { return typeof Rival === 'function'; },
   soloRival() { return this.mode === 'boss' || this.mode === 'duel'; },
-  lastWave() { return this.soloRival() ? 1 : this.mode === 'demo' ? DEMO_WAVES.length : Infinity; },
+  demoWaves() { return this.rivalBuilt() ? DEMO_WAVES.length : DEMO_WAVES.filter((w) => !w.boss).length; },
+  lastWave() { return this.soloRival() ? 1 : this.mode === 'demo' ? this.demoWaves() : Infinity; },
   buildDemo(n) {
     const def = DEMO_WAVES[n - 1];
     this.bossWave = !!def.boss;
@@ -76,7 +52,7 @@ const Director = {
     return out;
   },
   buildEndless(n) {
-    this.bossWave = S.enemies.bossEndless && n % BOSS_EVERY === 0;
+    this.bossWave = S.enemies.bossEndless && this.rivalBuilt() && n % BOSS_EVERY === 0;
     if (this.bossWave) {
       this.scale = { hp: 1 + (n - 1) * 0.06, dmg: 1 + (n - 1) * 0.03 };
       this.waveName = 'RIVAL';
@@ -104,14 +80,17 @@ const Director = {
   nextWave() {
     this.wave++;
     if (this.soloRival()) { this.bossWave = true; this.scale = { hp: 1, dmg: 1 }; this.waveName = this.mode === 'duel' ? 'LIMITERS OFF, FULL HEALTH' : 'RIVAL'; this.queue = []; }
-    else this.queue = this.mode === 'demo' ? this.buildDemo(this.wave) : this.mode === 'street' ? this.buildStreet(this.wave) : this.buildEndless(this.wave);
+    else this.queue = this.mode === 'demo' ? this.buildDemo(this.wave) : this.buildEndless(this.wave);
     this.total = this.queue.length;
     this.spawnT = this.bossWave ? 4 : 0.8;
     // endless waves from 4 on sometimes carry a twist
-    this.modifier = this.mode === 'endless' && !this.bossWave && this.wave >= 4 && chance(0.45) ? pick(Object.keys(WAVE_MODIFIERS)) : null;
+    const mods = Object.keys(WAVE_MODIFIERS).filter((k) => !WAVE_MODIFIERS[k].later);
+    this.modifier = this.mode === 'endless' && !this.bossWave && this.wave >= 4 && chance(0.45) ? pick(mods) : null;
     this.state = 'fight';
+    // Blackout: the street lamps go out for this wave (a rebake while the title shows)
+    Arena.setBlackout(this.modifier === 'blackout');
     if (this.bossWave) this.spawnRival();
-    const title = this.mode === 'duel' ? 'MELEE DUEL' : this.mode === 'boss' ? 'RIVAL FIGHT' : 'WAVE ' + this.wave + (this.mode === 'demo' ? ' / ' + DEMO_WAVES.length : '');
+    const title = this.mode === 'duel' ? 'MELEE DUEL' : this.mode === 'boss' ? 'RIVAL FIGHT' : 'WAVE ' + this.wave + (this.mode === 'demo' ? ' / ' + this.demoWaves() : '');
     Game.announce(title, this.waveName, this.mode === 'duel' ? '#ff6a7a' : this.bossWave ? '#4af0ff' : '#ff3a52', 2.2);
     if (this.modifier) Game.announce(WAVE_MODIFIERS[this.modifier].name, WAVE_MODIFIERS[this.modifier].desc, '#ffd070', 2.6, true);
     Sound.play('waveStart');
@@ -153,6 +132,7 @@ const Director = {
     const last = this.wave >= this.lastWave();
     const done = this.mode === 'duel' ? 'DUEL WON' : this.mode === 'boss' ? 'RIVAL DEFEATED' : 'DEMO CLEAR';
     this.modifier = null;
+    Arena.setBlackout(false);
     const pickDue = this.mode === 'endless' && upgradeDue(this.wave);
     if (pickDue) Game.queueCut(1.0, () => Game.offerUpgrade());
     Game.announce(last ? done : 'WAVE CLEAR', '+' + bonus + ' PTS', '#7dff8a', 1.8);
@@ -179,16 +159,21 @@ const Director = {
       for (let i = 0; i < 12; i++) {
         const a = rand(0, TAU), r = rand(13.6, 29);
         const x = clamp(p.x + Math.cos(a) * r, B.minX + 6, B.maxX - 6), z = clamp(p.z + Math.sin(a) * r, B.minZ + 6, B.maxZ - 6);
-        pts.push({ x, y: World.groundAt(x, z, 100) + rand(4, 8), z });
+        const y = World.groundAt(x, z, 100) + rand(4, 8);
+        // open air with room for the drone to arrive, not under a balcony's lip
+        if (World.boxFree(x, y - 0.2, z, 0.7, 1.2)) pts.push({ x, y, z });
       }
     } else if (type === 'brute' || type === 'crawler') pts = Arena.spawnPoints('ground').slice();
     else if (type === 'sniper') pts = Arena.perches().slice();
     else pts = Arena.spawnPoints('ground').concat(Arena.spawnPoints('high'));
+    if (!pts.length) pts = Arena.spawnPoints('high').map((q) => ({ x: q.x, y: q.y + 4, z: q.z }));
     let ok = pts.filter((q) => { const d = distXZ(q, p); return d > 11.8 && d < 43.6; });
     if (!ok.length) ok = pts.filter((q) => dist3(q, p) > 8.2);
     if (!ok.length) ok = pts;
     const q = pick(ok);
-    const e = new Enemy(type, { x: q.x + rand(-0.5, 0.5), y: q.y, z: q.z + rand(-0.5, 0.5) }, this.scale);
+    // ground spawns scatter a little; drone spots and perches were checked for room exactly where they are
+    const j = type === 'drone' || type === 'sniper' ? 0 : 0.5;
+    const e = new Enemy(type, { x: q.x + rand(-j, j), y: q.y, z: q.z + rand(-j, j) }, this.scale);
     if (this.modifier === 'elite' && chance(0.3)) makeElite(e);
     Game.enemies.push(e);
     if (distXZ(q, p) < 29) Sound.play('spawn', {}, q);

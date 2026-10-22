@@ -32,6 +32,7 @@ const Game = {
     this.player = null;
     this.slowScale = 1; this.slowT = 0; this.freezeT = 0; this.btT = 0; this.btKind = null; this.btOwner = null;
     this.cine = null; Input.locked = false; Input.releaseLock();
+    Arena.setBlackout(false);
     Sound.setSlow(false);
     Sound.setIntensity(0);
     this.announcements = [];
@@ -46,6 +47,9 @@ const Game = {
     Sound.stopAll();
     this.mode = mode;
     this.runs[mode] = (this.runs[mode] || 0) + 1;
+    // every mode plays in the crossroads except the 2D street's free roam
+    Arena.load(mode === 'street' ? 'street' : 'crossroads');
+    Arena.setBlackout(false);
     this.state = 'playing';
     FX.clear();
     this.enemies = []; this.projectiles = []; this.hazards = []; this.pickups = []; this.cuts = []; this.props = [];
@@ -278,7 +282,7 @@ const Game = {
     this.time += dt;
     if (!this.player.dead) this.stats.time += dt;
     this.player.update(dt);
-    Nav.update(this.player.pos.x, this.player.pos.z);
+    Nav.update(this.player.pos, this.time);
     const cine = this.cineActive() ? this.cine : null;
     for (const e of this.enemies) if (!e.dead && (!cine || e === cine.owner)) e.update(dt);
     separateEnemies(dt);

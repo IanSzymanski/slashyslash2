@@ -8,14 +8,16 @@ const TEX_STYLES = {
   shop: ['#3e3a48', '#302c38', '#524c5c'], shop2: ['#43384a', '#342b3a', '#574a5e'],
   slab: ['#4a4250', '#3a3240', '#5c5464'], roof: ['#2e2832', '#221e26', '#3c3440'],
   asphalt: ['#2a2430', '#1e1a22', '#36303c'], metal: ['#3a3e4e', '#262a36', '#5a6074'],
-  car: ['#4a3236', '#30202a', '#6a4a44'],
+  car: ['#4a3236', '#30202a', '#6a4a44'], container: ['#5a3428', '#3e2420', '#7a4c38'],
 };
 // Facades carry windows: a 256x192 texture covering 8 m x 6 m (4 x 2 windows), some of them lit.
 const FACADES = new Set(['brick', 'brick2', 'concrete', 'panel', 'shop', 'shop2']);
 const TEX_METRES = (style) => (FACADES.has(style) ? [8, 6] : [2, 2]);
 
 const Gfx = {
-  renderer: null, scene: null, camera: null, level: null, fireMats: [],
+  renderer: null, scene: null, camera: null, level: null, fireMats: [], lampMats: [], buzzMats: [], baked: [],
+  // how bright the flickering lights are this frame (render.js sets them), shared by every level material
+  uFire: { value: 1 }, uBuzz: { value: 1 },
   // a fixed pool: the light count never changes, so shaders never recompile mid-fight
   POOL: 8, pool: [], used: 0,
   FOV: 62,
@@ -72,12 +74,13 @@ const Gfx = {
     m.userData.feet = feet;
     m.onBeforeCompile = (sh) => {
       if (feet) { sh.uniforms.uFeet = feet; sh.uniforms.uRim = this.rim; }
+      else { sh.uniforms.uFire = this.uFire; sh.uniforms.uBuzz = this.uBuzz; }
       sh.uniforms.uDesat = this.desat;
       // characters: a 'glow' vertex attribute marks fullbright parts (eyes, cores) and 'plain' parts skip the
       // texture (clean lights); meshes without them read 0
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\n#ifdef USE_BAKED\nattribute vec3 baked;\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nattribute float glow;\nattribute float plain;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
-        .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_BAKED\nvBaked = baked;\n#endif\n#ifdef USE_FEET\nvGlow = glow;\nvPlain = plain;\n#endif');
+        .replace('#include <common>', '#include <common>\n#ifdef USE_BAKED\nattribute vec3 baked;\nattribute vec3 bakedFire;\nattribute vec3 bakedBuzz;\nuniform float uFire;\nuniform float uBuzz;\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nattribute float glow;\nattribute float plain;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
+        .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_BAKED\nvBaked = baked + bakedFire * uFire + bakedBuzz * uBuzz;\n#endif\n#ifdef USE_FEET\nvGlow = glow;\nvPlain = plain;\n#endif');
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', '#include <common>\nuniform float uDesat;\n#ifdef USE_BAKED\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nuniform vec3 uFeet;\nuniform vec3 uRim;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
         .replace('#include <map_fragment>', '#ifdef USE_FEET\n#ifdef USE_MAP\ndiffuseColor *= mix( texture2D( map, vMapUv ), vec4( 1.0 ), vPlain );\n#endif\n#else\n#include <map_fragment>\n#endif')
@@ -133,6 +136,16 @@ const Gfx = {
         g.fillStyle = dark;
         g.fillRect(0, 0, 64, 2); g.fillRect(0, 62, 64, 2);
         for (let i = 0; i < 64; i++) { g.fillRect(i, i, 2, 1); g.fillRect(63 - i, i, 2, 1); }
+      } else if (style === 'container') {
+        // corrugated steel: vertical ribs, a rust-streaked band, the door's locking bars
+        speckle(260);
+        g.fillStyle = dark;
+        for (let x = 0; x < 64; x += 4) g.fillRect(x, 0, 1, 64);
+        g.fillStyle = light;
+        for (let x = 2; x < 64; x += 4) g.fillRect(x, 0, 1, 64);
+        g.fillStyle = '#2a1a16'; g.fillRect(0, 0, 64, 3); g.fillRect(0, 61, 64, 3);
+        g.fillStyle = '#8a5a3a';
+        for (let i = 0; i < 10; i++) g.fillRect((R() * 64) | 0, 3, 1, 4 + ((R() * 14) | 0));
       } else if (style === 'car') {
         speckle(300);
         g.fillStyle = light;
@@ -256,23 +269,28 @@ const Gfx = {
   },
 
   // ---------- level ----------
-  // Every visible face is cut into cells of at most 1 m, and each vertex gets the light baked from
-  // World.lightAt with shadow rays. Faces flush against another box, under the street, or on the
-  // outside of the boundary are skipped. Faces of one texture share one mesh.
+  // Every visible face is cut into cells of at most 1 m (b.cell for tall plain walls), and each vertex gets
+  // the light baked from World.lightSplit with shadow rays, in three channels: steady, fire and buzz, so
+  // flicker shows on the world. Cells inside another box (under the plaza, behind a building) and faces on
+  // the outside of the boundary are skipped. Faces of one texture share one mesh.
   buildLevel(def) {
-    if (this.level) this.scene.remove(this.level);
-    this.fireMats = [];
+    if (this.level) {
+      this.scene.remove(this.level);
+      this.level.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    }
+    this.fireMats = []; this.lampMats = []; this.buzzMats = []; this.baked = [];
     const group = new THREE.Group();
     const buckets = new Map();
-    const bucket = (style) => { if (!buckets.has(style)) buckets.set(style, { pos: [], nrm: [], uv: [], baked: [], idx: [] }); return buckets.get(style); };
+    const bucket = (style) => { if (!buckets.has(style)) buckets.set(style, { pos: [], nrm: [], uv: [], baked: [], fire: [], buzz: [], idx: [] }); return buckets.get(style); };
     const B = def.bounds, cx = (B.minX + B.maxX) / 2, cz = (B.minZ + B.maxZ) / 2;
-    const light = [0, 0, 0];
+    const L0 = [0, 0, 0], L1 = [0, 0, 0], L2 = [0, 0, 0];
     const FACES = [
       { n: [1, 0, 0], u: [0, 0, -1], v: [0, 1, 0] }, { n: [-1, 0, 0], u: [0, 0, 1], v: [0, 1, 0] },
       { n: [0, 1, 0], u: [1, 0, 0], v: [0, 0, -1] }, { n: [0, -1, 0], u: [1, 0, 0], v: [0, 0, 1] },
       { n: [0, 0, 1], u: [1, 0, 0], v: [0, 1, 0] }, { n: [0, 0, -1], u: [-1, 0, 0], v: [0, 1, 0] },
     ];
     for (const b of def.boxes) {
+      if (b.hidden) continue;
       const mn = [b.min.x, b.min.y, b.min.z], mx = [b.max.x, b.max.y, b.max.z], ctr = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
       for (const F of FACES) {
         const ax = F.n[0] ? 0 : F.n[1] ? 1 : 2, top = F.n[1] > 0;
@@ -280,32 +298,45 @@ const Gfx = {
         if (F.n[1] < 0 && b.min.y <= 0.01) continue;
         const fc = ctr.slice(); fc[ax] = F.n[ax] > 0 ? mx[ax] : mn[ax];
         if (b.kind === 'bound' && !top && F.n[0] * (cx - fc[0]) + F.n[2] * (cz - fc[2]) <= 0) continue;
-        if (World.pointSolid(fc[0] + F.n[0] * 0.06, fc[1] + F.n[1] * 0.06, fc[2] + F.n[2] * 0.06)) continue;
         const style = top ? (b.top || b.style) : b.style, [tw, th] = TEX_METRES(style);
         const ua = F.u[0] ? 0 : F.u[1] ? 1 : 2, va = F.v[0] ? 0 : F.v[1] ? 1 : 2;
-        const ulen = mx[ua] - mn[ua], vlen = mx[va] - mn[va];
-        const nu = Math.max(1, Math.ceil(ulen)), nv = Math.max(1, Math.ceil(vlen));
-        const K = bucket(style), i0 = K.pos.length / 3;
+        const ulen = mx[ua] - mn[ua], vlen = mx[va] - mn[va], cs = b.cell || 1;
+        const nu = Math.max(1, Math.ceil(ulen / cs)), nv = Math.max(1, Math.ceil(vlen / cs));
         // corner where u and v are smallest along their (signed) axes
         const o = fc.slice();
         o[ua] = F.u[ua] > 0 ? mn[ua] : mx[ua];
         o[va] = F.v[va] > 0 ? mn[va] : mx[va];
-        for (let j = 0; j <= nv; j++) {
-          for (let i = 0; i <= nu; i++) {
-            const p = o.slice();
-            p[ua] += F.u[ua] * ulen * (i / nu);
-            p[va] += F.v[va] * vlen * (j / nv);
-            K.pos.push(p[0], p[1], p[2]);
-            K.nrm.push(F.n[0], F.n[1], F.n[2]);
-            const wu = p[0] * F.u[0] + p[1] * F.u[1] + p[2] * F.u[2], wv = p[0] * F.v[0] + p[1] * F.v[1] + p[2] * F.v[2];
-            K.uv.push(wu / tw, wv / th);
-            World.lightAt(p[0], p[1], p[2], F.n[0], F.n[1], F.n[2], light);
-            K.baked.push(light[0], light[1], light[2]);
-          }
-        }
+        const at = (fi, fj, lift, out) => {
+          for (let k = 0; k < 3; k++) out[k] = o[k] + F.u[k] * ulen * fi + F.v[k] * vlen * fj + F.n[k] * lift;
+          return out;
+        };
+        // cells showing: their middle just off the face isn't inside another box
+        const keep = new Uint8Array(nu * nv), P = [0, 0, 0];
+        let any = false;
         for (let j = 0; j < nv; j++) {
           for (let i = 0; i < nu; i++) {
-            const a = i0 + j * (nu + 1) + i, bb = a + 1, c = a + nu + 1, d = c + 1;
+            at((i + 0.5) / nu, (j + 0.5) / nv, 0.06, P);
+            if (!World.pointSolid(P[0], P[1], P[2])) { keep[j * nu + i] = 1; any = true; }
+          }
+        }
+        if (!any) continue;
+        const K = bucket(style), vid = new Int32Array((nu + 1) * (nv + 1)).fill(-1);
+        const vert = (i, j) => {
+          const q = j * (nu + 1) + i;
+          if (vid[q] >= 0) return vid[q];
+          const p = at(i / nu, j / nv, 0, [0, 0, 0]);
+          vid[q] = K.pos.length / 3;
+          K.pos.push(p[0], p[1], p[2]);
+          K.nrm.push(F.n[0], F.n[1], F.n[2]);
+          K.uv.push((p[0] * F.u[0] + p[1] * F.u[1] + p[2] * F.u[2]) / tw, (p[0] * F.v[0] + p[1] * F.v[1] + p[2] * F.v[2]) / th);
+          World.lightSplit(p[0], p[1], p[2], F.n[0], F.n[1], F.n[2], L0, L1, L2);
+          K.baked.push(L0[0], L0[1], L0[2]); K.fire.push(L1[0], L1[1], L1[2]); K.buzz.push(L2[0], L2[1], L2[2]);
+          return vid[q];
+        };
+        for (let j = 0; j < nv; j++) {
+          for (let i = 0; i < nu; i++) {
+            if (!keep[j * nu + i]) continue;
+            const a = vert(i, j), bb = vert(i + 1, j), c = vert(i, j + 1), d = vert(i + 1, j + 1);
             K.idx.push(a, bb, d, a, d, c);
           }
         }
@@ -318,20 +349,61 @@ const Gfx = {
       geo.setAttribute('normal', new THREE.Float32BufferAttribute(K.nrm, 3));
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(K.uv, 2));
       geo.setAttribute('baked', new THREE.Float32BufferAttribute(K.baked, 3));
+      geo.setAttribute('bakedFire', new THREE.Float32BufferAttribute(K.fire, 3));
+      geo.setAttribute('bakedBuzz', new THREE.Float32BufferAttribute(K.buzz, 3));
       geo.setIndex(K.idx);
       const opts = { map: this.texture(style) };
       if (FACADES.has(style)) Object.assign(opts, { emissiveMap: this.texture(style, true), emissive: new THREE.Color(1, 1, 1) });
       group.add(new THREE.Mesh(geo, this.litMaterial(opts, 'baked')));
+      this.baked.push(geo);
       verts += K.pos.length / 3;
     }
     for (const e of def.emitters || []) {
       const m = new THREE.MeshBasicMaterial({ color: e.color, fog: !e.glow });
+      m.userData.base = new THREE.Color(e.color);
       if (e.fire) this.fireMats.push(m);
+      if (e.lamp) this.lampMats.push(m);
+      if (e.buzz) this.buzzMats.push(m);
       group.add(new THREE.Mesh(this.boxGeometry([e]), m));
     }
     this.level = group;
     this.levelVerts = verts;
     this.scene.add(group);
+    this.syncLamps();
+  },
+  // The steady channel again, for the Blackout: the meshes stay, only their light changes.
+  rebake() {
+    const L0 = [0, 0, 0], L1 = [0, 0, 0], L2 = [0, 0, 0];
+    for (const geo of this.baked) {
+      const P = geo.attributes.position, N = geo.attributes.normal, A = geo.attributes.baked;
+      for (let i = 0; i < P.count; i++) {
+        World.lightSplit(P.getX(i), P.getY(i), P.getZ(i), N.getX(i), N.getY(i), N.getZ(i), L0, L1, L2);
+        A.setXYZ(i, L0[0], L0[1], L0[2]);
+      }
+      A.needsUpdate = true;
+    }
+    this.syncLamps();
+  },
+  // lamp heads go dark in a Blackout; the fog closes in a little
+  syncLamps() {
+    for (const m of this.lampMats) m.color.copy(World.blackout ? new THREE.Color('#2a2426') : m.userData.base);
+    this.scene.fog.far = World.blackout ? 75 : 95;
+  },
+  // Flicker for this frame: fires waver continuously; neon and failing lamps hold steady and now and then
+  // stutter out for a moment. Applied to the baked light, the glowing shapes and characters' light.
+  flicker(t, realDt) {
+    const f = 0.84 + 0.12 * Math.sin(t * 17.3) * Math.sin(t * 5.1) + 0.04 * Math.sin(t * 41);
+    const B = this._buzz || (this._buzz = { t: 0, k: 1, next: 2 });
+    B.next -= realDt;
+    if (B.t > 0) { B.t -= realDt; B.k = ((t * 28) | 0) % 3 ? 0.18 : 0.75; if (B.t <= 0) B.k = 1; }
+    else if (B.next <= 0) { B.t = rand(0.08, 0.3); B.next = rand(1.5, 5); }
+    World.flick.fire = f; World.flick.buzz = B.k;
+    this.uFire.value = f; this.uBuzz.value = B.k;
+    for (const m of this.fireMats) m.color.setRGB(1, 0.55 + 0.25 * Math.sin(t * 17) * Math.sin(t * 5.3), 0.2);
+    for (const m of this.buzzMats) {
+      if (World.blackout && this.lampMats.includes(m)) continue;
+      m.color.copy(m.userData.base).multiplyScalar(0.25 + 0.75 * B.k);
+    }
   },
   // plain box mesh for small props and emitters
   boxGeometry(boxes) {

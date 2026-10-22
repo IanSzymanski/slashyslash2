@@ -16,6 +16,8 @@ const Render = {
     this.ctx.imageSmoothingEnabled = false;
     this.playerRig = Rig.build(MODELS.player);
     this.playerRig.mesh.visible = false;
+    // yaw last, so the body's forward tilt and bank are about its own axes
+    this.playerRig.mesh.rotation.order = 'YXZ';
     Gfx.scene.add(this.playerRig.mesh);
     this.pickupGeo = Gfx.boxGeometry([{ min: { x: -0.08, y: -0.22, z: -0.08 }, max: { x: 0.08, y: 0.22, z: 0.08 } }, { min: { x: -0.22, y: -0.08, z: -0.08 }, max: { x: 0.22, y: 0.08, z: 0.08 } }]);
     this.pickupMat = new THREE.MeshBasicMaterial({ color: '#5aff7a' });
@@ -60,6 +62,8 @@ const Render = {
     app.style.height = h + 'px';
     app.style.setProperty('--ui-scale', (h / 720).toFixed(3));
     document.getElementById('scanlines').style.backgroundSize = '100% ' + Math.max(2, Math.round(scale)) + 'px';
+    // Retro renders at the 2D game's 480x270; the canvas is already scaled up without smoothing
+    if (S.visuals.retro) { Gfx.resize(VIEW_W, VIEW_H); return; }
     const k = Math.min(2, window.devicePixelRatio || 1) * S.visuals.resScale;
     Gfx.resize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
   },
@@ -105,11 +109,11 @@ const Render = {
   syncModels(realDt) {
     const seen = new Set();
     for (const e of Game.enemies) {
-      if (e.dead || !MODELS[e.def.model]) continue;
+      if (e.dead || !MODELS[e.type]) continue;
       seen.add(e);
       let R = this.models.get(e);
       if (!R) {
-        R = Rig.build(MODELS[e.def.model]);
+        R = Rig.build(MODELS[e.type]);
         Gfx.scene.add(R.mesh);
         this.models.set(e, R);
         e.model = R;
@@ -148,7 +152,7 @@ const Render = {
     if (P) {
       const p = P.rp || P.pos;
       R.mesh.position.set(p.x, p.y, p.z);
-      R.mesh.rotation.y = P.yaw;
+      R.mesh.rotation.set(P.tilt || 0, P.yaw, P.bank || 0);
       PlayerPose.apply(R, P);
       const want = Camera.curDist < 1 ? clamp(Camera.curDist - 0.4, 0, 1) / 0.6 : 1;
       const blink = P.blinkT > 0 && P.hurtT <= 0 && ((Game.realTime * 30) | 0) % 2 ? 0.55 : 1;
@@ -166,12 +170,14 @@ const Render = {
     const v = this._v.set(0, 0.55, 0.03);
     R.bones.weapon.localToWorld(v);
     Gfx.light(v.x, v.y, v.z, '#ff2030', P.sheathe || P.idleT > 2.5 ? 0.5 : 1.4, 3.5);
+    // in a Blackout you carry a little light of your own, as in 2D
+    if (World.blackout) { const c = P.rp || P.pos; Gfx.light(c.x, c.y + 2.2, c.z, '#c8a0b8', 2.2, 11); }
   },
 
   draw(realDt) {
     this.fps = lerp(this.fps, 1 / Math.max(realDt, 0.001), 0.05);
     const G = Game, t = G.realTime;
-    for (const m of Gfx.fireMats) m.color.setRGB(1, 0.55 + 0.25 * Math.sin(t * 17) * Math.sin(t * 5.3), 0.2);
+    Gfx.flicker(t, realDt);
     this.syncModels(realDt);
     Views.sync();
     FX.sync(Gfx.camera);
@@ -284,7 +290,7 @@ const Render = {
     // wave info
     const D = Director;
     if (D.wave > 0) {
-      const label = G.mode === 'street' ? 'STREET WAVE ' + D.wave : G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
+      const label = G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
       drawText(ctx, label, VIEW_W / 2, 6, { align: 'center', color: '#ffd0d8' });
       let sub;
       if (D.state === 'fight') sub = D.remaining() + ' HOSTILES' + (D.modifier ? ' - ' + WAVE_MODIFIERS[D.modifier].name : '');
@@ -389,8 +395,10 @@ const Render = {
         ctx.fillRect(Math.round(px), Math.round(py), 1, 1);
       }
     };
+    // the Glints Only modifier leaves just the glints and where hits came from
+    const glintsOnly = Game.mod('glints');
     for (const e of Game.enemies) {
-      if (e.dead) continue;
+      if (e.dead || glintsOnly) continue;
       const s = this.project(e.center());
       if (s && !s.off) continue;
       const yaw = yawOf(e.pos.x - Camera.pos.x, e.pos.z - Camera.pos.z);

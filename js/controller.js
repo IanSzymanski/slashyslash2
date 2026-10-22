@@ -1,21 +1,30 @@
 'use strict';
-// Character controller shared by the player and, later, the rival: run, jump, double jump, jump cut,
-// crouch, slide, bullet jump, wall slide and wall kick, dash, step-up and ledge mantle. The owner fills an intent each tick and handles
-// sound and effects through c.onMove(event, data), so this file runs headless in tools/feel-check.js.
+// Character controller shared by the player and, later, the rival: run and sprint, jump, double jump, jump
+// cut, crouch, slide, bullet jump, wall slide and wall kick, dash, vault and ledge mantle. The owner fills an
+// intent each tick and handles sound and effects through c.onMove(event, data), so this file runs headless
+// in tools/feel-check.js.
 
-// The 2D movement constants converted at PX = 1/11 (1 m = 11 px). A starting point: retune in metres.
+// Started from the 2D constants converted at PX = 1/11, then retuned in metres for a third-person feel:
+// momentum on the ground (a run that builds to a sprint, turns that carve, skids on reversals), vaults
+// instead of tall step-ups, and floatier jumps that reach the same heights.
 const MOVE = {
   R: 0.36, H: 1.82, CROUCH_H: 1.18, SLIDE_H: 0.91,
-  RUN: 13.8, ACCEL: 136, AIR_ACCEL: 95.5, FRICTION: 154.5, AIR_DRAG: 21.8, OVER_DRAG: 32.7,
-  GRAV: 87.3, MAX_FALL: 39.1, JUMP: 27.3, DJUMP: 25.6, JUMP_CUT: 0.45, COYOTE: 0.09, JUMP_BUF: 0.13,
-  CROUCH_SPEED: 5.0, SLIDE_MIN: 9.1, SLIDE_BOOST: 23.2, SLIDE_FRICTION: 20.9, SLIDE_TIME: 0.7, SLIDE_END: 5.9,
+  // a quick start to RUN, then a build to SPRINT over SPRINT_BUILD seconds of running
+  RUN: 9.5, SPRINT: 13.8, SPRINT_BUILD: 0.5, ACCEL: 70, AIR_ACCEL: 55, FRICTION: 62, AIR_DRAG: 9, OVER_DRAG: 32.7,
+  // turns carve the velocity round: radians a second when slow, falling to TURN at a sprint; a reversal
+  // sharper than SKID_ANGLE at speed brakes along the old line first
+  TURN_SLOW: 22, TURN: 7.5, AIR_TURN: 5.5, SKID_ANGLE: 2.3, SKID_FRICTION: 58,
+  // gravity eases off near the top of a held jump (below APEX_V m/s) so arcs hang a moment
+  GRAV: 70, MAX_FALL: 35, JUMP: 24.2, DJUMP: 22.6, JUMP_CUT: 0.45, COYOTE: 0.1, JUMP_BUF: 0.13, APEX_V: 4.5, APEX_HANG: 0.6,
+  CROUCH_SPEED: 5.0, SLIDE_MIN: 8.0, SLIDE_BOOST: 12, SLIDE_FRICTION: 9, SLIDE_TIME: 1.6, SLIDE_END: 6.0,
   DASH_SPEED: 43.6, DASH_TIME: 0.14, DASH_IFRAMES: 0.2, DASH_RECHARGE: 1.0, DASH_CHARGES: 2, DASH_ATTACK_WINDOW: 0.14,
-  // grounded bodies walk up lips this tall (car bodies are 0.9 m); ledges up to MANTLE_UP above the feet can be climbed
-  STEP: 1.0, MANTLE_UP: 1.45, MANTLE_TIME: 0.17,
+  // grounded bodies walk up lips this tall; running into anything up to VAULT_UP vaults it at speed; ledges up
+  // to MANTLE_UP above the feet can be climbed from the air
+  STEP: 0.45, VAULT_UP: 1.95, VAULT_MIN: 3.5, MANTLE_UP: 1.45, MANTLE_TIME: 0.17,
   // pushing into a wall while falling slides down it; jumping off any wall kicks away from it
-  WALL_SLIDE: 6.36, WALL_JUMP_OUT: 16.4, WALL_JUMP_UP: 26.4, WALL_LOCK: 0.13,
+  WALL_SLIDE: 6.36, WALL_JUMP_OUT: 16.4, WALL_JUMP_UP: 23.4, WALL_LOCK: 0.13,
   // crouch or slide plus jump launches along the aim, at least this steeply upward
-  BULLET: 34.1, BULLET_MIN_UP: 0.28,
+  BULLET: 32, BULLET_MIN_UP: 0.28,
 };
 
 const Controller = {
@@ -28,7 +37,7 @@ const Controller = {
     c.coyote = 0; c.jumpBuf = 0; c.airJumps = 1; c.jumpCuttable = false;
     c.crouching = false; c.sliding = false; c.slideT = 0;
     c.dashT = 0; c.dashVX = 0; c.dashVZ = 0; c.dashEndT = 0; c.dashCharges = M.DASH_CHARGES; c.dashRecharge = 0;
-    c.mantle = null; c.landLag = 0;
+    c.mantle = null; c.vault = null; c.landLag = 0; c.sprintK = 0; c.skidding = false; c.skidT = 0;
     c.wallN = null; c.wallSliding = false; c.wallJumpLock = 0;
     // set by the owner every tick: speed scale while attacking or parrying, gravity scale, whether jumps are allowed
     c.speedMul = 1; c.gravK = 1; c.canJump = true; c.canSlide = true;
@@ -48,6 +57,7 @@ const Controller = {
     c.dashEndT = Math.max(0, c.dashEndT - dt);
     c.landLag = Math.max(0, c.landLag - dt);
     c.wallJumpLock = Math.max(0, c.wallJumpLock - dt);
+    c.skidT = Math.max(0, c.skidT - dt);
     if (c.dashCharges < M.DASH_CHARGES) {
       c.dashRecharge += dt;
       if (c.dashRecharge >= M.DASH_RECHARGE + (c.dashRechargeExtra || 0)) { c.dashCharges++; c.dashRecharge = 0; }
@@ -74,7 +84,7 @@ const Controller = {
       v.x *= k; v.z *= k;
       // a little steering, so a slide can follow a curve
       if (I.mx || I.mz) {
-        const [nx, nz] = approach2(v.x, v.z, I.mx * hs, I.mz * hs, 6 * dt);
+        const [nx, nz] = approach2(v.x, v.z, I.mx * hs, I.mz * hs, 10 * dt);
         const l = Math.hypot(nx, nz) || 1, s = this.hspeed(c);
         v.x = (nx / l) * s; v.z = (nz / l) * s;
       }
@@ -90,27 +100,28 @@ const Controller = {
       if (this.setHeight(c, M.H)) c.crouching = false;
     }
 
-    // horizontal: accelerate toward the intended velocity, keep extra speed only while it points the same way
-    const maxSpd = (c.crouching ? M.CROUCH_SPEED : M.RUN) * c.speedMul;
+    // the sprint builds while you keep running at full pace, holds through turns and jumps, and drains
+    // when you stop, crouch, attack or skid
+    const ml = Math.hypot(I.mx, I.mz), moving = ml > 0.01 && c.wallJumpLock <= 0;
+    hs = this.hspeed(c);
+    if (c.onGround && !c.sliding) {
+      if (moving && !c.crouching && c.speedMul >= 1 && hs > M.RUN * 0.85) c.sprintK = Math.min(1, c.sprintK + dt / M.SPRINT_BUILD);
+      else if (!moving || c.crouching || c.speedMul < 1) c.sprintK = Math.max(0, c.sprintK - dt * 2.5);
+    }
+    const maxSpd = (c.crouching ? M.CROUCH_SPEED : lerp(M.RUN, M.SPRINT, c.sprintK)) * c.speedMul;
+    c.skidding = false;
     if (!c.sliding) {
-      const accel = c.onGround ? M.ACCEL : M.AIR_ACCEL;
-      const ml = Math.hypot(I.mx, I.mz);
-      if (ml > 0.01 && c.wallJumpLock <= 0) {
-        hs = this.hspeed(c);
-        const along = hs > 0 ? (v.x * I.mx + v.z * I.mz) / (hs * ml) : 0;
-        let target = maxSpd * Math.min(1, ml);
-        if (hs > target && along > 0.5) target = approach(hs, target, (c.onGround ? M.OVER_DRAG * 2 : M.OVER_DRAG * 0.5) * dt);
-        const [nx, nz] = approach2(v.x, v.z, (I.mx / ml) * target, (I.mz / ml) * target, accel * dt);
-        v.x = nx; v.z = nz;
-      } else {
+      if (moving) this.steerVel(c, dt, I.mx / ml, I.mz / ml, maxSpd * Math.min(1, ml));
+      else {
         const fr = c.onGround ? M.FRICTION : M.AIR_DRAG;
         const [nx, nz] = approach2(v.x, v.z, 0, 0, fr * dt);
         v.x = nx; v.z = nz;
       }
     }
 
-    // gravity: a little heavier on the way down when jump isn't held
+    // gravity: it eases off near the top of a held jump, and is a little heavier on the way down when not
     let grav = M.GRAV * c.gravK;
+    if (!c.onGround && I.jumpHeld && Math.abs(v.y) < M.APEX_V) grav *= M.APEX_HANG;
     if (v.y < 0 && !I.jumpHeld) grav *= 1.12;
     v.y = Math.max(v.y - grav * dt, -M.MAX_FALL);
 
@@ -128,6 +139,35 @@ const Controller = {
       } else if (c.wallN) { this.wallJump(c); c.jumpBuf = 0; }
       else if (c.airJumps > 0) { this.doubleJump(c); c.jumpBuf = 0; }
     }
+  },
+  // Turns the horizontal velocity toward (ux, uz) and brings its speed to target. From a standstill it just
+  // accelerates that way; at speed the heading carves round at a rate that falls as speed rises, and a
+  // reversal sharper than SKID_ANGLE brakes along the old line (a skid on the ground) before setting off.
+  steerVel(c, dt, ux, uz, target) {
+    const M = c.M, v = c.vel, ground = c.onGround, hs = this.hspeed(c), acc = ground ? M.ACCEL : M.AIR_ACCEL;
+    if (hs < 0.6) {
+      const [nx, nz] = approach2(v.x, v.z, ux * target, uz * target, acc * dt);
+      v.x = nx; v.z = nz;
+      return;
+    }
+    const dx = v.x / hs, dz = v.z / hs, ang = Math.atan2(dx * uz - dz * ux, dx * ux + dz * uz);
+    if (Math.abs(ang) > M.SKID_ANGLE && (!ground || hs > M.RUN * 0.5)) {
+      const s = approach(hs, 0, (ground ? M.SKID_FRICTION : M.AIR_ACCEL) * dt);
+      v.x = dx * s; v.z = dz * s;
+      if (ground) {
+        c.skidding = true;
+        c.sprintK = Math.max(0, c.sprintK - dt * 4);
+        if (c.skidT <= 0) this.emit(c, 'skid', { x: dx, z: dz });
+        c.skidT = 0.1;
+      }
+      return;
+    }
+    const rate = ground ? lerp(M.TURN_SLOW, M.TURN, clamp(hs / M.SPRINT, 0, 1)) : M.AIR_TURN;
+    const turn = clamp(ang, -rate * dt, rate * dt), cs = Math.cos(turn), sn = Math.sin(turn);
+    let s = hs;
+    if (s < target) s = Math.min(target, s + acc * dt);
+    else if (s > target) s = approach(s, target, (ground ? M.OVER_DRAG * 2 : M.OVER_DRAG * 0.5) * dt);
+    v.x = (dx * cs - dz * sn) * s; v.z = (dx * sn + dz * cs) * s;
   },
   // The outward normal of a wall within reach of the body's side, tall enough to kick off (not a car).
   // Walls are box faces, so only the four axis directions need probing; the one pushed into wins.
@@ -163,7 +203,7 @@ const Controller = {
   startSlide(c) {
     const M = c.M, hs = this.hspeed(c) || 1;
     c.sliding = true; c.crouching = false; c.slideT = M.SLIDE_TIME;
-    const s = Math.max(hs * 1.15, M.SLIDE_BOOST) / hs;
+    const s = Math.max(hs * 1.2, M.SLIDE_BOOST) / hs;
     c.vel.x *= s; c.vel.z *= s;
     this.setHeight(c, M.SLIDE_H);
     this.emit(c, 'slide');
@@ -212,7 +252,11 @@ const Controller = {
     const kh = clamp((k - 0.45) / 0.55, 0, 1);
     c.pos.x = lerp(m.x0, m.x1, kh); c.pos.z = lerp(m.z0, m.z1, kh);
     c.vel.x = 0; c.vel.y = 0; c.vel.z = 0;
-    if (k >= 1) { c.mantle = null; c.onGround = true; c.airJumps = 1; this.emit(c, 'mantleEnd'); }
+    if (k >= 1) {
+      // step off the top still moving, so a climb flows into the run
+      c.vel.x = m.dx * m.spd; c.vel.z = m.dz * m.spd;
+      c.mantle = null; c.onGround = true; c.airJumps = 1; this.emit(c, 'mantleEnd');
+    }
   },
   // Pushing into a wall in the air with its top within reach climbs it, if the top has room.
   tryMantle(c, I) {
@@ -226,20 +270,78 @@ const Controller = {
     const h = World.boxFree(x1, y1, z1, c.r, M.H) ? M.H : World.boxFree(x1, y1, z1, c.r, M.CROUCH_H) ? M.CROUCH_H : 0;
     if (!h || !World.boxFree(c.pos.x, y1, c.pos.z, c.r, h)) return false;
     if (h < c.h) c.h = h;
-    c.mantle = { t: 0, dur: M.MANTLE_TIME, y0: c.pos.y, y1, x0: c.pos.x, z0: c.pos.z, x1, z1 };
+    c.mantle = { t: 0, dur: M.MANTLE_TIME, y0: c.pos.y, y1, x0: c.pos.x, z0: c.pos.z, x1, z1, dx: -nx, dz: -nz, spd: clamp(c.preHs || 0, 3, 8) };
     c.sliding = false; c.crouching = h < M.H;
     this.emit(c, 'mantle');
     return true;
   },
 
-  // Moves the body and handles landing, coyote time and mantles. opt.step overrides the step height.
+  // ---------- vault ----------
+  // Running into anything between a step and VAULT_UP high goes over it without breaking stride: up onto
+  // its top in place, then on along the run's heading, landing on it or dropping off the far side.
+  tryVault(c, I, pvx, pvz) {
+    const M = c.M, col = c.col, b = col && col.wallBox, ml = Math.hypot(I.mx, I.mz);
+    if (!b || c.dashT > 0 || ml < 0.3) return false;
+    const nx = col.wallX, nz = col.wallZ, hs = Math.hypot(pvx, pvz);
+    if ((I.mx * -nx + I.mz * -nz) / ml < 0.5 || hs < M.VAULT_MIN) return false;
+    // over whatever is highest just past the face, within reach (a car's roof, not the body you ran into)
+    const lx = c.pos.x - nx * (c.r * 2 + 0.1), lz = c.pos.z - nz * (c.r * 2 + 0.1);
+    const top = this.highestTop(lx, lz, c.r, c.pos.y + M.VAULT_UP), rise = top - c.pos.y;
+    if (rise <= M.STEP || rise > M.VAULT_UP) return false;
+    const y1 = top + 0.03;
+    // room to rise where you stand, and at least a crouch's room on top
+    if (!World.boxFree(c.pos.x, c.pos.y + 0.02, c.pos.z, c.r, y1 - c.pos.y + c.h)) return false;
+    if (!World.boxFree(lx, y1, lz, c.r, M.CROUCH_H)) return false;
+    // keep the run's heading, turned at least partly into the obstacle
+    let dx = pvx / hs, dz = pvz / hs;
+    if (dx * -nx + dz * -nz < 0.4) { dx -= nx; dz -= nz; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; }
+    c.vault = {
+      t: 0, dur: clamp(1.6 / hs, 0.16, 0.3), y0: c.pos.y, y1, dx, dz, spd: Math.max(hs * 0.95, 4.5),
+      plant: { x: c.pos.x - nx * (c.r + 0.15), y: World.groundAt(c.pos.x - nx * (c.r + 0.15), c.pos.z - nz * (c.r + 0.15), top + 0.01), z: c.pos.z - nz * (c.r + 0.15) },
+    };
+    c.sliding = false; c.crouching = false;
+    this.emit(c, 'vault', c.vault);
+    return true;
+  },
+  // the highest box top at or below maxY anywhere under a body's footprint at (x, z)
+  highestTop(x, z, r, maxY) {
+    let best = -Infinity;
+    for (const b of World.near(x - r, z - r, x + r, z + r)) {
+      if (b.max.x <= x - r || b.min.x >= x + r || b.max.z <= z - r || b.min.z >= z + r) continue;
+      if (b.max.y <= maxY + 1e-6 && b.max.y > best) best = b.max.y;
+    }
+    return best;
+  },
+  moveVault(c, dt) {
+    const V = c.vault;
+    V.t += dt;
+    const k = Math.min(1, V.t / V.dur), y = lerp(V.y0, V.y1, easeOutQuad(Math.min(1, k / 0.55)));
+    if (World.boxFree(c.pos.x, y, c.pos.z, c.r, c.h)) c.pos.y = y;
+    const x = c.pos.x + V.dx * V.spd * dt, z = c.pos.z + V.dz * V.spd * dt;
+    if (World.boxFree(x, c.pos.y, z, c.r, c.h)) { c.pos.x = x; c.pos.z = z; }
+    c.vel.x = V.dx * V.spd; c.vel.z = V.dz * V.spd; c.vel.y = 0;
+    if (k >= 1) {
+      c.vault = null;
+      c.onGround = World.standing(c);
+      if (!c.onGround) c.coyote = c.M.COYOTE;
+      if (c.h < c.M.H && this.canStand(c)) c.h = c.M.H;
+      this.emit(c, 'vaultEnd');
+    }
+  },
+
+  // Moves the body and handles landing, coyote time, vaults and mantles. opt.step overrides the step height.
   integrate(c, dt, I, opt = {}) {
     if (c.mantle) { this.moveMantle(c, dt); return c.col || {}; }
-    const wasGround = c.onGround, preVy = c.vel.y;
+    if (c.vault) { this.moveVault(c, dt); return c.col || {}; }
+    const wasGround = c.onGround, preVy = c.vel.y, pvx = c.vel.x, pvz = c.vel.z;
+    c.preHs = Math.hypot(pvx, pvz);
     const col = World.moveBody(c, dt, { step: opt.step === undefined ? c.M.STEP : opt.step });
     if (col.ground && !wasGround) { c.airJumps = 1; this.emit(c, 'land', { vy: preVy }); }
     if (!col.ground && wasGround && c.vel.y <= 0) c.coyote = c.M.COYOTE;
-    if (I && opt.mantle !== false && col.wall) this.tryMantle(c, I);
+    if (I && opt.mantle !== false && col.wall) {
+      if (wasGround) this.tryVault(c, I, pvx, pvz);
+      else this.tryMantle(c, I);
+    }
     return col;
   },
 };

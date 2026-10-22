@@ -66,6 +66,8 @@ class Player {
     this.loops = {};
     // animation: run cycle phase, double-jump flip, landing squash, time spent at rest
     this.runPhase = 0; this.spinT = 0; this.spinDur = 0.32; this.landSquash = 0; this.idleT = 0; this.blinkT = 0;
+    // body lean from acceleration (forward, and toward the inside of a turn), and the landing roll
+    this.accF = 0; this.accL = 0; this.bank = 0; this.tilt = 0; this.rollT = 0; this.rollDur = 0.4;
     this.charId = 'ronin'; this.utilCD = 0; this.utilT = 0; this.utilFlash = 0;
     this.plunge = null; this.kickAnim = null; this.ghostT = 0; this.bulletT = 0;
     this.onMove = (ev, d) => this.moveEvent(ev, d);
@@ -111,7 +113,7 @@ class Player {
     this.animT += dt;
     this.updateAim();
     const dec = (k) => { if (this[k] > 0) this[k] = Math.max(0, this[k] - dt); };
-    for (const k of ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT', 'utilT', 'utilFlash', 'bulletT']) dec(k);
+    for (const k of ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT', 'utilT', 'utilFlash', 'bulletT', 'rollT']) dec(k);
     Controller.timers(this, dt);
     for (const m of this.hitMarks) m.t -= dt;
     this.hitMarks = this.hitMarks.filter((m) => m.t > 0);
@@ -156,13 +158,16 @@ class Player {
     this.canSlide = !this.attack && !this.sheathe;
 
     const reeled = this.rebounding() || this.zipping();
-    if (this.dashT > 0) Controller.moveDash(this, dt);
+    this.dashRechargeExtra = Game.has('emberWake') ? 0.25 : 0;
+    if (this.dashT > 0) { Controller.moveDash(this, dt); if (Game.has('emberWake') && this.dashHits) this.emberWake(); }
     else if (this.iaido) this.moveIaido(dt);
     else if (this.rebounding()) this.moveRebound(dt);
     else if (this.zipping()) this.moveZip(dt);
     else if (this.plunge) this.movePlunge(dt, I);
-    else if (!this.mantle) Controller.moveNormal(this, dt, I);
+    else if (!this.mantle && !this.vault) Controller.moveNormal(this, dt, I);
+    const vx0 = this.vel.x, vz0 = this.vel.z;
     const col = Controller.integrate(this, dt, reeled ? null : I, { mantle: !this.attack && !this.iaido && !this.sheathe && !this.plunge && !reeled, step: this.plunge ? 0 : undefined });
+    this.updateLean(dt, vx0, vz0);
     if (this.iaido && col.wall) this.iaido.t = this.iaido.dur;
     // a zip to a wall or a ledge ends when the body meets the surface near the anchor
     if (this.zipping() && this.tether.kind === 'world' && (col.wall || col.ceil || col.ground) && dist3(this.tether.pos, this.chest()) < 2.4) this.arriveZip();
@@ -176,7 +181,8 @@ class Player {
     this.updateGhosts(dt);
     this.updateFacing(dt);
     const hs = Controller.hspeed(this);
-    if (this.onGround && hs > 1.4) this.runPhase += hs * dt * 1.155;
+    // strides lengthen as the sprint builds, so the cadence rises less than the speed
+    if (this.onGround && hs > 1.4) this.runPhase += hs * dt * (1.155 - 0.22 * this.sprintK);
     // a slide throws sparks back off the leading boot and a little grit, as in 2D
     if (this.sliding && hs > 0.5) {
       const p = this.pos, dx = this.vel.x / hs, dz = this.vel.z / hs;
@@ -196,6 +202,18 @@ class Player {
       this.pos.x = this.prev.x = s.x; this.pos.y = this.prev.y = s.y; this.pos.z = this.prev.z = s.z;
       this.vel.x = this.vel.y = this.vel.z = 0;
     }
+  }
+  // How the body leans: forward with acceleration and speed, and into turns by the sideways acceleration
+  // (as a runner banks), smoothed so it never snaps.
+  updateLean(dt, vx0, vz0) {
+    const ax = (this.vel.x - vx0) / dt, az = (this.vel.z - vz0) / dt, Y = this.yaw;
+    const ground = this.onGround && !this.sliding && !this.vault && !this.mantle && this.dashT <= 0;
+    const af = ground ? ax * fwdX(Y) + az * fwdZ(Y) : 0, al = ground ? ax * -Math.cos(Y) + az * Math.sin(Y) : 0;
+    this.accF = damp(this.accF, clamp(af / 70, -1, 1), 10, dt);
+    this.accL = damp(this.accL, clamp(al / 90, -1, 1), 8, dt);
+    const k = clamp(Controller.hspeed(this) / PC.SPRINT, 0, 1);
+    this.bank = damp(this.bank, ground ? this.accL * 0.3 * k : 0, 10, dt);
+    this.tilt = damp(this.tilt, ground && !this.attack ? -0.06 * k * k : 0, 8, dt);
   }
   // While attacking or parrying (and for FACE_AIM after) the body faces the aim; otherwise where it's going.
   updateFacing(dt) {
@@ -244,7 +262,11 @@ class Player {
       this.spinT = 0; this.bulletT = 0;
       if (this.kickAnim && this.kickAnim.t > 0.1) this.kickAnim = null;
       if (this.plunge) { this.plungeImpact(); return; }
-      if (d.vy < -18.2) { this.landSquash = 0.12; Sound.play('land', { v: clamp(-d.vy / 36.4, 0.4, 1.2) }); FX.dust(p, 4 + ((-d.vy / 9) | 0), { smax: 3.6 }); }
+      const hs = Controller.hspeed(this);
+      // a hard landing at a run rolls through it instead of absorbing it
+      if (d.vy < -22 && hs > 7 && !this.attack && !this.sheathe && !Input.isDown('crouch')) {
+        this.rollT = this.rollDur; Sound.play('land', { v: 0.5 }); FX.dust(p, 6, { smax: 4.5 });
+      } else if (d.vy < -16) { this.landSquash = 0.12; Sound.play('land', { v: clamp(-d.vy / 32, 0.4, 1.2) }); FX.dust(p, 4 + ((-d.vy / 9) | 0), { smax: 3.6 }); }
       if (Input.isDown('crouch') && Controller.hspeed(this) > PC.SLIDE_MIN && !this.attack && !this.sheathe && !this.iaido) Controller.startSlide(this);
     } else if (ev === 'dash') {
       Sound.play('dash');
@@ -254,6 +276,15 @@ class Player {
       FX.light(c, '#ff3048', 3, 4, 0.15);
       Game.shake(0.06);
     } else if (ev === 'mantle') Sound.play('step');
+    else if (ev === 'vault') {
+      // a hand on the top, legs swept over
+      Sound.play('step'); Sound.play('slide');
+      FX.dust(d.plant, 4, { smax: 2.7, rise: 0.5 });
+    } else if (ev === 'skid') {
+      Sound.play('slide');
+      FX.dust(p, 6, { dir: { x: d.x, y: 0.2, z: d.z }, spread: 0.9, smax: 5.5 });
+      FX.sparks({ x: p.x, y: p.y + 0.05, z: p.z }, 4, { x: d.x, y: 0.3, z: d.z }, 0.8, 3.6, 9);
+    }
   }
 
   // ---------- dash ----------
@@ -280,6 +311,19 @@ class Player {
     if (!Controller.tryDash(this, dx, dz)) return;
     this.iframes = Math.max(this.iframes, PC.DASH_IFRAMES);
     this.yaw = yawOf(dx, dz);
+    this.dashHits = new Set();
+  }
+  // Ember Wake: a dash cuts what it passes through
+  emberWake() {
+    const c = this.center();
+    for (const e of Game.enemies) {
+      if (e.dead || e.spawning || this.dashHits.has(e) || !bodiesTouch(this, e, 0.35)) continue;
+      this.dashHits.add(e);
+      const dl = Math.hypot(this.dashVX, this.dashVZ) || 1, ux = this.dashVX / dl, uz = this.dashVZ / dl;
+      hurtEnemy(e, 20, { kv: { x: ux * 7.3, y: 5.5, z: uz * 7.3 }, dir: { x: ux, y: 0.2, z: uz }, cause: 'dash', stagger: 0.3, hitstop: 0.02 });
+      FX.sparks(e.center(), 8, { x: ux, y: 0.2, z: uz }, 1, 5.5, 18.2, { c0: '#ffffff', c1: '#ffb040', c2: '#ff3048' });
+    }
+    if (Math.random() < 0.7) FX.embers(c, 1);
   }
 
   // ---------- melee ----------

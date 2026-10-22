@@ -109,11 +109,12 @@ const UI = {
     document.getElementById('over-title').textContent = victory ? (duel ? 'Duel won' : boss ? 'Rival defeated' : 'Demo complete') : 'Signal lost';
     let sub;
     if (victory && duel) sub = 'You beat AEGIS-07 blade to blade. Practice only: win the full Rival Fight to unlock it.';
+    else if (victory && !boss && !Director.rivalBuilt()) sub = 'All six demo waves cleared. AEGIS-07 joins the demo as its last wave in a later build.';
     else if (victory) sub = boss ? 'AEGIS-07 is down and unlocked for a future character roster.' : 'All demo waves cleared, rival included. AEGIS-07 is unlocked for a future character roster.';
     else if (duel) sub = 'AEGIS-07 won the duel. Parry a swing, let it parry your counter, then parry its gold riposte.';
     else if (boss) sub = 'AEGIS-07 holds the street. Tether its pulse grenade and kick it back to break the shield.';
-    else if (Game.mode === 'endless' || Game.mode === 'street') sub = `You held the street until wave ${Director.wave}.`;
-    else sub = Director.wave === 0 ? 'Down before the first wave.' : `Down on wave ${Director.wave} of ${DEMO_WAVES.length}.`;
+    else if (Game.mode === 'endless') sub = `You held the street until wave ${Director.wave}.`;
+    else sub = Director.wave === 0 ? 'Down before the first wave.' : `Down on wave ${Director.wave} of ${Director.demoWaves()}.`;
     document.getElementById('over-sub').textContent = sub;
     const mm = Math.floor(st.time / 60), ss = Math.floor(st.time % 60).toString().padStart(2, '0');
     const rows = [
@@ -130,7 +131,8 @@ const UI = {
   renderHowTo() {
     const rows = [
       ['Look (click the game to lock the mouse)', 'Mouse'],
-      ['Move (relative to the camera)', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
+      ['Move (relative to the camera); keep running and it builds to a sprint', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
+      ['Vault over cars and anything chest-high', 'Run into it'],
       ['Jump / double jump / wall kick', actionLabel('jump')],
       ['Crouch · slide while running', actionLabel('crouch')],
       ['Bullet jump (toward the crosshair)', `${actionLabel('crouch')} + ${actionLabel('jump')}`],
@@ -199,6 +201,7 @@ const UI = {
       input.addEventListener('change', () => {
         setPath(S, item.key, input.checked);
         if (item.key === 'visuals.scanlines') this.applyVisualToggles();
+        if (item.key === 'visuals.retro') Render.resize();
         if (item.key === 'audio.muteOnBlur') Sound.setFocus(document.hasFocus());
         saveSettings();
       });
