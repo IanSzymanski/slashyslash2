@@ -246,15 +246,15 @@ class Enemy {
     const c = Game.player.chest(), dx = c.x - from.x, dy = c.y - from.y, dz = c.z - from.z, d = Math.hypot(dx, dy, dz) || 1;
     return !World.raycast(from, { x: dx / d, y: dy / d, z: dz / d }, d - 0.3);
   }
-  // A spot on the street near the player with a clear shot, nearest this enemy first.
+  // A spot at ground level near the player with a clear shot, nearest this enemy first.
   findFiringSpot(height) {
     const p = Game.player, g = World.def.groundY;
     let best = null, bd = Infinity;
     for (const r of [8, 11, 14]) {
       for (let i = 0; i < 12; i++) {
-        const a = (i / 12) * TAU, x = p.pos.x + Math.cos(a) * r, z = p.pos.z + Math.sin(a) * r;
-        if (World.groundAt(x, z, g + 0.01) !== g || !World.boxFree(x, g, z, this.r, this.h)) continue;
-        if (!this.clearShot({ x, y: g + height, z })) continue;
+        const a = (i / 12) * TAU, x = p.pos.x + Math.cos(a) * r, z = p.pos.z + Math.sin(a) * r, t = World.groundAt(x, z, g + 0.5);
+        if (t < g - 0.01 || !World.boxFree(x, t, z, this.r, this.h)) continue;
+        if (!this.clearShot({ x, y: t + height, z })) continue;
         const d = Math.hypot(x - this.pos.x, z - this.pos.z);
         if (d < bd) { bd = d; best = { x, z }; }
       }

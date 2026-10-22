@@ -59,8 +59,9 @@ const HARNESS = () => {
     aimAt(c, dp = 0) {
       for (let i = 0; i < 2; i++) { const q = Camera.pos; Camera.yaw = yawOf(c.x - q.x, c.z - q.z); Camera.pitch = Math.atan2(c.y - q.y, Math.hypot(c.x - q.x, c.z - q.z)) + dp; T.frame(1); }
     },
+    // a fresh free roam on the 2D street, where the move checks were written
     fresh() {
-      Game.toMenu(); UI.act('test');
+      Game.toMenu(); UI.act('street');
       const p = Game.player;
       S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD;
       T.frame(5);
@@ -449,6 +450,47 @@ async function run(browser, file, errors) {
     Game.toMenu(); UI.act('demo'); T.frame(2);
     Director.wave = 1; Director.nextWave();
     ok(Director.demoWaves() === 6 && Director.waveName === 'SHIELD WALL' && Director.queue.includes('shielder'), `demo wave 2 is ${Director.waveName} with shield scrappers, of ${Director.demoWaves()} waves`);
+
+    // ---------- Phase 4: the crossroads and the look ----------
+    Game.toMenu(); UI.act('test'); T.frame(2);
+    ok(Arena.id === 'crossroads' && Nav.stats.nodes > 15000 && World.def.perches.length > 20, `Free Roam loads the crossroads (${Nav.stats.nodes} nav nodes, ${World.def.perches.length} perches)`);
+    Game.toMenu(); UI.act('street'); T.frame(2);
+    const streetOk = Arena.id === 'street';
+    Game.toMenu(); UI.act('endless'); T.frame(2);
+    ok(streetOk && Arena.id === 'crossroads', 'the 2D Street loads its own arena, and Endless goes back to the crossroads');
+    // fires waver and neon stutters, in the baked light and on characters
+    let fmin = 9, fmax = 0;
+    for (let i = 0; i < 90; i++) { T.frame(1); fmin = Math.min(fmin, World.flick.fire); fmax = Math.max(fmax, World.flick.fire); }
+    Gfx._buzz.next = 0; T.frame(2);
+    ok(fmax - fmin > 0.05 && World.flick.buzz < 1 && Gfx.uBuzz.value === World.flick.buzz, `fires flicker (${fmin.toFixed(2)}-${fmax.toFixed(2)}) and neon stutters (${World.flick.buzz.toFixed(2)})`);
+    // a Blackout wave turns the street lamps off with a rebake, and clearing the wave turns them back on
+    const lampAt = World.def.lights.find((l) => l.street && l.group === 'lamp'), under = { x: lampAt.x, y: lampAt.y - 4, z: lampAt.z };
+    // the steady channel only, so a fire's flicker between readings doesn't count
+    const steady = () => World.lightSplit(under.x, under.y, under.z, undefined, undefined, undefined, [0, 0, 0], [0, 0, 0], [0, 0, 0]).reduce((a, b) => a + b, 0);
+    const lit0 = steady();
+    const later = {}, rnd = Math.random;
+    for (const k in WAVE_MODIFIERS) { later[k] = WAVE_MODIFIERS[k].later; WAVE_MODIFIERS[k].later = k !== 'blackout'; }
+    Math.random = () => 0.1;
+    Director.wave = 4; Director.nextWave();
+    Math.random = rnd;
+    for (const k in WAVE_MODIFIERS) WAVE_MODIFIERS[k].later = later[k];
+    const lit1 = steady();
+    const dark = Gfx.lampMats.every((m) => m.color.getHex() !== m.userData.base.getHex());
+    ok(Director.modifier === 'blackout' && World.blackout && lit1 < lit0 * 0.5 && dark, `a Blackout wave puts the street lamps out (light under a lamp ${lit0.toFixed(2)} to ${lit1.toFixed(2)})`);
+    Game.enemies = []; Director.queue = []; T.frame(3);
+    const lit2 = steady(), lampsOn = Gfx.lampMats.every((m) => Gfx.buzzMats.includes(m) || m.color.getHex() === m.userData.base.getHex());
+    ok(!World.blackout && Math.abs(lit2 - lit0) < 1e-6 && lampsOn, 'clearing the wave turns them back on');
+    // weather: rain and ash fall around the camera
+    S.visuals.weather = true; T.frame(2);
+    const y0 = Array.from(Views.rain.geometry.attributes.position.array.slice(0, 30)); T.frame(3);
+    const moved = Views.rain.geometry.attributes.position.array.slice(0, 30).some((v, i) => Math.abs(v - y0[i]) > 1e-4);
+    ok(Views.rain.visible && Views.ash.visible && moved, 'rain and ash fall');
+    // Retro renders at the 2D game's 480x270
+    S.visuals.retro = true; Render.resize();
+    const gl = Gfx.renderer.getContext(), retro = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+    S.visuals.retro = false; Render.resize();
+    ok(retro[0] === 480 && retro[1] === 270, `Retro renders at 480x270 (${retro.join('x')})`);
+
     T.render = false;
     Game.toMenu();
     return out;
@@ -471,7 +513,7 @@ async function run(browser, file, errors) {
     const B = World.def.bounds, PM = Camera.PITCH_MAX + 1e-6;
     const inBox = (b) => World.overlap(b.pos.x, b.pos.y + 0.02, b.pos.z, b.r * 0.9, b.h - 0.04);
     let maxEnemies = 0;
-    const seen = new Set();
+    const seen = new Set(), hist = [];
     for (let f = 0; f < frames; f++) {
       for (const c of codes) {
         const held = Input.down.has(c);
@@ -490,6 +532,8 @@ async function run(browser, file, errors) {
       if (f === Math.floor(frames / 2)) { Game.pause(); if (Game.state !== 'paused') fail('pause failed'); await UI.resumeGame(); if (Game.state !== 'playing') fail('resume failed'); }
       T.frame(1);
       if (f % 3 === 0) Render.draw(1 / 60);
+      // the player's last few frames, to explain a failure
+      { const q = Game.player; hist.push(`${f}: ${q.pos.x.toFixed(2)},${q.pos.y.toFixed(3)},${q.pos.z.toFixed(2)} v ${q.vel.x.toFixed(1)},${q.vel.y.toFixed(1)},${q.vel.z.toFixed(1)}${q.onGround ? ' ground' : ''}${q.sliding ? ' slide' : ''}${q.crouching ? ' crouch' : ''}${q.dashT > 0 ? ' dash' : ''}${q.vault ? ' vault' : ''}${q.plunge ? ' plunge' : ''}${q.iaido ? ' iaido' : ''}${q.tether ? ' tether ' + q.tether.phase + '/' + q.tether.mode : ''} h ${q.h.toFixed(2)}`); if (hist.length > 6) hist.shift(); }
       maxEnemies = Math.max(maxEnemies, Game.enemies.length);
       for (const e of Game.enemies) seen.add(e.type);
       const cp = Camera.pos, p = Game.player;
@@ -501,7 +545,7 @@ async function run(browser, file, errors) {
         const q = b.pos;
         if (![q.x, q.y, q.z].every(isFinite)) fail(`${b.type || 'player'} position not finite at frame ${f}`);
         else if (q.x < B.minX - 0.01 || q.x > B.maxX + 0.01 || q.z < B.minZ - 0.01 || q.z > B.maxZ + 0.01 || q.y < -0.01) fail(`${b.type || 'player'} outside the arena at frame ${f}: ${q.x.toFixed(2)},${q.y.toFixed(2)},${q.z.toFixed(2)}`);
-        else if (!b.mantle && inBox(b)) fail(`${b.type || 'player'} inside a box at frame ${f}: ${q.x.toFixed(2)},${q.y.toFixed(2)},${q.z.toFixed(2)}`);
+        else if (!b.mantle && inBox(b)) fail(`${b.type || 'player'} inside a box at frame ${f}: ${q.x.toFixed(2)},${q.y.toFixed(2)},${q.z.toFixed(2)}${b === p ? '\n    ' + hist.join('\n    ') : ''}`);
       }
       for (const o of Game.projectiles.concat(Game.props)) if (!o.dead && ![o.pos.x, o.pos.y, o.pos.z].every(isFinite)) fail(`${o.kind} position not finite at frame ${f}`);
       if (problems.length) break;

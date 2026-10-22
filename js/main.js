@@ -27,8 +27,10 @@
         Camera.follow(p, realDt);
         Camera.update(realDt, S.camera.distance, p.dashT > 0 || p.iaido ? 8 : 5 * clamp((Controller.hspeed(p) - PC.RUN) / (PC.SPRINT - PC.RUN), 0, 1));
       } else if (Game.state === 'menu') {
-        Camera.orbit(Arena.center(), Game.realTime);
-        Camera.update(realDt, 9);
+        // the title screen: a slow orbit framed for the arena
+        const O = World.def.orbit;
+        Camera.orbit(Arena.center(), Game.realTime, O.pitch, O.lift);
+        Camera.update(realDt, O.dist);
         Input.consume();
       } else {
         if (Game.player) { Render.interp(); Camera.update(realDt); }
@@ -45,8 +47,7 @@
       document.getElementById('nogl').hidden = false;
       return;
     }
-    World.build(STREET);
-    Gfx.buildLevel(STREET);
+    Arena.load('crossroads');
     Render.prewarm();
     Input.init(gl);
     Input.gameKeysActive = () => Game.state === 'playing';

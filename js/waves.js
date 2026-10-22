@@ -31,7 +31,7 @@ const Director = {
   mode: 'demo', wave: 0, state: 'idle', queue: [], spawnT: 0, breakT: 0, waveName: '', total: 0, scale: { hp: 1, dmg: 1 }, bossWave: false, modifier: null,
 
   start(mode) {
-    this.mode = mode; this.wave = 0; this.state = mode === 'training' ? 'training' : mode === 'test' ? 'idle' : 'intro'; this.breakT = 1.4; this.queue = []; this.modifier = null;
+    this.mode = mode; this.wave = 0; this.state = mode === 'training' ? 'training' : mode === 'test' || mode === 'street' ? 'idle' : 'intro'; this.breakT = 1.4; this.queue = []; this.modifier = null;
   },
   enabledTypes() { return ALL_TYPES.filter((t) => S.enemies[t]); },
   rivalBuilt() { return typeof Rival === 'function'; },
@@ -87,6 +87,8 @@ const Director = {
     const mods = Object.keys(WAVE_MODIFIERS).filter((k) => !WAVE_MODIFIERS[k].later);
     this.modifier = this.mode === 'endless' && !this.bossWave && this.wave >= 4 && chance(0.45) ? pick(mods) : null;
     this.state = 'fight';
+    // Blackout: the street lamps go out for this wave (a rebake while the title shows)
+    Arena.setBlackout(this.modifier === 'blackout');
     if (this.bossWave) this.spawnRival();
     const title = this.mode === 'duel' ? 'MELEE DUEL' : this.mode === 'boss' ? 'RIVAL FIGHT' : 'WAVE ' + this.wave + (this.mode === 'demo' ? ' / ' + this.demoWaves() : '');
     Game.announce(title, this.waveName, this.mode === 'duel' ? '#ff6a7a' : this.bossWave ? '#4af0ff' : '#ff3a52', 2.2);
@@ -130,6 +132,7 @@ const Director = {
     const last = this.wave >= this.lastWave();
     const done = this.mode === 'duel' ? 'DUEL WON' : this.mode === 'boss' ? 'RIVAL DEFEATED' : 'DEMO CLEAR';
     this.modifier = null;
+    Arena.setBlackout(false);
     const pickDue = this.mode === 'endless' && upgradeDue(this.wave);
     if (pickDue) Game.queueCut(1.0, () => Game.offerUpgrade());
     Game.announce(last ? done : 'WAVE CLEAR', '+' + bonus + ' PTS', '#7dff8a', 1.8);

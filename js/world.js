@@ -1,9 +1,12 @@
 'use strict';
-// The arena as a list of axis-aligned boxes: collision, raycasts, baked light and street navigation,
-// plus the Arena points the Director spawns from. Bodies are boxes too (HL1-style hulls).
+// The arena as a list of axis-aligned boxes: collision, raycasts, baked light and navigation, plus the
+// Arena points the Director spawns from. Bodies are boxes too (HL1-style hulls). Two arenas: the
+// crossroads every mode plays in, and the 2D street converted for comparison and testing.
 
 const World = {
   def: null, boxes: [], CELL: 8, cells: null, gx0: 0, gz0: 0, gw: 0, gd: 0, stamp: 0,
+  // the Blackout modifier switches the street lamps off; flick scales the flickering lights (render.js sets it)
+  blackout: false, flick: { fire: 1, buzz: 1 },
   STEP_SUB: 0.25, EPS: 1e-4,
 
   build(def) {
@@ -24,6 +27,8 @@ const World = {
       }
     }
     for (const l of def.lights) l.lin = hexLinear(l.color);
+    // perches a sniper can't stand on (inside a wall beside the ledge) are dropped
+    if (!def.perchesChecked) { def.perches = def.perches.filter((q) => this.boxFree(q.x, q.y + 0.02, q.z, 0.5, 1.8)); def.perchesChecked = true; }
     Nav.build();
   },
   // boxes whose footprint overlaps the rectangle, each once
@@ -54,6 +59,16 @@ const World = {
       if (b.max.x > x - r + E && b.min.x < x + r - E && b.max.z > z - r + E && b.min.z < z + r - E && b.max.y > y + E && b.min.y < y + h - E) return b;
     }
     return null;
+  },
+  // of the boxes overlapping a body hull, the highest top (down) or lowest bottom (up) the body came from
+  overlapY(x, y, z, r, h, down, fromY) {
+    const E = this.EPS;
+    let best = null;
+    for (const b of this.near(x - r, z - r, x + r, z + r)) {
+      if (!(b.max.x > x - r + E && b.min.x < x + r - E && b.max.z > z - r + E && b.min.z < z + r - E && b.max.y > y + E && b.min.y < y + h - E)) continue;
+      if (down ? b.max.y <= fromY + E && (!best || b.max.y > best.max.y) : b.min.y >= fromY + h - E && (!best || b.min.y < best.min.y)) best = b;
+    }
+    return best || this.overlap(x, y, z, r, h);
   },
   boxFree(x, y, z, r, h) { return !this.overlap(x, y, z, r, h); },
   // top of the highest box under (x, z) at or below fromY
@@ -104,8 +119,10 @@ const World = {
       const steps = Math.max(1, Math.ceil(Math.abs(dy) / this.STEP_SUB)), s = dy / steps;
       for (let i = 0; i < steps; i++) {
         p.y += s;
-        const hit = this.overlap(p.x, p.y, p.z, r, b.h);
+        let hit = this.overlap(p.x, p.y, p.z, r, b.h);
         if (hit) {
+          // a thin slab on the street can be hit together with the street: land on (or bump) the nearer one
+          hit = this.overlapY(p.x, p.y, p.z, r, b.h, s < 0, p.y - s);
           if (s < 0) { p.y = hit.max.y; c.ground = true; c.landed = hit; } else { p.y = hit.min.y - b.h - E; c.ceil = true; }
           v.y = 0;
           break;
@@ -118,15 +135,18 @@ const World = {
   },
 
   // ---------- light ----------
-  // Light reaching a point from the static lamps, neons and fires, with shadow rays against the boxes.
-  // With a normal it's what a surface facing that way receives (the bake); without, an all-round
-  // sample for a character standing there. Returns linear RGB.
-  lightAt(x, y, z, nx, ny, nz, out = [0, 0, 0]) {
-    const D = this.def, A = D.ambient, K = D.sky;
-    const up = nx === undefined ? 0.6 : 0.5 + 0.5 * ny;
-    out[0] = A[0] + K[0] * up; out[1] = A[1] + K[1] * up; out[2] = A[2] + K[2] * up;
+  // Light reaching a point from the arena's static lights, with shadow rays against the boxes, split by
+  // how it varies: out gets the steady lamps plus the ambient and sky light, fire the barrel fires (which
+  // flicker), buzz the neon and failing lamps (which drop out now and then). With a normal it's what a
+  // surface facing that way receives (the bake); without, an all-round sample for a character standing
+  // there. Street lamps give nothing during a Blackout, and the sky dims. Linear RGB.
+  lightSplit(x, y, z, nx, ny, nz, out, fire, buzz) {
+    const D = this.def, A = D.ambient, K = D.sky, dark = this.blackout;
+    const up = nx === undefined ? 0.6 : 0.5 + 0.5 * ny, amb = dark ? 0.6 : 1;
+    for (let i = 0; i < 3; i++) { out[i] = (A[i] + K[i] * up) * amb; fire[i] = 0; buzz[i] = 0; }
     const ox = nx === undefined ? x : x + nx * 0.05, oy = ny === undefined ? y : y + ny * 0.05, oz = nz === undefined ? z : z + nz * 0.05;
     for (const L of D.lights) {
+      if (dark && L.street) continue;
       const dx = L.x - ox, dy = L.y - oy, dz = L.z - oz, d2 = dx * dx + dy * dy + dz * dz;
       if (d2 > L.range * L.range) continue;
       const d = Math.sqrt(d2) || 1e-3;
@@ -134,9 +154,17 @@ const World = {
       if (nx !== undefined) { ndl = (nx * dx + ny * dy + nz * dz) / d; if (ndl <= 0) continue; }
       if (d > 0.3 && this.raycast({ x: ox, y: oy, z: oz }, { x: dx / d, y: dy / d, z: dz / d }, d - 0.25)) continue;
       const f = 1 - d / L.range, att = (f * f) / (1 + d * d * 0.02);
-      const k = L.intensity * ndl * att;
-      out[0] += L.lin[0] * k; out[1] += L.lin[1] * k; out[2] += L.lin[2] * k;
+      const k = L.intensity * ndl * att, to = L.group === 'fire' ? fire : L.group === 'buzz' ? buzz : out;
+      to[0] += L.lin[0] * k; to[1] += L.lin[1] * k; to[2] += L.lin[2] * k;
     }
+    return out;
+  },
+  // all of it at once, with the flickering lights at their current strength
+  lightAt(x, y, z, nx, ny, nz, out = [0, 0, 0]) {
+    const f = this._lf || (this._lf = [0, 0, 0]), b = this._lb || (this._lb = [0, 0, 0]);
+    this.lightSplit(x, y, z, nx, ny, nz, out, f, b);
+    const F = this.flick.fire, Z = this.flick.buzz;
+    for (let i = 0; i < 3; i++) out[i] += f[i] * F + b[i] * Z;
     return out;
   },
 };
@@ -427,28 +455,50 @@ const Nav = {
 
 // What the Director, props and training need from a level, so waves.js never reads level geometry.
 const Arena = {
+  id: null,
+  // Builds an arena's collision, nav graph, light bake and meshes; returns false if it was already loaded.
+  load(id) {
+    if (this.id === id) return false;
+    const def = ARENAS[id];
+    World.blackout = false;
+    World.build(def);
+    if (typeof Gfx !== 'undefined' && Gfx.renderer) Gfx.buildLevel(def);
+    this.id = id;
+    return true;
+  },
+  // the Blackout modifier: the street lamps go out (a rebake), and back on when the wave ends
+  setBlackout(on) {
+    on = !!on;
+    if (World.blackout === on || !World.def) return;
+    World.blackout = on;
+    if (typeof Gfx !== 'undefined' && Gfx.renderer) Gfx.rebake();
+  },
   bounds() { return World.def.bounds; },
   center() { const b = World.def.bounds; return { x: (b.minX + b.maxX) / 2, y: World.def.groundY, z: (b.minZ + b.maxZ) / 2 }; },
   spawnPoints(kind) { return World.def.spawn[kind] || []; },
   perches() { return World.def.perches; },
   barrelSpots() { return World.def.barrelSpots; },
   playerStart() { return World.def.playerStart; },
-  // nearest street-level point to (x, z) where a body of half-width r fits, searched in rings 0.5 m apart
+  // nearest ground-level point to (x, z) (the street or a kerb-high surface like the plaza) where a body of
+  // half-width r fits, searched in rings 0.5 m apart
   freeGroundAt(x, z, r) {
     const g = World.def.groundY;
     for (let ring = 0; ring <= 24; ring++) {
       const n = ring ? ring * 8 : 1;
       for (let i = 0; i < n; i++) {
         const a = (i / n) * TAU, px = x + Math.cos(a) * ring * 0.5, pz = z + Math.sin(a) * ring * 0.5;
-        if (World.groundAt(px, pz, g + 0.01) === g && World.boxFree(px, g, pz, r, PC.HEIGHT)) return { x: px, y: g, z: pz };
+        const t = World.groundAt(px, pz, g + 0.5);
+        if (t >= g - 0.01 && World.boxFree(px, t, pz, r, PC.HEIGHT)) return { x: px, y: t, z: pz };
       }
     }
     return { x, y: g, z };
   },
+  // at ground level: the street or a kerb-high surface
+  isGround(x, z) { const g = World.def.groundY, t = World.groundAt(x, z, g + 0.5); return t >= g - 0.01; },
 };
 
-// The 2D street converted with to3(): x runs along the street, heights are the 2D heights above the
-// street line, and the street gets 14 m of depth (z -7 to 7). The 2D buildings become solid blocks
+// The 2D street converted with to3() (Phase 1): x runs along the street, heights are the 2D heights above
+// the street line, and the street gets 14 m of depth (z -7 to 7). Kept for comparison and the move tests. The 2D buildings become solid blocks
 // behind the street with walkable roofs; a row of facades too tall to climb closes the front.
 const STREET = (() => {
   const G = GROUND_2D, H = (y) => (G - y) * PX, X = (x) => x * PX;
@@ -505,26 +555,175 @@ const STREET = (() => {
   // static lights for the bake, and the glowing shapes that show where they come from
   const lights = [], emitters = [];
   for (const x of [330, 760, 1240, 1600, 2010, 2290]) {
+    const buzz = x === 1600;
     emitters.push({ min: { x: X(x) - 0.1, y: 0, z: -6.4 }, max: { x: X(x) + 0.1, y: 5.6, z: -6.2 }, color: '#26222c' });
-    emitters.push({ min: { x: X(x) - 0.45, y: 5.45, z: -6.6 }, max: { x: X(x) + 0.45, y: 5.65, z: -5.6 }, color: '#ffd8a0', glow: true });
-    lights.push({ x: X(x), y: 5.2, z: -6.0, color: '#ffb060', intensity: 2.4, range: 17 });
+    emitters.push({ min: { x: X(x) - 0.45, y: 5.45, z: -6.6 }, max: { x: X(x) + 0.45, y: 5.65, z: -5.6 }, color: '#ffd8a0', glow: true, lamp: true, buzz });
+    lights.push({ x: X(x), y: 5.2, z: -6.0, color: '#ffb060', intensity: 2.4, range: 17, street: true, group: buzz ? 'buzz' : 'lamp' });
   }
   for (const [x, top, z] of [[140, G, 4.5], [940, G, 5], [1700, G, 4], [1200, 175, -11], [2160, G, 5]]) {
     const y = H(top);
     emitters.push({ min: { x: X(x) - 0.35, y, z: z - 0.35 }, max: { x: X(x) + 0.35, y: y + 0.9, z: z + 0.35 }, color: '#3a2a26' });
     emitters.push({ min: { x: X(x) - 0.3, y: y + 0.9, z: z - 0.3 }, max: { x: X(x) + 0.3, y: y + 1.05, z: z + 0.3 }, color: '#ffb040', glow: true, fire: true });
-    lights.push({ x: X(x), y: y + 1.3, z, color: '#ff7a2a', intensity: 2.2, range: 12 });
+    lights.push({ x: X(x), y: y + 1.3, z, color: '#ff7a2a', intensity: 2.2, range: 12, group: 'fire' });
   }
   for (const [x, y, text, color, vertical] of [[527, 222, 'HOTEL', '#ff3ad0', true], [1150, 188, 'RAMEN', '#3af0ff'], [122, 344, '24H', '#ffd03a'], [1600, 266, 'BAR', '#7dff5a'], [872, 344, 'OPEN', '#ff5a5a']]) {
     const w = vertical ? 0.5 : text.length * 0.55, h = vertical ? text.length * 0.6 : 0.6, cy = H(y);
-    emitters.push({ min: { x: X(x) - w / 2, y: cy - h / 2, z: BACK }, max: { x: X(x) + w / 2, y: cy + h / 2, z: BACK + 0.12 }, color, glow: true });
-    lights.push({ x: X(x), y: cy, z: BACK + 0.8, color, intensity: 1.8, range: 11 });
+    emitters.push({ min: { x: X(x) - w / 2, y: cy - h / 2, z: BACK }, max: { x: X(x) + w / 2, y: cy + h / 2, z: BACK + 0.12 }, color, glow: true, buzz: true });
+    lights.push({ x: X(x), y: cy, z: BACK + 0.8, color, intensity: 1.8, range: 11, group: 'buzz' });
   }
+  // clearance rules (feel-check.js): the street, and the alleys between the back-row blocks
+  const row = boxes.filter((b) => b.kind === 'building').sort((a, b) => a.min.x - b.min.x);
+  const alleys = [];
+  for (let i = 1; i < row.length; i++) alleys.push({ min: { x: row[i - 1].max.x, z: -15 }, max: { x: row[i].min.x, z: BACK } });
   return {
-    boxes, groundY: 0, emitters, lights,
+    name: 'The 2D Street', boxes, groundY: 0, emitters, lights,
     ambient: [0.022, 0.018, 0.032], sky: [0.05, 0.04, 0.075],
     bounds: { minX: L, maxX: R, minZ: -15, maxZ: FRONT },
     playerStart: { x: X(1200), y: 0, z: 0, yaw: -Math.PI / 2 },
     spawn: { ground, high }, perches, barrelSpots,
+    clearance: { streets: [{ min: { x: L, z: BACK }, max: { x: R, z: FRONT } }], alleys },
+    orbit: { dist: 9, pitch: -0.3, lift: 0 },
   };
 })();
+
+// The crossroads (Phase 4), about 70 x 70 m: four streets meet at a plaza raised a kerb's height. A block of
+// four buildings fills each corner, split by 6 m alleys, with walkable roofs from 6 to 18 m and clutter on
+// top. An overpass crosses the east street, girders cross the other three and one alley, and fire escapes
+// climb every building taller than an enemy's jump. Container barricades close the street ends against a
+// ring of facades too tall to climb. Clearance rules: streets 18 m wide, 5 m under anything you walk
+// under, alleys 6 m, no way into a building.
+const CROSSROADS = (() => {
+  const boxes = [], lights = [], emitters = [];
+  const B = (x0, y0, z0, x1, y1, z1, style, o = {}) => {
+    const b = Object.assign({ min: { x: Math.min(x0, x1), y: y0, z: Math.min(z0, z1) }, max: { x: Math.max(x0, x1), y: y1, z: Math.max(z0, z1) }, style }, o);
+    boxes.push(b);
+    return b;
+  };
+  const E = 35, TALL = 26, R = mulberry32(2026);
+  B(-E - 2, -1, -E - 2, E + 2, 0, E + 2, 'asphalt', { kind: 'ground' });
+  B(-E - 2, 0, -E - 2, -E, TALL, E + 2, 'concrete', { kind: 'bound', top: 'roof', cell: 2 });
+  B(E, 0, -E - 2, E + 2, TALL, E + 2, 'brick', { kind: 'bound', top: 'roof', cell: 2 });
+  B(-E, 0, -E - 2, E, TALL, -E, 'panel', { kind: 'bound', top: 'roof', cell: 2 });
+  B(-E, 0, E, E, TALL, E + 2, 'brick2', { kind: 'bound', top: 'roof', cell: 2 });
+  for (const b of boxes.filter((b) => b.kind === 'bound')) B(b.min.x, b.max.y, b.min.z, b.max.x, 120, b.max.z, b.style, { kind: 'bound', hidden: true });
+  B(-10, 0, -10, 10, 0.15, 10, 'slab', { kind: 'plaza' });
+
+  // Each corner block, in |x| |z| from the centre: A on the plaza, B along the east-west street, C along
+  // the north-south street, D at the back. Alleys run between them at |x| 20-26 and |z| 20-26.
+  const FOOT = { A: [10, 20, 10, 20], B: [26, 35, 9, 20], C: [9, 20, 26, 35], D: [26, 35, 26, 35] };
+  // fire escapes: which face (axis and whether it faces toward or away from the centre) and where along it
+  const FIRE = { A: ['z', -1, 14, 17], B: ['x', -1, 12, 15], C: ['z', -1, 12, 15], D: ['x', -1, 29, 32] };
+  const QUADS = [
+    { sx: 1, sz: 1, h: { A: 6, B: 12, C: 9, D: 16 }, st: { A: 'shop', B: 'brick', C: 'panel', D: 'concrete' } },
+    { sx: -1, sz: 1, h: { A: 7, B: 9, C: 9, D: 14 }, st: { A: 'shop2', B: 'concrete', C: 'brick2', D: 'panel' } },
+    { sx: -1, sz: -1, h: { A: 6, B: 9, C: 12, D: 18 }, st: { A: 'shop', B: 'panel', C: 'brick', D: 'brick2' } },
+    { sx: 1, sz: -1, h: { A: 7, B: 7, C: 12, D: 15 }, st: { A: 'shop2', B: 'brick2', C: 'concrete', D: 'brick' } },
+  ];
+  const roofs = [];
+  for (const q of QUADS) {
+    for (const k of ['A', 'B', 'C', 'D']) {
+      const [a0, a1, b0, b1] = FOOT[k], h = q.h[k];
+      const b = B(q.sx * a0, 0, q.sz * b0, q.sx * a1, h, q.sz * b1, q.st[k], { kind: 'building', top: 'roof' });
+      roofs.push(b);
+      // clutter on the roof: an air unit, and a water tank on the tall ones
+      const cx = (b.min.x + b.max.x) / 2 + (R() - 0.5) * 3, cz = (b.min.z + b.max.z) / 2 + (R() - 0.5) * 3;
+      B(cx - 0.7, h, cz - 0.5, cx + 0.7, h + 1.0, cz + 0.5, 'metal', { kind: 'prop' });
+      if (h >= 12) { const tx = b.min.x + 1.6, tz = b.max.z - 1.6; B(tx - 1.1, h, tz - 1.1, tx + 1.1, h + 2.4, tz + 1.1, 'metal', { kind: 'prop' }); }
+      // fire escapes: platforms 5.4 m apart from 5.5 m up (5 m of headroom between them), until the roof
+      // is within an enemy's jump of the top one
+      if (h > 6.4) {
+        const [ax, , f0, f1] = FIRE[k], tiers = [5.5];
+        while (h - tiers[tiers.length - 1] > 6) tiers.push(tiers[tiers.length - 1] + 5.4);
+        for (const y of tiers) {
+          if (ax === 'x') {
+            // the face nearer the centre (dir -1), the platform sticking out 1.6 m from it
+            const fx = q.sx > 0 ? b.min.x : b.max.x, out = -q.sx;
+            B(fx, y - 0.3, q.sz * f0, fx + out * 1.6, y, q.sz * f1, 'metal', { kind: 'fire', plat: true });
+          } else {
+            const fz = q.sz > 0 ? b.min.z : b.max.z, out = -q.sz;
+            B(q.sx * f0, y - 0.3, fz, q.sx * f1, y, fz + out * 1.6, 'metal', { kind: 'fire', plat: true });
+          }
+        }
+      }
+    }
+  }
+  // the overpass over the east street, level with the 7 m roof on its south side; girders across the others
+  B(27, 6.4, -9, 33, 7, 9, 'slab', { kind: 'overpass', plat: true });
+  B(-9, 11.6, -31.5, 9, 12, -29, 'metal', { kind: 'girder', plat: true });
+  B(-9, 8.6, 29, 9, 9, 31.5, 'metal', { kind: 'girder', plat: true });
+  B(-31.5, 8.6, -9, -29, 9, 9, 'metal', { kind: 'girder', plat: true });
+  B(20, 6.6, -19, 26, 7, -16.5, 'metal', { kind: 'girder', plat: true });
+
+  // wrecked cars, vaulted over at a run: body and roof
+  const car = (x, z, alongX, y0 = 0) => {
+    const [x1, z1] = alongX ? [x + 3.45, z + 1.8] : [x + 1.8, z + 3.45];
+    B(x, y0, z, x1, y0 + 0.91, z1, 'car', { kind: 'car' });
+    if (alongX) B(x + 0.73, y0 + 0.91, z + 0.15, x1 - 0.73, y0 + 1.55, z1 - 0.15, 'car', { kind: 'car' });
+    else B(x + 0.15, y0 + 0.91, z + 0.73, x1 - 0.15, y0 + 1.55, z1 - 0.73, 'car', { kind: 'car' });
+  };
+  car(12, -6, true); car(-24, 3, true); car(3, -24, false); car(-5, 14, false); car(-7.5, -6.5, true, 0.15); car(22, 1, false);
+  // container barricades closing each street's end, one stacked in the middle
+  const cont = (x0, y0, z0, x1, z1) => B(x0, y0, z0, x1, y0 + 2.6, z1, 'container', { kind: 'container' });
+  for (const s of [1, -1]) {
+    const zf = s * E, zb = s * (E - 2.5);
+    cont(-9, 0, zf, -3, zb); cont(-2.6, 0, zf, 3.4, zb); cont(3.8, 0, zf, 9, zb); cont(-2.6, 2.6, zf, 3.4, zb);
+    const xf = s * E, xb = s * (E - 2.5);
+    cont(xf, 0, -9, xb, -3); cont(xf, 0, -2.6, xb, 3.4); cont(xf, 0, 3.8, xb, 9); cont(xf, 2.6, -2.6, xb, 3.4);
+  }
+
+  // street lamps: the plaza's corners and staggered down each street; two of them failing
+  const lamp = (x, z, y0 = 0, buzz = false) => {
+    emitters.push({ min: { x: x - 0.1, y: y0, z: z - 0.1 }, max: { x: x + 0.1, y: y0 + 5.6, z: z + 0.1 }, color: '#26222c' });
+    emitters.push({ min: { x: x - 0.45, y: y0 + 5.45, z: z - 0.45 }, max: { x: x + 0.45, y: y0 + 5.65, z: z + 0.45 }, color: '#ffd8a0', glow: true, lamp: true, buzz });
+    lights.push({ x, y: y0 + 5.2, z, color: '#ffb060', intensity: 2.4, range: 17, street: true, group: buzz ? 'buzz' : 'lamp' });
+  };
+  for (const [x, z] of [[8.6, 8.6], [-8.6, 8.6], [-8.6, -8.6], [8.6, -8.6]]) lamp(x, z, 0.15);
+  for (const [x, z, b] of [[15, -8.2], [29, 8.2, true], [-15, 8.2], [-29, -8.2], [8.2, 15], [-8.2, 29], [-8.2, -15, true], [8.2, -29]]) lamp(x, z, 0, !!b);
+  // barrel fires in the alley crossings and by two barricades
+  for (const [x, z] of [[23, 23], [-23, 23], [-23, -23], [23, -23], [6, -30.5], [-30.5, 6]]) {
+    emitters.push({ min: { x: x - 0.35, y: 0, z: z - 0.35 }, max: { x: x + 0.35, y: 0.9, z: z + 0.35 }, color: '#3a2a26' });
+    emitters.push({ min: { x: x - 0.3, y: 0.9, z: z - 0.3 }, max: { x: x + 0.3, y: 1.05, z: z + 0.3 }, color: '#ffb040', glow: true, fire: true });
+    lights.push({ x, y: 1.3, z, color: '#ff7a2a', intensity: 2.2, range: 12, group: 'fire' });
+  }
+  // neon signs on faces toward the plaza and streets: (x, y, z, normal axis, normal sign, text, colour, vertical)
+  for (const [x, y, z, ax, sg, text, color, vert] of [
+    [10, 4.2, 14, 'x', -1, 'HOTEL', '#ff3ad0', true], [-30, 5.5, 9, 'z', -1, 'RAMEN', '#3af0ff'], [9, 5, -30, 'x', -1, 'BAR', '#7dff5a'],
+    [-15, 3.6, -10, 'z', 1, 'OPEN', '#ff5a5a'], [15, 3.6, -10, 'z', 1, '24H', '#ffd03a'], [-10, 4.2, 15, 'x', 1, 'NOODLE', '#ff9a3a', true],
+    [-9, 6, -30, 'x', 1, 'PAWN', '#5a8aff'],
+  ]) {
+    // a thin glowing panel standing 0.12 m off the face
+    const w = vert ? 0.5 : text.length * 0.55, h = vert ? text.length * 0.6 : 0.6;
+    const [x0, x1] = ax === 'x' ? [x, x + sg * 0.12] : [x - w / 2, x + w / 2], [z0, z1] = ax === 'z' ? [z, z + sg * 0.12] : [z - w / 2, z + w / 2];
+    emitters.push({ min: { x: Math.min(x0, x1), y: y - h / 2, z: Math.min(z0, z1) }, max: { x: Math.max(x0, x1), y: y + h / 2, z: Math.max(z0, z1) }, color, glow: true, buzz: true });
+    lights.push({ x: x + (ax === 'x' ? sg * 0.8 : 0), y, z: z + (ax === 'z' ? sg * 0.8 : 0), color, intensity: 1.8, range: 11, group: 'buzz' });
+  }
+
+  // sniper perches: roof and platform edges from 9 m to 16.5 m, the middle of each side, 0.6 m in
+  const perches = [];
+  for (const b of boxes.filter((b) => (b.plat || b.kind === 'building') && b.max.y >= 9 && b.max.y <= 16.5 && b.max.x - b.min.x >= 3.6 && b.max.z - b.min.z >= 2)) {
+    const cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
+    for (const [x, z] of [[b.min.x + 0.6, cz], [b.max.x - 0.6, cz], [cx, b.min.z + 0.6], [cx, b.max.z - 0.6]]) perches.push({ x, y: b.max.y, z });
+  }
+  const ground = [[5, -29], [-5, -29], [5, 29], [-5, 29], [29, -5], [28.5, 7], [-29, 5], [-29, -5], [23, 32], [-23, 32], [23, -32], [-23, -32], [32, 23], [-32, 23], [32, -23], [-32, -23]]
+    .map(([x, z]) => ({ x, y: 0, z }));
+  const high = roofs.filter((b) => b.max.y <= 12).map((b) => ({ x: b.min.x + 2, y: b.max.y, z: b.min.z + 2 }));
+  const barrelSpots = [[6.5, 0.15, -6.5], [-6.5, 0.15, 6.5], [16, 0, -3], [-16, 0, 3], [3, 0, 22], [-3, 0, -22], [15, 6, 15], [30, 7, -4]]
+    .map(([x, y, z]) => ({ x, y, z }));
+  return {
+    name: 'The Crossroads', boxes, groundY: 0, emitters, lights,
+    ambient: [0.022, 0.018, 0.032], sky: [0.05, 0.04, 0.075],
+    bounds: { minX: -E, maxX: E, minZ: -E, maxZ: E },
+    playerStart: { x: 0, y: 0.15, z: 6, yaw: 0 },
+    spawn: { ground, high }, perches, barrelSpots,
+    clearance: {
+      streets: [{ min: { x: -E, z: -9 }, max: { x: E, z: 9 } }, { min: { x: -9, z: -E }, max: { x: 9, z: E } }],
+      alleys: [1, -1].flatMap((s) => [
+        { min: { x: s > 0 ? 20 : -26, z: 9 }, max: { x: s > 0 ? 26 : -20, z: E } }, { min: { x: s > 0 ? 20 : -26, z: -E }, max: { x: s > 0 ? 26 : -20, z: -9 } },
+        { min: { x: 9, z: s > 0 ? 20 : -26 }, max: { x: E, z: s > 0 ? 26 : -20 } }, { min: { x: -E, z: s > 0 ? 20 : -26 }, max: { x: -9, z: s > 0 ? 26 : -20 } },
+      ]),
+    },
+    orbit: { dist: 24, pitch: -0.55, lift: 6 },
+  };
+})();
+
+const ARENAS = { crossroads: CROSSROADS, street: STREET };

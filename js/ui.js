@@ -64,6 +64,7 @@ const UI = {
       case 'duel': this.startRun('duel'); break;
       case 'training': this.startRun('training'); break;
       case 'test': this.startRun('test'); break;
+      case 'street': this.startRun('street'); break;
       case 'pick': Game.chooseUpgrade(el.dataset.id); break;
       case 'resume': this.resumeGame(); break;
       case 'restart': this.startRun(Game.mode); break;
@@ -200,6 +201,7 @@ const UI = {
       input.addEventListener('change', () => {
         setPath(S, item.key, input.checked);
         if (item.key === 'visuals.scanlines') this.applyVisualToggles();
+        if (item.key === 'visuals.retro') Render.resize();
         if (item.key === 'audio.muteOnBlur') Sound.setFocus(document.hasFocus());
         saveSettings();
       });

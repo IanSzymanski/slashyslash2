@@ -30,11 +30,11 @@ const Camera = {
     this.pivot.y = damp(this.pivot.y, r.y + PC.HEIGHT + this.PIVOT_UP, 12, realDt);
     this.base = { x: r.x, y: r.y + Math.max(0.5, p.h - 0.3), z: r.z };
   },
-  // the title screen's slow orbit around a point
-  orbit(c, realTime) {
+  // the title screen's slow orbit around a point, looking down at pitch, the pivot lifted by lift
+  orbit(c, realTime, pitch = -0.3, lift = 0) {
     this.base = null;
-    this.pivot.x = c.x; this.pivot.y = c.y + PC.HEIGHT + this.PIVOT_UP; this.pivot.z = c.z;
-    this.yaw = realTime * 0.12; this.pitch = -0.3;
+    this.pivot.x = c.x; this.pivot.y = c.y + PC.HEIGHT + this.PIVOT_UP + lift; this.pivot.z = c.z;
+    this.yaw = realTime * 0.06; this.pitch = pitch;
   },
   // fovKick: degrees to widen the view by (dashes, drawn slashes, a sprint); true means a dash's 8
   update(realDt, distance = S.camera.distance, fovKick = 0) {

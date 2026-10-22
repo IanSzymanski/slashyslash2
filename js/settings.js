@@ -61,7 +61,7 @@ const DEFAULT_SETTINGS = {
   visuals: {
     shake: 1, hitstop: 1, particles: 1, resScale: 1,
     damageNumbers: true, lighting: true, glow: true, flashes: true, slowmo: true,
-    weather: true, scanlines: false, showFps: false, indicators: true,
+    weather: true, scanlines: false, showFps: false, indicators: true, retro: false,
   },
 };
 
@@ -154,6 +154,7 @@ const SETTINGS_SCHEMA = {
     { type: 'toggle', key: 'visuals.damageNumbers', label: 'Damage numbers' },
     { type: 'toggle', key: 'visuals.indicators', label: 'Threat ring around the crosshair' },
     { type: 'toggle', key: 'visuals.weather', label: 'Ash and rain' },
+    { type: 'toggle', key: 'visuals.retro', label: 'Retro: render at 480x270, pixelated' },
     { type: 'toggle', key: 'visuals.scanlines', label: 'CRT scanlines' },
     { type: 'toggle', key: 'visuals.showFps', label: 'Show FPS' },
   ],

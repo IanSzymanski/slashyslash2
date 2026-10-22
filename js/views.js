@@ -4,7 +4,7 @@
 // player's afterimages. Every material is made once here and compiled in Render.prewarm.
 
 const Views = {
-  map: new Map(), mats: null, geos: null, ghosts: [], lasers: [], arcs: [], zones: [], zips: [], beams: [], tetherMesh: null,
+  map: new Map(), mats: null, geos: null, ghosts: [], lasers: [], arcs: [], zones: [], zips: [], beams: [], tetherMesh: null, rain: null, ash: null,
   GHOSTS: 10, LASERS: 6, ARCS: 4, ZONES: 8, ZIPS: 3, BEAMS: 8, LASER_N: 40, ARC_N: 28,
 
   init() {
@@ -51,6 +51,7 @@ const Views = {
       this.zones.push(z);
     }
     for (const m of [this.tetherMesh, ...this.zips, ...this.lasers, ...this.arcs]) m.visible = false;
+    this.initWeather();
   },
   // everything once, visible, for the shader compile
   prewarmShow(group) {
@@ -62,6 +63,7 @@ const Views = {
     add(new THREE.Mesh(this.geos.ring, this.mats.halo));
     add(new THREE.Mesh(this.geos.band, add_wave()));
     this.beams[0].visible = true;
+    this.rain.visible = this.ash.visible = true;
     add(new THREE.Mesh(this.geos.rock, FX.gibMaterial('#5c5464', false)));
     this.ghosts[0].mesh.visible = true;
     this.zones[0].visible = true;
@@ -88,6 +90,7 @@ const Views = {
     this.syncTether();
     this.syncZips();
     this.syncBeams(t);
+    this.syncWeather();
     this.syncTells(t);
   },
   make(o) {
@@ -201,6 +204,48 @@ const Views = {
     }, n);
   },
 
+  // Weather, as in 2D: rain streaks and drifting ash in a box around the camera, recycled as they leave it.
+  // A drop stops at the first surface below where it started, so none fall under the overpass.
+  RAIN: 700, ASH: 260, WB: 18,
+  initWeather() {
+    const mk = (n, per) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * per * 3), 3)); return g; };
+    this.rain = new THREE.LineSegments(mk(this.RAIN, 2), new THREE.LineBasicMaterial({ color: '#7a7cb4', transparent: true, opacity: 0.4, depthWrite: false }));
+    this.ash = new THREE.Points(mk(this.ASH, 1), new THREE.PointsMaterial({ color: '#9a8a9a', size: 0.05, transparent: true, opacity: 0.8, depthWrite: false }));
+    for (const m of [this.rain, this.ash]) { m.frustumCulled = false; Gfx.scene.add(m); }
+    this.drops = []; this.flakes = [];
+    for (let i = 0; i < this.RAIN; i++) this.drops.push({ x: 0, y: -1e9, z: 0, v: rand(17, 23), floor: 0 });
+    for (let i = 0; i < this.ASH; i++) this.flakes.push({ x: 0, y: -1e9, z: 0, v: rand(0.5, 1.3), ph: rand(0, TAU) });
+    this.wLast = 0;
+  },
+  syncWeather() {
+    const on = S.visuals.weather;
+    this.rain.visible = this.ash.visible = on;
+    if (!on) return;
+    const now = Game.realTime, dt = clamp(now - this.wLast, 0, 0.1) * (Game.state === 'playing' || Game.state === 'menu' ? Game.slowScale : 0);
+    this.wLast = now;
+    const c = Gfx.camera.position, W = this.WB;
+    const respawn = (d, top) => {
+      d.x = c.x + rand(-W, W); d.z = c.z + rand(-W, W); d.y = top ? c.y + rand(8, 16) : c.y + rand(-8, 16);
+      d.floor = World.groundAt(d.x, d.z, d.y);
+    };
+    const rp = this.rain.geometry.attributes.position, ra = rp.array;
+    for (let i = 0; i < this.drops.length; i++) {
+      const d = this.drops[i];
+      d.y -= d.v * dt; d.x -= 3 * dt;
+      if (d.y < d.floor || d.y < c.y - 10 || Math.abs(d.x - c.x) > W || Math.abs(d.z - c.z) > W) respawn(d, d.y > -1e8 && d.y < d.floor);
+      const o = i * 6;
+      ra[o] = d.x; ra[o + 1] = d.y; ra[o + 2] = d.z; ra[o + 3] = d.x + 0.09; ra[o + 4] = d.y + 0.6; ra[o + 5] = d.z;
+    }
+    rp.needsUpdate = true;
+    const ap = this.ash.geometry.attributes.position, aa = ap.array;
+    for (let i = 0; i < this.flakes.length; i++) {
+      const f = this.flakes[i];
+      f.ph += dt; f.y -= f.v * dt; f.x += (Math.sin(f.ph * 1.3) * 0.5 - 0.35) * dt; f.z += Math.cos(f.ph * 0.9) * 0.3 * dt;
+      if (f.y < c.y - 10 || Math.abs(f.x - c.x) > W || Math.abs(f.z - c.z) > W || f.y < World.groundAt(f.x, f.z, f.y + 0.05)) respawn(f, false);
+      aa[i * 3] = f.x; aa[i * 3 + 1] = f.y; aa[i * 3 + 2] = f.z;
+    }
+    ap.needsUpdate = true;
+  },
   // A sniper reeling itself to another perch: its grapple line from the left hand to where it's going.
   syncZips() {
     let zi = 0;
