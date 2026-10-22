@@ -42,11 +42,11 @@ const Camera = {
     const r = p.rp || p.pos;
     this.fp = S.camera.distance <= 0;
     if (this.fp) {
-      // the eyes: ahead of the hull's middle so the inside of the helmet stays behind the lens, further ahead
-      // looking down so the chest does too
-      const ahead = 0.14 + 0.36 * Math.max(0, -Math.sin(this.pitch));
-      this.pivot.x = r.x + fwdX(this.yaw) * ahead; this.pivot.z = r.z + fwdZ(this.yaw) * ahead;
-      this.pivot.y = damp(this.pivot.y, r.y + p.h - 0.16, 30, realDt);
+      // the model's eyes (render.js keeps their offset from the body as the pose moves the head), easing back
+      // over the chest looking down so the body is in view below; what's at the lens is cut away (Gfx.nearCut)
+      const e = p.eyeOff, ahead = 0.05 - 0.07 * Math.max(0, -Math.sin(this.pitch));
+      this.pivot.x = r.x + (e ? e.x : 0) + fwdX(this.yaw) * ahead; this.pivot.z = r.z + (e ? e.z : 0) + fwdZ(this.yaw) * ahead;
+      this.pivot.y = damp(this.pivot.y, r.y + (e ? e.y : p.h - 0.16), 30, realDt);
       this.base = null;
       return;
     }
@@ -90,6 +90,8 @@ const Camera = {
         if (h) { const k = Math.max(0, h.t - 0.02) / L; this.pivot.x = b.x + dx * k; this.pivot.y = b.y + dy * k; this.pivot.z = b.z + dz * k; }
       }
     }
+    // first person's punches and vignettes step here, just before the view uses them
+    FPFX.update(realDt);
     const cp = Math.cos(this.pitch), d = this.dir;
     d.x = -Math.sin(this.yaw) * cp; d.y = Math.sin(this.pitch); d.z = -Math.cos(this.yaw) * cp;
     if (this.fp && Game.state === 'playing') this.curDist = 0;
@@ -108,11 +110,14 @@ const Camera = {
     const sy = s * (Math.sin(tt * 1.7) * 0.6 + Math.sin(tt * 3.1) * 0.4), sp = s * (Math.cos(tt * 2.3) * 0.6 + Math.sin(tt * 2.9) * 0.4);
     const c3 = Gfx.camera;
     c3.position.set(p.x, p.y, p.z);
-    c3.rotation.set(this.pitch + sp, this.yaw + sy, 0);
+    // first person runs a little wider, with bigger kicks, and punches and rolls on its own springs (fpfx.js)
+    const fp = this.fp && Game.state === 'playing' && !Game.cineActive();
+    c3.rotation.set(this.pitch + sp, this.yaw + sy, fp ? FPFX.roll : 0);
     // a wider view on dashes, drawn slashes and at a sprint sells the speed (a comfort setting)
-    const kick = fovKick === true ? 8 : +fovKick || 0;
-    this.fov = damp(this.fov, Gfx.FOV + (S.camera.fovKick ? kick : 0), kick > 6 ? 18 : 6, realDt);
-    if (Math.abs(c3.fov - this.fov) > 0.01) { c3.fov = this.fov; c3.updateProjectionMatrix(); }
+    const kick = (fovKick === true ? 8 : +fovKick || 0) * (fp ? 1.4 : 1);
+    this.fov = damp(this.fov, Gfx.FOV + (fp ? FPFX.BASE_FOV : 0) + (S.camera.fovKick ? kick : 0), kick > 6 ? 18 : 6, realDt);
+    const fov = this.fov + (fp ? FPFX.fov : 0);
+    if (Math.abs(c3.fov - fov) > 0.01) { c3.fov = fov; c3.updateProjectionMatrix(); }
     Sound.setListener(p, d);
     this.updateAim();
   },

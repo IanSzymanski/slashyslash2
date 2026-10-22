@@ -71,6 +71,9 @@ const Gfx = {
   rim: { value: new THREE.Color('#2e3a58') },
   // bullet time drains the colour from lit surfaces; glowing parts and effects stay bright
   desat: { value: 0 },
+  // in first person, character surfaces closer to the lens than this are cut away (dithered over the next
+  // 50%), so your own shoulders and arms, or an enemy in your face, never fill the view from inside
+  nearCut: { value: 0 },
   litMaterial(opts, mode, feetUniform = null, rim = true) {
     const m = new THREE.MeshLambertMaterial(opts);
     m.defines = mode === 'baked' ? { USE_BAKED: '' } : { USE_FEET: '' };
@@ -78,7 +81,7 @@ const Gfx = {
     const feet = mode === 'baked' ? null : feetUniform || { value: new THREE.Color(0.25, 0.22, 0.3) };
     m.userData.feet = feet;
     m.onBeforeCompile = (sh) => {
-      if (feet) { sh.uniforms.uFeet = feet; sh.uniforms.uRim = this.rim; }
+      if (feet) { sh.uniforms.uFeet = feet; sh.uniforms.uRim = this.rim; sh.uniforms.uNearCut = this.nearCut; }
       else { sh.uniforms.uFire = this.uFire; sh.uniforms.uBuzz = this.uBuzz; }
       sh.uniforms.uDesat = this.desat;
       // characters: a 'glow' vertex attribute marks fullbright parts (eyes, cores) and 'plain' parts skip the
@@ -87,7 +90,8 @@ const Gfx = {
         .replace('#include <common>', '#include <common>\n#ifdef USE_BAKED\nattribute vec3 baked;\nattribute vec3 bakedFire;\nattribute vec3 bakedBuzz;\nuniform float uFire;\nuniform float uBuzz;\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nattribute float glow;\nattribute float plain;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
         .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_BAKED\nvBaked = baked + bakedFire * uFire + bakedBuzz * uBuzz;\n#endif\n#ifdef USE_FEET\nvGlow = glow;\nvPlain = plain;\n#endif');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform float uDesat;\n#ifdef USE_BAKED\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nuniform vec3 uFeet;\nuniform vec3 uRim;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
+        .replace('#include <common>', '#include <common>\nuniform float uDesat;\n#ifdef USE_BAKED\nvarying vec3 vBaked;\n#endif\n#ifdef USE_FEET\nuniform vec3 uFeet;\nuniform vec3 uRim;\nuniform float uNearCut;\nvarying float vGlow;\nvarying float vPlain;\n#endif')
+        .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n#ifdef USE_FEET\nif ( uNearCut > 0.0 ) {\n  float nd = length( vViewPosition );\n  float nk = ( nd - uNearCut ) / ( uNearCut * 0.5 );\n  if ( nk < fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) ) ) discard;\n}\n#endif')
         .replace('#include <map_fragment>', '#ifdef USE_FEET\n#ifdef USE_MAP\ndiffuseColor *= mix( texture2D( map, vMapUv ), vec4( 1.0 ), vPlain );\n#endif\n#else\n#include <map_fragment>\n#endif')
         .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n#ifdef USE_BAKED\nreflectedLight.indirectDiffuse += vBaked * diffuseColor.rgb;\n#endif\n#ifdef USE_FEET\nreflectedLight.indirectDiffuse += mix( uFeet, vec3( 1.0 ), vGlow ) * diffuseColor.rgb;\n#ifndef NO_RIM\nfloat rim = 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) );\nreflectedLight.indirectDiffuse += uRim * rim * rim * rim * ( 1.0 - vGlow );\n#endif\n#endif')
         .replace('#include <opaque_fragment>', '#include <opaque_fragment>\n#ifdef USE_FEET\nfloat dsk = uDesat * ( 1.0 - vGlow );\n#else\nfloat dsk = uDesat;\n#endif\ngl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( dot( gl_FragColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ) * vec3( 0.62, 0.68, 0.95 ), dsk );');

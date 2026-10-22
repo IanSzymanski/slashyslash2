@@ -43,6 +43,9 @@ body {
 }
 #gl { cursor: none; }
 #hud { pointer-events: none; }
+/* first person's vignettes (fpfx.js) */
+#fpfx, #fpfx-glow { position: absolute; inset: 0; pointer-events: none; display: none; }
+#fpfx-glow { mix-blend-mode: screen; }
 body.in-menu #gl { cursor: default; }
 .nogl {
   position: absolute; inset: 0; margin: 0;

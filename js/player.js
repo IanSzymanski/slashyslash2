@@ -175,8 +175,9 @@ class Player {
     const col = Controller.integrate(this, dt, reeled ? null : I, { mantle: !this.attack && !this.iaido && !this.sheathe && !this.plunge && !reeled, step: this.plunge ? 0 : undefined });
     this.updateLean(dt, vx0, vz0);
     if (this.iaido && col.wall) this.iaido.t = this.iaido.dur;
-    // a zip to a wall or a ledge ends when the body meets the surface near the anchor
-    if (this.zipping() && (this.tether.kind === 'world' || this.tether.kind === 'anchor') && (col.wall || col.ceil || col.ground) && dist3(this.tether.pos, this.chest()) < 2.4) this.arriveZip();
+    // a zip to a wall or a ledge ends when the body meets the surface near the anchor (the ground counts only
+    // for an anchor below the chest, so a zip at a low ledge carries on to its face and climbs it)
+    if (this.zipping() && (this.tether.kind === 'world' || this.tether.kind === 'anchor') && (col.wall || col.ceil || (col.ground && this.tether.pos.y < this.chest().y - 0.3)) && dist3(this.tether.pos, this.chest()) < 2.4) this.arriveZip();
     if (this.cling) this.updateCling();
     if (this.skid) this.updateSkid();
 
@@ -253,6 +254,7 @@ class Player {
       Sound.play('djump');
       FX.ring({ x: p.x, y: p.y + 0.05, z: p.z }, 0.2, 1.1, 0.22, { c: '#ff3a52' });
       FX.sparks(p, 6, { x: 0, y: -1, z: 0 }, 2.2, 3.6, 10.9);
+      FPFX.kick('jump');
     } else if (ev === 'slide') {
       Sound.play('slide');
       const hs = Controller.hspeed(this) || 1;
@@ -274,6 +276,7 @@ class Player {
       FX.ring({ x: p.x, y: p.y + 0.55, z: p.z }, 0.25, 1.6, 0.25, { flat: false });
       FX.sparks({ x: p.x, y: p.y + 0.35, z: p.z }, 10, { x: -d.x, y: -d.y, z: -d.z }, 1.3, 5.5, 18.2);
       Game.shake(0.08);
+      FPFX.kick('dash', { scale: 0.7, dir: d });
     } else if (ev === 'land') {
       this.spinT = 0; this.bulletT = 0;
       if (this.kickAnim && this.kickAnim.t > 0.1) this.kickAnim = null;
@@ -291,6 +294,7 @@ class Player {
       FX.sparks(c, 8, { x: -d.x, y: 0, z: -d.z }, 1.2, 5.5, 18);
       FX.light(c, '#ff3048', 3, 4, 0.15);
       Game.shake(0.06);
+      FPFX.kick('dash', { dir: d });
     } else if (ev === 'mantle') Sound.play('step');
     else if (ev === 'vault') {
       // a hand on the top, legs swept over to the side
@@ -503,6 +507,7 @@ class Player {
     });
     Sound.play('swing', { stage: a.stage === 3 || a.heavy ? 3 : 1 });
     if (a.heavy) Sound.play('heavySwing');
+    FPFX.kick(a.heavy ? 'heavy' : a.stage === 3 ? 'finisher' : 'attack', { side: a.dir || 1 });
     const fx = fwdX(a.yaw), fz = fwdZ(a.yaw);
     // with an assisted target, close the gap to it rather than overshoot (ground friction stops a lunge in ~v^2/300 m)
     const gap = a.target ? distXZ(a.target.pos, this.pos) - a.target.r - this.r - a.r * 0.5 : Infinity;
@@ -628,6 +633,7 @@ class Player {
     FX.flash('#ff3048', 0.14);
     Sound.play('slam');
     Game.shake(0.3);
+    FPFX.kick('slam');
   }
 
   // ---------- slide attacks ----------
@@ -779,6 +785,7 @@ class Player {
     const P = this.plunge, p = this.pos;
     this.plunge = null;
     const fall = Math.max(0, P.startY - p.y), power = clamp(fall / 20, 0.15, 1);
+    FPFX.kick('slam', { scale: 0.7 + power * 0.6 });
     const R = 4.2 + power * 5.6, dmg = (22 + power * 42) * (Game.has('aftershock') ? 0.8 : 1);
     if (Game.has('aftershock')) Game.hazards.push(new SlamRing(p, { cause: 'plunge', speed: 25.5, dmg: 18 + power * 22 }));
     for (const e of Game.enemies) {
@@ -872,6 +879,8 @@ class Player {
   }
   // Parry tells are a quick glint from the eye, never a ring around the body (rings read as shields).
   eyeGlint(c, size) {
+    // in first person the glint would sit on the lens; the screen's edges flare instead (fpfx.js)
+    if (Camera.fp) return;
     FX.glint(this.head(), { c, size, dur: 0.22, follow: () => this.head() });
   }
   parryActive() { return !!this.sheathe && this.sheathe.t <= this.sheathe.parryUntil; }
@@ -910,6 +919,7 @@ class Player {
     Game.hitstop(0.07);
     Game.shake(0.28);
     FX.flash('#ffffff', 0.3);
+    FPFX.kick('parry', { from: h.from });
     const c = this.chest(), from = h.from || { x: c.x + fwdX(this.yaw), y: c.y, z: c.z + fwdZ(this.yaw) };
     const dx = from.x - c.x, dy = from.y - c.y, dz = from.z - c.z, l = Math.hypot(dx, dy, dz) || 1;
     const dir = { x: dx / l, y: dy / l, z: dz / l };
@@ -956,6 +966,7 @@ class Player {
     if (cfg.heavy) Sound.play('heavySwing');
     Game.shake(cfg.shake);
     FX.flash(cfg.empowered ? '#fff4d0' : '#ff3048', cfg.flash);
+    FPFX.kick('draw', { scale: cfg.empowered || cfg.heavy ? 1.15 : 1, col: cfg.empowered ? [255, 200, 110] : null });
     Game.hitstop(cfg.empowered ? 0.045 : 0.02);
     FX.light(s, cfg.empowered ? '#ffe0a0' : '#ff3048', 4, cfg.empowered ? 9 : 5, 0.3);
     if (cfg.empowered) Game.slowmo(0.3, 0.3);
@@ -1176,6 +1187,8 @@ class Player {
         T.pos.x += (T.vel.x * dt) / steps; T.pos.y += (T.vel.y * dt) / steps; T.pos.z += (T.vel.z * dt) / steps; T.dist += (sp * dt) / steps;
         if (this.tetherHit(T)) return;
         if (World.pointSolid(T.pos.x, T.pos.y, T.pos.z)) {
+          // the box it bit, for climbing onto it
+          T.box = World.near(T.pos.x, T.pos.z, T.pos.x, T.pos.z).find((b) => pointInBox(T.pos.x, T.pos.y, T.pos.z, b)) || null;
           T.pos.x -= (T.vel.x * dt) / steps; T.pos.y -= (T.vel.y * dt) / steps; T.pos.z -= (T.vel.z * dt) / steps;
           this.attachTether(null, 'world');
           return;
@@ -1239,6 +1252,8 @@ class Player {
       this.onGround = false; this.airJumps = 1;
       this.stand();
       Sound.play('zip');
+    } else if (T.mode === 'fling' && T.kind === 'world' && this.ledgeFling(T)) {
+      Sound.play('zip');
     } else if (T.mode === 'fling') {
       const c = this.chest(), dx = T.pos.x - c.x, dy = T.pos.y - c.y, dz = T.pos.z - c.z, d = Math.hypot(dx, dy, dz) || 1;
       const sp = this.ult ? 69 : PC.FLING;
@@ -1253,6 +1268,25 @@ class Player {
       this.onGround = false;
       T.spd = Math.max(13.6, Math.hypot(this.vel.x, this.vel.y, this.vel.z));
     }
+  }
+  // A tap at a ledge (the hook within 1.6 m of the top of something above you) throws you in an arc up and
+  // over its edge, landing a little way onto the top; if the arc comes up short, you climb the edge.
+  ledgeFling(T) {
+    const b = T.box, p = this.pos;
+    if (!b || b.kind === 'bound' || b.max.y < p.y + 0.5 || b.max.y - T.pos.y > 1.6) return false;
+    const top = b.max.y, n = Controller.sideOf(b, T.pos.x, T.pos.z), r = this.r;
+    let lx = n ? T.pos.x - n.x * (r + 0.6) : T.pos.x, lz = n ? T.pos.z - n.z * (r + 0.6) : T.pos.z;
+    lx = clamp(lx, Math.min(b.min.x + r, (b.min.x + b.max.x) / 2), Math.max(b.max.x - r, (b.min.x + b.max.x) / 2));
+    lz = clamp(lz, Math.min(b.min.z + r, (b.min.z + b.max.z) / 2), Math.max(b.max.z - r, (b.min.z + b.max.z) / 2));
+    const land = Controller.highestTop(lx, lz, r, top + 0.6);
+    if (land < top - 0.01 || !World.boxFree(lx, land + 0.02, lz, r, PC.CROUCH_H)) return false;
+    const g = PC.GRAV * this.gravK, peak = Math.max(land + 1, p.y + 1);
+    const vy = Math.sqrt(2 * g * (peak - p.y)), t = vy / g + Math.sqrt((2 * (peak - land)) / (g * 1.12));
+    this.vel.x = (lx - p.x) / t; this.vel.y = vy; this.vel.z = (lz - p.z) / t;
+    this.noDragT = t; this.onGround = false; this.airJumps = 1;
+    this.climbBox = b; this.climbT = t + 0.3;
+    this.stand();
+    return true;
   }
   moveZip(dt) {
     const T = this.tether, c = this.chest();
@@ -1296,12 +1330,20 @@ class Player {
       this.haul(this, [{ x: p.x, y: p.y, z: p.z }, { x: ox, y: Math.min(p.y, A.y - 0.6), z: A.z }, { x: ox, y: top + 0.5, z: A.z }, { x: A.x + side * (A.landDx || 0), y: top, z: A.z }], 0.42);
       this.vel.x = 0; this.vel.y = 0; this.vel.z = 0;
       Sound.play('step'); FX.dust(T.pos, 4, { smax: 2 });
-    } else {
+    } else if (!(T.kind === 'world' && this.zipLedge(T))) {
       this.vel.x *= 0.3; this.vel.z *= 0.3;
       this.vel.y = Math.max(this.vel.y * 0.3, 13.6);
     }
     this.airJumps = 1;
     this.releaseTether();
+  }
+
+  // A zip that ends against the side of something whose top is within reach climbs straight onto it.
+  zipLedge(T) {
+    const b = T.box;
+    if (!b || b.kind === 'bound') return false;
+    const n = Controller.sideOf(b, this.pos.x, this.pos.z);
+    return !!n && Controller.ledge(this, b, n.x, n.z, PC.MANTLE_UP + 0.6);
   }
 
   // Tethering a pulse grenade in flight: time slows, you reel yourself to it and kick it toward the crosshair.
@@ -1412,6 +1454,8 @@ class Player {
     this.iframes = Math.max(this.iframes, hadShield && this.shield > 0 ? 0.35 : 0.6);
     this.hurtT = 0.22;
     this.blinkT = this.iframes;
+    // a hit through the shield darkens the screen's edges toward it; one the shield eats glints blue
+    FPFX.kick(dmg > 0 ? 'hit' : 'guard', { from: h.from, scale: dmg > 0 ? clamp(0.6 + dmg / 40, 0.6, 1.3) : 1 });
     Game.combo = 0; Game.comboT = 0; Game.styleHit();
     const from = h.from || { x: this.pos.x - fwdX(this.yaw), z: this.pos.z - fwdZ(this.yaw) };
     let dx = this.pos.x - from.x, dz = this.pos.z - from.z;
@@ -1442,6 +1486,7 @@ class Player {
     if (l < 1e-3) { dx = -fwdX(this.yaw); dz = -fwdZ(this.yaw); } else { dx /= l; dz /= l; }
     this.vel.x = dx * 39 * power; this.vel.z = dz * 39 * power; this.vel.y = 23.6 * power; this.onGround = false;
     this.hurtT = 0.45; this.yaw = yawOf(-dx, -dz);
+    FPFX.kick('hit', { from, scale: 0.8 });
     FX.sparks(this.chest(), 12, { x: dx, y: 0.2, z: dz }, 1.2, 5.5, 20, { c0: '#ffffff', c1: '#ff6a7a', c2: '#145e6a' });
   }
   // Getting behind the rival's red flash as it swings: a moment of slow motion and a white afterimage.
@@ -1453,6 +1498,7 @@ class Player {
     FX.text('DODGED', { x: this.pos.x, y: this.pos.y + 2.4, z: this.pos.z }, { c: '#ffffff', always: true, dur: 0.8, vy: 1.4 });
     Sound.play('perilDodge');
     Game.slowmo(0.3, 0.4, true);
+    FPFX.kick('dodge');
     this.iframes = Math.max(this.iframes, 0.3);
   }
   onShieldFull() {

@@ -20,8 +20,10 @@ const MOVE = {
   CROUCH_SPEED: 5.0, SLIDE_MIN: 8.0, SLIDE_BOOST: 12, SLIDE_FRICTION: 9, SLIDE_TIME: 1.6, SLIDE_END: 6.0,
   DASH_SPEED: 43.6, DASH_TIME: 0.14, DASH_IFRAMES: 0.2, DASH_RECHARGE: 1.0, DASH_CHARGES: 2, DASH_ATTACK_WINDOW: 0.14,
   // grounded bodies walk up lips this tall; running into anything up to VAULT_UP vaults it at speed, hopping
-  // VAULT_HOP clear of the top; ledges up to MANTLE_UP above the feet can be climbed from the air
-  STEP: 0.45, VAULT_UP: 1.95, VAULT_MIN: 3.5, VAULT_HOP: 0.45, MANTLE_UP: 1.45, MANTLE_TIME: 0.17,
+  // VAULT_HOP clear of the top. A ledge up to MANTLE_UP above the feet (a hand over the edge) is climbed from
+  // the air as you move into it, and from the ground (CLIMB_UP) after pushing into it for CLIMB_PUSH seconds
+  // where it's too high or too slow to vault. A climb takes MANTLE_TIME for a metre, longer for more.
+  STEP: 0.45, VAULT_UP: 1.95, VAULT_MIN: 3.5, VAULT_HOP: 0.45, MANTLE_UP: 2.4, CLIMB_UP: 2.65, CLIMB_PUSH: 0.1, MANTLE_TIME: 0.2,
   // pushing into a wall in the air (rising slower than CLING_VY) digs a hand in: held CLING_HOLD seconds,
   // then a slide that builds by CLING_ACCEL to WALL_SLIDE, for as long as a movement key is held. Wall kicks
   // start from a cling.
@@ -136,8 +138,9 @@ const Controller = {
     // walls: pushing into a tall one in the air, at or past the top of a jump, clings to it
     const w = c.onGround ? null : this.wallProbe(c, I);
     c.wallN = w; c.wallSliding = false;
-    if (w && c.canCling && v.y < M.CLING_VY && c.wallJumpLock <= 0 && w.box !== c.clingLock && w.top - c.pos.y > M.MANTLE_UP + 0.1
-      && I.mx * -w.x + I.mz * -w.z > 0.5) { this.startCling(c, w); return; }
+    // (a top within reach with room on it is climbed instead)
+    if (w && c.canCling && v.y < M.CLING_VY && c.wallJumpLock <= 0 && w.box !== c.clingLock && I.mx * -w.x + I.mz * -w.z > 0.5
+      && !(w.top - c.pos.y <= M.MANTLE_UP + 0.1 && this.ledgeSpot(c, w.box, w.x, w.z, M.MANTLE_UP))) { this.startCling(c, w); return; }
 
     // jumping
     if (c.jumpBuf > 0 && c.canJump && c.landLag <= 0.05) {
@@ -204,7 +207,8 @@ const Controller = {
     const turn = clamp(ang, -rate * dt, rate * dt), cs = Math.cos(turn), sn = Math.sin(turn);
     let s = hs;
     if (s < target) s = Math.min(target, s + acc * dt);
-    else if (s > target) s = approach(s, target, (ground ? M.OVER_DRAG * 2 : M.OVER_DRAG * 0.5) * dt);
+    // (a tether launch keeps its speed to the top of its arc)
+    else if (s > target && (ground || !(c.noDragT > 0))) s = approach(s, target, (ground ? M.OVER_DRAG * 2 : M.OVER_DRAG * 0.5) * dt);
     v.x = (dx * cs - dz * sn) * s; v.z = (dx * sn + dz * cs) * s;
   },
   // A wall within reach of the body's side, tall enough to cling to (not a car): its outward normal, the box
@@ -339,8 +343,8 @@ const Controller = {
       return;
     }
     // up first, then over the lip
-    c.pos.y = lerp(m.y0, m.y1, easeOutQuad(Math.min(1, k * 1.5)));
-    const kh = clamp((k - 0.45) / 0.55, 0, 1);
+    c.pos.y = lerp(m.y0, m.y1, easeOutQuad(Math.min(1, k / 0.62)));
+    const kh = clamp((k - 0.5) / 0.5, 0, 1);
     c.pos.x = lerp(m.x0, m.x1, kh); c.pos.z = lerp(m.z0, m.z1, kh);
     c.vel.x = 0; c.vel.y = 0; c.vel.z = 0;
     if (k >= 1) {
@@ -349,22 +353,61 @@ const Controller = {
       c.mantle = null; c.onGround = true; c.airJumps = 1; this.emit(c, 'mantleEnd');
     }
   },
-  // Pushing into a wall in the air with its top within reach climbs it, if the top has room.
+  // Moving into a wall in the air with its top within reach climbs it, if the top has room. The wall is the
+  // one just hit, or the one beside the body that the wall probe found (c.wallN). c.climbBox, while
+  // c.climbT lasts, is a ledge the tether is throwing you at: it's climbed whatever the keys say.
   tryMantle(c, I) {
-    const M = c.M, col = c.col, b = col && col.wallBox;
-    if (!b || c.onGround || c.vel.y > 6 || c.dashT > 0) return false;
-    const nx = col.wallX, nz = col.wallZ;
-    if (I.mx * -nx + I.mz * -nz < 0.5) return false;
-    const rise = b.max.y - c.pos.y;
-    if (rise <= 0.2 || rise > M.MANTLE_UP) return false;
-    const x1 = c.pos.x - nx * (c.r * 2 + 0.1), z1 = c.pos.z - nz * (c.r * 2 + 0.1), y1 = b.max.y + 0.01;
-    const h = World.boxFree(x1, y1, z1, c.r, M.H) ? M.H : World.boxFree(x1, y1, z1, c.r, M.CROUCH_H) ? M.CROUCH_H : 0;
-    if (!h || !World.boxFree(c.pos.x, y1, c.pos.z, c.r, h)) return false;
-    if (h < c.h) c.h = h;
-    c.mantle = { t: 0, dur: M.MANTLE_TIME, y0: c.pos.y, y1, x0: c.pos.x, z0: c.pos.z, x1, z1, dx: -nx, dz: -nz, spd: clamp(c.preHs || 0, 3, 8) };
-    c.sliding = false; c.crouching = h < M.H;
-    this.emit(c, 'mantle');
+    const M = c.M, col = c.col;
+    if (c.onGround) return false;
+    let b = col && col.wallBox, nx = col && col.wallX, nz = col && col.wallZ;
+    if (!b && c.wallN) { b = c.wallN.box; nx = c.wallN.x; nz = c.wallN.z; }
+    if (!b) return false;
+    const thrown = c.climbBox === b && c.climbT > 0;
+    if (!thrown && I.mx * -nx + I.mz * -nz < 0.5) return false;
+    return this.ledge(c, b, nx, nz, M.MANTLE_UP + (thrown ? 0.4 : 0));
+  },
+  // On the ground, pushing into a ledge that can't be vaulted (too high, or too slow a run) climbs it.
+  tryClimb(c, I, dt) {
+    const M = c.M, col = c.col, b = col && col.wallBox, ml = Math.hypot(I.mx, I.mz);
+    if (!b || ml < 0.3 || (I.mx * -col.wallX + I.mz * -col.wallZ) / ml < 0.6) { c.pushT = 0; return false; }
+    c.pushT = (c.pushT || 0) + dt;
+    if (c.pushT < M.CLIMB_PUSH) return false;
+    if (!this.ledge(c, b, col.wallX, col.wallZ, M.CLIMB_UP, 0.4)) return false;
+    c.pushT = 0;
     return true;
+  },
+  // Climbs onto the top of b from beside it (its outward normal nx, nz): the top must be no more than reach
+  // above the feet and at least min, with room to rise where you are and to stand (or crouch) on top.
+  ledge(c, b, nx, nz, reach, min = 0.02) {
+    const M = c.M, L = this.ledgeSpot(c, b, nx, nz, reach, min);
+    if (!L) return false;
+    const { x1, y1, z1, h, rise } = L;
+    if (h < c.h) c.h = h;
+    const dur = M.MANTLE_TIME * clamp(0.55 + rise * 0.45, 0.65, 1.55);
+    c.mantle = { t: 0, dur, rise, y0: c.pos.y, y1, x0: c.pos.x, z0: c.pos.z, x1, z1, dx: -nx, dz: -nz, spd: clamp(c.preHs || 0, 3, 8) };
+    c.sliding = false; c.crouching = h < M.H; c.dashT = 0; c.climbBox = null;
+    this.dropCling(c); this.endSkid(c, false);
+    this.emit(c, 'mantle', c.mantle);
+    return true;
+  },
+
+  // where a climb onto b would put you: the spot on its top and the height there's room for, or null
+  ledgeSpot(c, b, nx, nz, reach, min = 0.02) {
+    const M = c.M;
+    if (b.max.y - c.pos.y > reach) return null;
+    const x1 = c.pos.x - nx * (c.r * 2 + 0.1), z1 = c.pos.z - nz * (c.r * 2 + 0.1);
+    const top = this.highestTop(x1, z1, c.r, c.pos.y + reach), rise = top - c.pos.y;
+    if (rise < min || top < b.max.y - 1e-6) return null;
+    const y1 = top + 0.01;
+    const h = World.boxFree(x1, y1, z1, c.r, M.H) ? M.H : World.boxFree(x1, y1, z1, c.r, M.CROUCH_H) ? M.CROUCH_H : 0;
+    if (!h || !World.boxFree(c.pos.x, c.pos.y + 0.02, c.pos.z, c.r, Math.max(h, y1 - c.pos.y + h - 0.02))) return null;
+    return { x1, y1, z1, h, rise };
+  },
+  // the outward normal of the side of b that (x, z) is beside, or null over its top
+  sideOf(b, x, z) {
+    const ox = x < b.min.x ? b.min.x - x : x > b.max.x ? x - b.max.x : 0, oz = z < b.min.z ? b.min.z - z : z > b.max.z ? z - b.max.z : 0;
+    if (!ox && !oz) return null;
+    return ox >= oz ? { x: x < b.min.x ? -1 : 1, z: 0 } : { x: 0, z: z < b.min.z ? -1 : 1 };
   },
 
   // Hauled onto a top along path (world points), over dur seconds, through whatever is in the way.
@@ -444,9 +487,11 @@ const Controller = {
     if (col.ground && !wasGround) { c.airJumps = 1; this.emit(c, 'land', { vy: preVy }); }
     if (col.ground) { c.clingLock = null; if (c.cling) this.dropCling(c); }
     if (!col.ground && wasGround && c.vel.y <= 0) c.coyote = c.M.COYOTE;
-    if (I && opt.mantle !== false && col.wall) {
-      if (wasGround) this.tryVault(c, I, pvx, pvz);
-      else this.tryMantle(c, I);
+    c.climbT = Math.max(0, (c.climbT || 0) - dt);
+    if (I && opt.mantle !== false && wasGround && col.wall) { if (!this.tryVault(c, I, pvx, pvz)) this.tryClimb(c, I, dt); }
+    else {
+      c.pushT = 0;
+      if (I && opt.mantle !== false && !wasGround && !col.ground && (col.wall || c.wallN)) this.tryMantle(c, I);
     }
     return col;
   },

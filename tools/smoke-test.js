@@ -546,7 +546,39 @@ async function run(browser, file, errors) {
       for (let i = 0; i < 220; i++) { if (p.onGround && !p.mantle && p.pos.y > 1) { top = p.pos.y; break; } T.frame(1); }
       ok(Math.abs(top - (A.top || 0)) < 0.05, `${label} (landed at ${top.toFixed(2)} m, top ${A.top} m)`);
     }
+    // ledges: walking into a 2.6 m shipping container climbs it; a held tether at its edge zips you up and over
+    // onto it, and a tap at its edge throws you onto it
+    for (const [hold, label] of [[0, 'walking into a shipping container climbs it'], [60, 'a zip at a container\'s edge climbs onto it'], [2, 'a tap of the tether at a container\'s edge throws you onto it']]) {
+      Game.toMenu(); UI.act('test'); T.frame(2);
+      p = Game.player; S.gameplay.invincible = true;
+      p.pos.x = p.prev.x = hold ? 22.5 : 30.5; p.pos.z = p.prev.z = -6; p.pos.y = p.prev.y = 0; T.frame(2);
+      let climbed = false;
+      if (hold) { T.aimAt({ x: 32.5, y: 2.3, z: -6 }); T.press('Mouse2'); for (let i = 0; i < hold; i++) { T.frame(1); climbed = climbed || !!p.mantle; } T.release('Mouse2'); }
+      else { T.face(34, -6); T.press('KeyW'); for (let i = 0; i < 60; i++) { T.frame(1); climbed = climbed || !!p.mantle; } T.release('KeyW'); }
+      let top = 0;
+      for (let i = 0; i < 220; i++) { climbed = climbed || !!p.mantle; if (p.onGround && !p.mantle && p.pos.y > 1) { top = p.pos.y; break; } T.frame(1); }
+      ok(Math.abs(top - 2.6) < 0.05 && (hold === 2 || climbed), `${label} (at ${top.toFixed(2)} m${climbed ? ', climbed' : ''})`);
+    }
     S.gameplay.invincible = false;
+
+    // first person: a dash punches the view wider, a hit rolls it and darkens the screen's edges; none of it in
+    // third person
+    {
+      Game.toMenu(); UI.act('test'); T.frame(2);
+      p = Game.player; S.gameplay.invincible = false;
+      const d0 = S.camera.distance;
+      S.camera.distance = 0; T.face(p.pos.x + 1, p.pos.z, -0.1); T.frame(30);
+      const fov0 = Gfx.camera.fov;
+      let fovDash = 0;
+      T.press('KeyW'); T.frame(3); T.tap('ShiftLeft'); for (let i = 0; i < 8; i++) { T.frame(1); fovDash = Math.max(fovDash, Gfx.camera.fov); } T.release('KeyW'); T.frame(40);
+      p.iframes = 0; p.shield = 0; p.takeHit({ dmg: 20, from: { x: p.pos.x + 3, y: 1, z: p.pos.z } });
+      let roll = 0; for (let i = 0; i < 6; i++) { T.frame(1); roll = Math.max(roll, Math.abs(Gfx.camera.rotation.z)); }
+      const vig = document.getElementById('fpfx').style.background;
+      ok(fovDash > fov0 + 8 && roll > 0.02 && /radial-gradient/.test(vig), `first person punches the view on a dash (${fov0.toFixed(0)} to ${fovDash.toFixed(0)} deg), rolls (${roll.toFixed(3)}) and darkens the edges on a hit`);
+      S.camera.distance = 5; T.frame(10);
+      ok(!document.getElementById('fpfx').style.background && Gfx.camera.rotation.z === 0, 'third person has no vignette or roll');
+      S.camera.distance = d0; p.hp = PC.MAX_HP;
+    }
 
     // ---------- AEGIS-07 ----------
     // the rival fight opens on its entry cutscene, and it fights once that's over

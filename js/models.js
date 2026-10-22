@@ -768,6 +768,15 @@ const PlayerPose = {
     }
     if (p.mantle) {
       o.cat = 'mantle'; o.lean = 0.5; o.hipY = -9; o.fF = [3, -6]; o.fB = [-2, -3]; o.hF = [5, -17]; o.hB = [5, -17]; o.swordAng = 2.6;
+      const m = p.mantle;
+      if (m.path) return o;
+      // a climb: hands on the lip (the free hand planted on its edge), pushing down as the body rises past
+      // it, knees tucked under it, then the leading foot up onto the top
+      const q = p.rp || p.pos, k = clamp(m.t / m.dur, 0, 1), lip = clamp((m.y1 - q.y) * 11, 0, 24);
+      o.lean = lerp(0.15, 0.6, k);
+      if (k < 0.85) o.plantW = { x: m.x0 + m.dx * (p.r + 0.04) + m.dz * 0.2, y: m.y1, z: m.z0 + m.dz * (p.r + 0.04) - m.dx * 0.2 };
+      o.hF = [4, -Math.max(lip, 8)]; o.hB = [3, -Math.max(lip, 8)];
+      o.fF = [4, -clamp(lip * 0.8, 3, 12)]; o.fB = [-1, -clamp(lip * 0.3, 1, 6)];
       return o;
     }
     if (!p.onGround) {
@@ -966,6 +975,8 @@ const PlayerPose = {
       for (let i = 0; i < SCARF_N; i++) {
         const a = i === 0 ? A : T.set(sc[i].x, sc[i].y, sc[i].z), b = sc[i + 1] || null;
         const bone = B['scarf' + i];
+        // in first person the tail would swing across the view, so it's folded away like the head
+        bone.scale.setScalar(Camera.fp && p === Game.player ? 0.001 : 1);
         Rig.place(bone, a);
         if (b) U.set(a.x - b.x, a.y - b.y, a.z - b.z);
         if (U.lengthSq() < 1e-8) U.set(0, 1, 0);

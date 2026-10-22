@@ -13,6 +13,8 @@
 <!-- BODY:START -->
 <div id="app">
   <canvas id="gl" aria-label="SlashySlash 3D game view"></canvas>
+  <div id="fpfx" aria-hidden="true"></div>
+  <div id="fpfx-glow" aria-hidden="true"></div>
   <canvas id="hud" width="480" height="270" aria-hidden="true"></canvas>
   <p id="nogl" class="nogl" hidden>This browser couldn't start WebGL, which the 3D version needs. The 2D game runs without it.</p>
   <div id="scanlines" hidden></div>
@@ -125,6 +127,7 @@
 <script src="js/rivalviews.js"></script>
 <script src="js/render.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/fpfx.js"></script>
 <script src="js/core.js"></script>
 <script src="js/main.js"></script>
 </body>

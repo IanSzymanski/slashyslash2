@@ -160,6 +160,26 @@ const endM = tr[tr.length - 1];
 rows.push([`Mantle onto the ${fmt(girder.max.y)} m girder`, endM.y >= girder.max.y - 0.01 ? `on top at ${fmt(endM.y)} m` : `fell back to ${fmt(endM.y)} m`, tr.some((s) => s.mantle) ? 'mantled' : 'no mantle']);
 check(endM.y >= girder.max.y - 0.01 && tr.some((s) => s.mantle), 'double jump plus mantle could not reach the highest climb');
 
+// ledges in the crossroads: walking into a car or a shipping container climbs it, a running jump at a container
+// climbs it from the air, and a tall wall is clung to instead
+run('World.build(ARENAS.crossroads)');
+const climbRow = (name, tr, top) => {
+  const i = tr.findIndex((s) => s.mantle), j = i >= 0 ? tr.slice(i).findIndex((s) => !s.mantle) + i : -1, end = i >= 0 ? tr[j] : tr[tr.length - 1];
+  const ok = i >= 0 && Math.abs(end.y - top) < 0.05;
+  rows.push([name, ok ? `on top at ${fmt(end.y)} m` : `at ${fmt(end.y)} m`, i >= 0 ? `${tr[i - 1].g ? 'from the ground' : 'from the air'}, ${fmt(end.t - tr[i].t)} s` : 'no climb']);
+  return ok ? tr[i - 1] : null;
+};
+tr = simulate(1.6, { x: 20.6, y: 0, z: 2.7 }, () => ({ mx: 0.3 }));
+check(climbRow('Walk into a wrecked car', tr, 1.55), 'walking into a wrecked car does not climb onto its roof');
+tr = simulate(1.6, { x: 30.6, y: 0, z: -6 }, () => ({ mx: 0.3 }));
+const wc = climbRow('Walk into a 2.6 m container', tr, 2.6);
+check(wc && wc.g, 'walking into a shipping container does not climb it');
+let jumpT = null;
+tr = simulate(1.6, { x: 25, y: 0, z: -6 }, (t, c) => { if (jumpT === null && c.pos.x > 30.8) jumpT = t; return { mx: 1, jump: t === jumpT, jumpHeld: jumpT !== null && t < jumpT + 0.4 }; });
+const jc = climbRow('Running jump at a container', tr, 2.6);
+check(jc && !jc.g, 'a running jump at a shipping container does not climb it from the air');
+run('World.build(STREET)');
+
 console.log('Movement (metres)');
 for (const r of rows) console.log(`  ${r[0].padEnd(34)}${r[1].padEnd(34)}${r[2]}`);
 
