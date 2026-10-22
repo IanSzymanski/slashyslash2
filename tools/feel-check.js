@@ -123,6 +123,15 @@ rows.push(['Wall kick', kickT === null ? 'no wall slide' : `+${fmt(kickApex)} m 
 check(cI >= 0 && Math.abs(hold.length * DT - MOVE.CLING_HOLD) < 0.05 && holdDrift < 0.01, 'a cling does not hold still for CLING_HOLD');
 check(slideV < -2 && slideV > -MOVE.WALL_SLIDE, 'the slide after a cling does not build slowly');
 check(kickT !== null && kickApex > 2.5, 'could not cling, slide and kick off a wall');
+// letting go of the movement keys drops off the wall at once
+let clungAt = null, droppedAt = null;
+tr = simulate(1.6, { x: wx, y: 0, z: wz }, (t, c) => {
+  if (c.cling && clungAt === null) clungAt = t;
+  if (clungAt !== null && !c.cling && droppedAt === null) droppedAt = t;
+  return { mz: clungAt === null || t < clungAt + 0.3 ? -1 : 0, jump: t < DT, jumpHeld: true };
+});
+check(clungAt !== null && droppedAt !== null && droppedAt - (clungAt + 0.3) <= DT * 3, 'letting go of the keys does not drop off a wall at once');
+rows.push(['Wall cling, keys released', droppedAt !== null ? `off the wall a tick after letting go` : 'still on it', '']);
 // without a cling there's no kick: a jump near a wall that isn't pushed into is a double jump
 tr = simulate(1.2, { x: wx, y: 0, z: wz }, (t) => ({ mx: 0.2, jump: t < DT || Math.abs(t - 0.45) < DT / 2, jumpHeld: true }));
 check(!tr.some((s) => s.cling) && Math.max(...tr.map((s) => s.z)) - wz < 2, 'a jump beside a wall kicks off it without a cling');

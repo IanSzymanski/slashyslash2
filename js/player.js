@@ -233,6 +233,8 @@ class Player {
     if (this.attack || this.sheathe || this.atkPend || this.iaido || (T && (T.phase === 'fly' || T.mode === 'tow'))) this.aimHold = PC.FACE_AIM;
     let want = null;
     if (this.kickAnim || this.cling) return;
+    // first person: the body always faces the view, and the keys strafe
+    if (Camera.fp) { this.yaw = Camera.yaw; return; }
     if (this.iaido) want = yawOf(this.iaido.dir.x, this.iaido.dir.z);
     // a skid turn spins round to face where the push-off goes
     else if (this.skid) { this.yaw += angDiff(this.yaw, yawOf(this.skid.ux, this.skid.uz)) * Math.min(1, dt * 22); return; }
@@ -497,6 +499,7 @@ class Player {
     FX.swoosh({
       follow: this, oy: this.chestH(), yaw: a.yaw, tilt: a.tilt, pitch: a.pa || 0, r: a.r, span: a.span, dir: a.dir,
       sweep: a.sweep, dur: a.sweep + a.fade, thick: a.heavy ? 0.5 : 0.35, pal: 'red', trail: a.heavy ? 1 : a.stage === 3 ? 0.95 : 0.85,
+      bolts: a.heavy || a.stage === 3 ? 3 : 2,
     });
     Sound.play('swing', { stage: a.stage === 3 || a.heavy ? 3 : 1 });
     if (a.heavy) Sound.play('heavySwing');
@@ -557,6 +560,13 @@ class Player {
       return;
     }
     if (!a.swept && a.t >= a.wind) this.beginSweep(a);
+    // the blade crackles as it travels
+    if (a.swept && a.t - (a.wind || 0) < a.sweep + 0.04 && Math.random() < 0.7) {
+      const th = a.dir * (clamp((a.t - (a.wind || 0)) / a.sweep, 0, 1) - 0.5) * a.span, d = PlayerPose.arcDir(a.yaw, a.tilt, th, a.pa || 0), c0 = this.chest();
+      const tip = { x: c0.x + d.x * a.r * 0.9, y: c0.y + d.y * a.r * 0.9, z: c0.z + d.z * a.r * 0.9 };
+      FX.elec(tip, 0.5, 1, { outer: '#ff2a44', core: '#ffffff' });
+      if (Math.random() < 0.5) FX.sparks(tip, 2, d, 1.6, 2, 7, { c0: '#ffffff', c1: '#ff8a9a', c2: '#a01828', life: 0.5 });
+    }
     if (a.swept && a.t >= a.act0 && a.t <= a.act1) {
       const c = this.chest(), reach = a.r + 0.27;
       const big = a.finisher || a.heavy, brk = Game.has('breaker');
@@ -713,7 +723,7 @@ class Player {
       FX.sparks(E, 18, { x: fx * 0.4, y: 1, z: fz * 0.4 }, 1.2, 9, 29);
       FX.ring({ x: E.x, y: this.pos.y + 0.06, z: E.z }, 0.3, 3.6, 0.3);
       FX.decal('crack', E, { len: 3.2 });
-      FX.swoosh({ follow: this, oy: this.chestH(), yaw: a.yaw, tilt: Math.PI / 2, r: 2.7, span: 2.6, dir: 1, sweep: 0.08, dur: 0.3, thick: 0.5, trail: 1 });
+      FX.swoosh({ follow: this, oy: this.chestH(), yaw: a.yaw, tilt: Math.PI / 2, r: 2.7, span: 2.6, dir: 1, sweep: 0.08, dur: 0.3, thick: 0.5, trail: 1, bolts: 3 });
       FX.light({ x: E.x, y: this.pos.y + 0.9, z: E.z }, '#ff3048', 6, 8.2, 0.3);
       FX.flash('#ff3048', 0.12);
       Sound.play('slam'); Sound.play('swing', { stage: 3 }); Sound.play('heavySwing');
@@ -936,7 +946,11 @@ class Player {
     this.iframes = Math.max(this.iframes, cfg.empowered ? 0.5 : 0.3);
     if (this.crouching && Controller.canStand(this)) { this.crouching = false; Controller.setHeight(this, PC.H); }
     if (this.sliding) { this.sliding = false; Controller.setHeight(this, PC.H); }
-    FX.slashLine(s, { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len }, { w: cfg.lineW, dur: cfg.empowered ? 0.45 : 0.3, pal: cfg.empowered ? 'gold' : 'red' });
+    const end = { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len };
+    FX.slashLine(s, end, { w: cfg.lineW, dur: cfg.empowered ? 0.45 : 0.3, pal: cfg.empowered ? 'gold' : 'red' });
+    // lightning runs the length of the draw
+    const lo = cfg.empowered ? '#ffb040' : '#ff2a44';
+    for (let i = 0; i < (cfg.empowered ? 3 : 2); i++) FX.bolt(s, end, cfg.empowered ? 0.4 : 0.26, { outer: lo, core: '#ffffff', jag: 0.25 + i * 0.12, w: 0.09, forks: 3 });
     if (cfg.empowered) Sound.play('iaido', { power: 1, empowered: true });
     else Sound.play('quickdraw');
     if (cfg.heavy) Sound.play('heavySwing');
@@ -968,7 +982,7 @@ class Player {
     const c = this.chest(), yaw = yawOf(I.dir.x, I.dir.z);
     // the closing arc swings the other way from the last swing
     const dir = (this.lastDir = -this.lastDir);
-    FX.swoosh({ x: c.x, y: c.y, z: c.z, oy: 0, yaw, tilt: cfg.empowered ? 0.2 : 0, r: cfg.arcR, span: cfg.span, dir, sweep: 0.08, dur: cfg.empowered ? 0.38 : 0.26, thick: 0.45, pal: cfg.empowered ? 'gold' : 'red', trail: 1 });
+    FX.swoosh({ x: c.x, y: c.y, z: c.z, oy: 0, yaw, tilt: cfg.empowered ? 0.2 : 0, r: cfg.arcR, span: cfg.span, dir, sweep: 0.08, dur: cfg.empowered ? 0.38 : 0.26, thick: 0.45, pal: cfg.empowered ? 'gold' : 'red', trail: 1, bolts: cfg.empowered ? 4 : 3 });
     const arc = { yaw, span: cfg.span, pa: 0, band: 1.8 };
     for (const e of Game.enemies) {
       if (e.dead || e.spawning || I.hit.has(e) || !this.inSwing(arc, c, cfg.arcR, e)) continue;

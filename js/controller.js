@@ -23,7 +23,8 @@ const MOVE = {
   // VAULT_HOP clear of the top; ledges up to MANTLE_UP above the feet can be climbed from the air
   STEP: 0.45, VAULT_UP: 1.95, VAULT_MIN: 3.5, VAULT_HOP: 0.45, MANTLE_UP: 1.45, MANTLE_TIME: 0.17,
   // pushing into a wall in the air (rising slower than CLING_VY) digs a hand in: held CLING_HOLD seconds,
-  // then a slide that builds by CLING_ACCEL to WALL_SLIDE. Wall kicks start from a cling.
+  // then a slide that builds by CLING_ACCEL to WALL_SLIDE, for as long as a movement key is held. Wall kicks
+  // start from a cling.
   CLING_VY: 4, CLING_HOLD: 1.0, CLING_ACCEL: 5, WALL_SLIDE: 6.36, WALL_JUMP_OUT: 16.4, WALL_JUMP_UP: 23.4, WALL_LOCK: 0.13,
   // crouch or slide plus jump launches along the aim, at least this steeply upward
   BULLET: 32, BULLET_MIN_UP: 0.28,
@@ -241,19 +242,20 @@ const Controller = {
     this.endSkid(c, false);
     this.emit(c, 'cling', c.cling);
   },
-  // Held, then sliding: jump kicks off, crouch or pushing away lets go, the wall ending drops you.
+  // Held, then sliding, while any movement key is down: jump kicks off; letting go of the keys, or crouch,
+  // drops off at once (not back onto that wall until you land or kick); the wall ending drops you.
   moveCling(c, dt, I) {
-    const M = c.M, C = c.cling, v = c.vel;
+    const M = c.M, C = c.cling;
     C.t += dt;
     if (!this.wallAt(c, C.n.x, C.n.z)) { this.dropCling(c); return false; }
     if (c.jumpBuf > 0 && c.canJump) { c.jumpBuf = 0; c.wallN = C.n; this.wallJump(c); return true; }
-    const away = I.mx * C.n.x + I.mz * C.n.z;
-    if (I.crouchPressed || away > 0.6) {
+    if (I.crouchPressed || Math.hypot(I.mx, I.mz) < 0.1) {
       c.clingLock = C.box;
       this.dropCling(c);
-      if (away > 0.6) { v.x = C.n.x * 3; v.z = C.n.z * 3; }
+      c.vel.x = C.n.x * 1.5; c.vel.z = C.n.z * 1.5;
       return false;
     }
+    const v = c.vel;
     if (C.t < M.CLING_HOLD) { v.x = 0; v.y = 0; v.z = 0; }
     else {
       if (!C.sliding) { C.sliding = true; this.emit(c, 'clingSlide', C); }

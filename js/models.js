@@ -872,6 +872,8 @@ const PlayerPose = {
     const [T, P, D, E, U, F, A, W] = this._v;
     const o = this.pose2D(p), B = r.bones, M = r.mesh, X = PX;
     this.crossfade(p, o);
+    // first person: no flips, and the torso stays under the lens instead of pitching into the view
+    if (Camera.fp && p === Game.player) { o.lean = clamp(o.lean, -0.25, 0.25); o.rot = 0; }
     Rig.reset(r);
     const tr = () => (o.tremble ? rand(-0.012, 0.012) * o.tremble : 0);
     // the body: hip height, a roll about the hips for flips and falls, lean shared by spine and chest
@@ -881,8 +883,9 @@ const PlayerPose = {
     B.spine.rotation.x = -o.lean * 0.55;
     B.chest.rotation.x = -o.lean * 0.45;
     B.chest.rotation.y = o.twist;
-    // the head stays level-ish and looks along the aim
+    // the head stays level-ish and looks along the aim; in first person it's folded away behind the lens
     B.head.rotation.x = clamp(o.lean * 0.8 + p.aimDir.y * 0.5, -0.5, 0.8);
+    B.head.scale.setScalar(Camera.fp && p === Game.player ? 0.001 : 1);
     M.updateMatrixWorld(true);
     // a side-plane point (2D px, x forward, y down) at a sideways offset, rolled with the body, in world space
     const piv = -o.hipY * X;

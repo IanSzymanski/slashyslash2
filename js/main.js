@@ -19,8 +19,9 @@
     const look = Input.takeLook();
     // a bug in one frame is logged, not allowed to stop the loop
     try {
+      const wheel = Input.takeWheel();
       if (Game.state === 'playing') {
-        if (!Game.cineActive()) Camera.look(look.x, look.y);
+        if (!Game.cineActive()) { Camera.look(look.x, look.y); Camera.zoom(wheel); }
         Game.step(realDt);
         Render.interp();
         const p = Game.player;

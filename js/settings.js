@@ -132,7 +132,7 @@ const SETTINGS_SCHEMA = {
   camera: [
     { type: 'range', key: 'camera.sensitivity', label: 'Mouse sensitivity', min: 0.2, max: 3, step: 0.05, fmt: 'x' },
     { type: 'toggle', key: 'camera.invertY', label: 'Invert mouse Y' },
-    { type: 'range', key: 'camera.distance', label: 'Camera distance', min: 3, max: 7, step: 0.25, fmt: 'm' },
+    { type: 'range', key: 'camera.distance', label: 'Camera distance (scroll wheel; 0 is first person)', min: 0, max: 9, step: 0.25, fmt: 'm' },
     { type: 'toggle', key: 'camera.fovKick', label: 'Widen the view at speed (sprints, dashes)' },
   ],
   audio: [

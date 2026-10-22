@@ -156,7 +156,7 @@ const Render = {
       const v = this._pv.set(0, py, 0).applyEuler(R.mesh.rotation);
       R.mesh.position.set(p.x - v.x, p.y + py - v.y, p.z - v.z);
       PlayerPose.apply(R, P);
-      const want = Camera.curDist < 1 ? clamp(Camera.curDist - 0.4, 0, 1) / 0.6 : 1;
+      const want = Camera.fp || Camera.curDist >= 1 ? 1 : clamp(Camera.curDist - 0.4, 0, 1) / 0.6;
       const blink = P.blinkT > 0 && P.hurtT <= 0 && ((Game.realTime * 30) | 0) % 2 ? 0.55 : 1;
       R.mat.opacity = want * blink;
       R.mat.depthWrite = R.mat.opacity > 0.99;
