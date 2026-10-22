@@ -262,6 +262,43 @@ const Gfx = {
     this.texCache.set('char', t);
     return t;
   },
+  // AEGIS-07's finish from its reference sheets: pixel camo of white, light and mid grey with blue patches and
+  // a few dark flecks, in 2x2 blocks, multiplied into each part's colour (white parts show it at full strength).
+  camoTexture() {
+    let t = this.texCache.get('camo');
+    if (t) return t;
+    const N = 64, B = 2, M = N / B, c = makeCanvas(N, N), g = c.ctx, R = mulberry32(4207);
+    const grid = new Uint8Array(M * M);
+    // random-walk blobs of each colour, laid over each other
+    const blob = (kind, count, len) => {
+      for (let i = 0; i < count; i++) {
+        let x = (R() * M) | 0, y = (R() * M) | 0;
+        const L = len * (0.5 + R());
+        for (let s = 0; s < L; s++) {
+          for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) grid[((y + dy) % M) * M + ((x + dx) % M)] = kind;
+          if (R() < 0.5) x = (x + (R() < 0.5 ? M - 1 : 1)) % M; else y = (y + (R() < 0.5 ? M - 1 : 1)) % M;
+        }
+      }
+    };
+    blob(1, 30, 9); blob(2, 22, 7); blob(3, 10, 5); blob(4, 5, 4); blob(5, 18, 2);
+    const COLS = [[228, 231, 236], [192, 197, 206], [142, 148, 160], [96, 122, 184], [64, 92, 166], [74, 78, 92]];
+    for (let y = 0; y < M; y++) {
+      for (let x = 0; x < M; x++) {
+        const [r, gg, b] = COLS[grid[y * M + x]], k = 0.94 + R() * 0.08;
+        g.fillStyle = `rgb(${Math.min(255, r * k) | 0},${Math.min(255, gg * k) | 0},${Math.min(255, b * k) | 0})`;
+        g.fillRect(x * B, y * B, B, B);
+      }
+    }
+    // plate seams
+    g.fillStyle = 'rgb(120,124,136)';
+    g.fillRect(0, 31, N, 1); g.fillRect(31, 0, 1, N);
+    t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.magFilter = THREE.NearestFilter;
+    this.texCache.set('camo', t);
+    return t;
+  },
   // Ground marks as white masks the material tints: a furrow running down the texture (with a fainter
   // churned rim), cracks out from the middle, or a soft round scorch.
   decalTexture(kind) {

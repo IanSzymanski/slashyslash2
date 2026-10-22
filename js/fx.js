@@ -152,7 +152,8 @@ const FX = {
   // A sword trail: a curved ribbon around a centre (o.follow keeps it on a character). The arc lies in
   // the plane of the facing direction and a sweep axis tilted from horizontal by o.tilt; o.dir picks
   // which way the head travels. The head draws over o.sweep seconds, then the trail fades by o.dur.
-  // With o.bolts, that many strands of lightning crawl along its lit stretch, each throwing a fork outward.
+  // With o.bolts, that many strands of lightning crawl along its lit stretch, each throwing a fork outward
+  // (o.boltPal colours them apart from the trail).
   swoosh(o) {
     const s = Object.assign({ t: 0, dur: 0.24, sweep: 0.09, trail: 0.85, thick: 0.4, dir: 1, tilt: 0, pal: 'red', oy: 1.15, N: 24, bolts: 0 }, o);
     const geo = new THREE.BufferGeometry(), n = (s.N + 1) * 2;
@@ -495,7 +496,8 @@ const FX = {
   syncSwooshBolts(s, cx, cy, cz, fx, fy, fz, ax, ay, az, r0, r1, k, fade) {
     const cp = Gfx.camera.position, N = this.ARC_BOLT, u1 = k, u0 = Math.max(0, k - s.trail * 0.8);
     const hot = this._boltHot || (this._boltHot = [0, 0, 0]), glow = this._boltGlow || (this._boltGlow = [0, 0, 0]);
-    palAt(s.pal, 1, hot); palAt(s.pal, 0.55, glow);
+    const bp = s.boltPal || s.pal;
+    palAt(bp, 1, hot); palAt(bp, 0.55, glow);
     const at = (u, rad, out) => {
       const th = s.dir * (u - 0.5) * s.span, c = Math.cos(th), sn = Math.sin(th);
       out.x = cx + (fx * c + ax * sn) * rad; out.y = cy + (fy * c + ay * sn) * rad; out.z = cz + (fz * c + az * sn) * rad;

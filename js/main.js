@@ -24,9 +24,13 @@
         if (!Game.cineActive()) { Camera.look(look.x, look.y); Camera.zoom(wheel); }
         Game.step(realDt);
         Render.interp();
-        const p = Game.player;
-        Camera.follow(p, realDt);
-        Camera.update(realDt, S.camera.distance, p.dashT > 0 || p.iaido ? 8 : 5 * clamp((Controller.hspeed(p) - PC.RUN) / (PC.SPRINT - PC.RUN), 0, 1));
+        const p = Game.player, C = Game.cine;
+        if (C && C.shot && !C.closing) Camera.update(realDt, Camera.cine(C, realDt), 0);
+        else {
+          if (Camera.cineView) Camera.endCine(p, C && C.focus);
+          Camera.follow(p, realDt);
+          Camera.update(realDt, S.camera.distance, p.dashT > 0 || p.iaido ? 8 : 5 * clamp((Controller.hspeed(p) - PC.RUN) / (PC.SPRINT - PC.RUN), 0, 1));
+        }
       } else if (Game.state === 'menu') {
         // the title screen: a slow orbit framed for the arena
         const O = World.def.orbit;

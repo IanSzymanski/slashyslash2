@@ -503,9 +503,18 @@ function separateEnemies(dt) {
 function hurtEnemy(e, dmg, o = {}) {
   if (e.dead || e.spawning || e.dying) return 0;
   if (e.shielded && e.shielded(o)) { e.shieldHit(o); return 0; }
+  // the rival's own parries and the phase change, and its evasive boosts
+  if (e.intercept && e.intercept(o)) return 0;
+  if (e.dodging && e.dodging()) {
+    if (!e._missT || Game.time > e._missT) { e._missT = Game.time + 0.4; FX.text('DODGE', { x: e.pos.x, y: e.pos.y + e.h + 0.6, z: e.pos.z }, { c: '#7aa8ff', always: true, dur: 0.5, vy: 1.8 }); }
+    return 0;
+  }
   let d = dmg * (e.damageTakenMul ? e.damageTakenMul() : 1) * (Game.has('glass') ? 1.35 : 1);
   if (e.tethered) d *= 1.25;
   d = Math.max(1, Math.round(d));
+  // the rival's first phase can't be skipped: its health stops at half until the limiters come off
+  if (e.gateDamage) { d = e.gateDamage(d); if (d <= 0) return 0; }
+  if (e.noteHurt) e.noteHurt(d);
   e.hp -= d;
   e.hitFlash = 0.08;
   if (!o.noKnock && o.kv) {

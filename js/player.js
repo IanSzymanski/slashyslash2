@@ -1428,6 +1428,33 @@ class Player {
     if (this.hp <= 0) this.die();
     return 'hit';
   }
+  // The rival's enrage shockwave: thrown clear of from (a point), whatever you were doing, without damage.
+  blastAway(from, power = 1) {
+    if (this.dead) return;
+    if (this.tether) this.releaseTether();
+    if (this.sheathe) this.cancelSheathe();
+    this.attack = null; this.attackQueued = null; this.atkPend = null; this.plunge = null; this.iaido = null; this.dashT = 0; this.kickAnim = null;
+    this.sliding = false; this.mantle = null; this.vault = null;
+    Controller.dropCling(this); Controller.endSkid(this, false);
+    if (this.crouching && Controller.canStand(this)) { this.crouching = false; Controller.setHeight(this, PC.H); }
+    let dx = this.pos.x - from.x, dz = this.pos.z - from.z;
+    const l = Math.hypot(dx, dz);
+    if (l < 1e-3) { dx = -fwdX(this.yaw); dz = -fwdZ(this.yaw); } else { dx /= l; dz /= l; }
+    this.vel.x = dx * 39 * power; this.vel.z = dz * 39 * power; this.vel.y = 23.6 * power; this.onGround = false;
+    this.hurtT = 0.45; this.yaw = yawOf(-dx, -dz);
+    FX.sparks(this.chest(), 12, { x: dx, y: 0.2, z: dz }, 1.2, 5.5, 20, { c0: '#ffffff', c1: '#ff6a7a', c2: '#145e6a' });
+  }
+  // Getting behind the rival's red flash as it swings: a moment of slow motion and a white afterimage.
+  perilDodge(src) {
+    const c = this.chest(), u = { x: c.x - src.pos.x, y: 0.3, z: c.z - src.pos.z };
+    FX.ghost('#ffffff', 0.5, 0.8);
+    FX.sparks(c, 14, u, 1.4, 5.5, 20, { c0: '#ffffff', c1: '#ff8a9a', c2: '#781e2a' });
+    FX.light(c, '#ffffff', 4, 6, 0.3);
+    FX.text('DODGED', { x: this.pos.x, y: this.pos.y + 2.4, z: this.pos.z }, { c: '#ffffff', always: true, dur: 0.8, vy: 1.4 });
+    Sound.play('perilDodge');
+    Game.slowmo(0.3, 0.4, true);
+    this.iframes = Math.max(this.iframes, 0.3);
+  }
   onShieldFull() {
     if (this.shieldWasFull) return;
     this.shieldWasFull = true; this.regenOn = false;

@@ -55,6 +55,25 @@ const Camera = {
     this.pivot.y = damp(this.pivot.y, r.y + PC.HEIGHT + this.PIVOT_UP, 12, realDt);
     this.base = { x: r.x, y: r.y + Math.max(0.5, p.h - 0.3), z: r.z };
   },
+  // A cutscene's shot: its owner sets Game.cine.shot = { look, yaw, pitch, dist, ease } and the view eases
+  // toward it. Returns the distance to pass to update().
+  cine(C, realDt) {
+    const s = C.shot;
+    if (!this.cineView) this.cineView = { yaw: this.yaw, pitch: this.pitch, dist: Math.max(1.5, this.curDist), look: { x: this.pivot.x, y: this.pivot.y, z: this.pivot.z } };
+    const V = this.cineView, k = 1 - Math.exp(-realDt * (s.ease || 3));
+    V.yaw += angDiff(V.yaw, s.yaw) * k; V.pitch = lerp(V.pitch, s.pitch, k); V.dist = lerp(V.dist, s.dist, k);
+    V.look.x = lerp(V.look.x, s.look.x, k); V.look.y = lerp(V.look.y, s.look.y, k); V.look.z = lerp(V.look.z, s.look.z, k);
+    this.yaw = V.yaw; this.pitch = V.pitch;
+    this.pivot.x = V.look.x; this.pivot.y = V.look.y; this.pivot.z = V.look.z;
+    this.base = null; this.fp = false;
+    return V.dist;
+  },
+  // back to the player after a cutscene, turned to face what it showed
+  endCine(p, focus) {
+    this.cineView = null;
+    if (p && focus && focus.pos && !focus.dead) { this.yaw = yawOf(focus.pos.x - p.pos.x, focus.pos.z - p.pos.z); this.pitch = -0.12; }
+    if (p) { this.pivot.x = p.pos.x; this.pivot.y = p.pos.y + PC.HEIGHT + this.PIVOT_UP; this.pivot.z = p.pos.z; }
+  },
   // the title screen's slow orbit around a point, looking down at pitch, the pivot lifted by lift
   orbit(c, realTime, pitch = -0.3, lift = 0) {
     this.base = null;

@@ -29,9 +29,10 @@ const Render = {
   // Three deletes a compiled program once no material uses it, so one material of each kind is kept for good.
   keep: [],
   prewarm() {
-    const g = new THREE.Group(), r = Rig.build(MODELS.scrapper);
+    const g = new THREE.Group(), r = Rig.build(MODELS.scrapper), ra = Rig.build(MODELS.aegis);
     r.outline.visible = true;
-    g.add(r.mesh);
+    ra.blade.visible = true;
+    g.add(r.mesh, ra.mesh);
     for (const glow of [false, true]) g.add(new THREE.Mesh(r.parts[0].geo, FX.gibMaterial('#ffffff', glow)));
     g.add(new THREE.Mesh(this.pickupGeo, this.pickupMat));
     const o = { x: 0, y: 1, z: 0 };
@@ -50,7 +51,7 @@ const Render = {
     this.playerRig.mesh.visible = false;
     Views.prewarmHide();
     Gfx.scene.remove(g);
-    this.keep.push(r.mat, r.outline.material, decal, ...FX.detachAll());
+    this.keep.push(r.mat, r.outline.material, ra.mat, ra.blade.children[0].material, decal, ...FX.detachAll());
   },
   // The 2D game's 16:9 frame; the 3D view renders at the frame's native size times the resolution scale.
   resize() {
@@ -114,17 +115,22 @@ const Render = {
       let R = this.models.get(e);
       if (!R) {
         R = Rig.build(MODELS[e.type]);
+        R.mesh.rotation.order = 'YXZ';
         Gfx.scene.add(R.mesh);
         this.models.set(e, R);
         e.model = R;
       }
       const p = e.rp || e.pos;
-      R.mesh.visible = !e.spawning;
-      R.mesh.position.set(p.x, p.y, p.z);
-      R.mesh.rotation.y = e.yaw;
+      R.mesh.visible = e.showModel ? e.showModel() : !e.spawning;
+      // a body that pitches over (the rival's knockout) lies on the street, not half in it
+      R.mesh.position.set(p.x, p.y + Math.abs(Math.sin(e.tilt || 0)) * 0.35, p.z);
+      R.mesh.rotation.set(e.tilt || 0, e.yaw, 0);
       Poses[e.type](R, e);
-      R.mat.emissive.setRGB(e.hitFlash > 0 ? 0.8 : e.cutMark && ((Game.realTime * 30) | 0) % 2 ? 0.6 : 0, e.hitFlash > 0 ? 0.8 : 0, e.hitFlash > 0 ? 0.8 : 0);
-      R.outline.visible = !!e.elite;
+      if (e.emissive) R.mat.emissive.setScalar(e.emissive());
+      else R.mat.emissive.setRGB(e.hitFlash > 0 ? 0.8 : e.cutMark && ((Game.realTime * 30) | 0) % 2 ? 0.6 : 0, e.hitFlash > 0 ? 0.8 : 0, e.hitFlash > 0 ? 0.8 : 0);
+      const oc = e.outline ? e.outline() : e.elite ? '#ffd070' : null;
+      R.outline.visible = !!oc;
+      if (oc) R.outline.material.color.set(oc);
       const want = this.inCameraLine(e) ? 0.25 : 1;
       e.fade = approach(e.fade, want, realDt * 6);
       R.mat.opacity = e.fade;
@@ -133,6 +139,8 @@ const Render = {
     }
     for (const [e, R] of this.models) {
       if (seen.has(e)) continue;
+      // the rival's body stays where it fell, as its husk
+      if (e.husk && !e.husk.rig && !e.husk.dead) { e.husk.rig = R; R.outline.visible = false; this.models.delete(e); continue; }
       Gfx.scene.remove(R.mesh);
       R.geo.dispose(); R.mat.dispose(); R.outline.material.dispose();
       this.models.delete(e);
@@ -188,6 +196,7 @@ const Render = {
     Gfx.desat.value = G.bulletK() * 0.85;
     Gfx.beginFrame();
     this.bladeLight();
+    BossViews.pushLights();
     Views.pushLights();
     FX.pushLights();
     Gfx.endFrame();
@@ -205,6 +214,7 @@ const Render = {
     }
     const inGame = G.player && (G.state === 'playing' || G.state === 'paused' || G.state === 'over' || G.state === 'pick');
     if (inGame && !G.cineActive()) this.drawHUD(ctx, realDt);
+    if (inGame && G.cine) this.drawCine(ctx, G.cine, t);
     if (S.visuals.showFps) drawText(ctx, Math.round(this.fps) + ' FPS', VIEW_W - 4, VIEW_H - 9, { align: 'right', color: '#7a849c' });
   },
   drawTexts(ctx) {
@@ -340,12 +350,106 @@ const Render = {
       ctx.fillRect(0, 0, VIEW_W, 3); ctx.fillRect(0, VIEW_H - 3, VIEW_W, 3); ctx.fillRect(0, 0, 3, VIEW_H); ctx.fillRect(VIEW_W - 3, 0, 3, VIEW_H);
       ctx.globalAlpha = 1;
     }
+    const boss = G.enemies.find((e) => e.isBoss && !e.dead && !e.spawning);
+    if (boss) this.drawBossBar(ctx, boss, t);
     if (G.state === 'playing') {
       if (S.visuals.indicators) this.drawThreatRing(ctx, p, t);
       const bt = G.bulletK();
-      if (bt > 0) this.drawReboundCue(ctx, p, bt, t);
+      if (bt > 0 && (G.btKind === 'riposte' || G.btKind === 'peril')) this.drawParryCue(ctx, bt, t);
+      else if (bt > 0) this.drawReboundCue(ctx, p, bt, t);
       this.drawCrosshair(ctx, p);
     }
+  },
+  // ---------- the rival ----------
+  // Its health along the bottom of the screen with the half-health mark of phase 1, its shield and stance.
+  drawBossBar(ctx, b, t) {
+    const w = 220, x = Math.round(VIEW_W / 2 - w / 2), y = VIEW_H - 18;
+    drawText(ctx, b.name, x, y - 9, { color: b.phase === 2 ? '#ff8a9a' : '#bfd4ff' });
+    const stance = b.dying ? '' : b.mode === 'charge' ? 'CHARGING' : 'ZONING';
+    if (stance) drawText(ctx, stance, x + w, y - 9, { align: 'right', color: b.mode === 'charge' ? '#ffd0d8' : '#7a9ab8' });
+    ctx.fillStyle = '#0b0910'; ctx.fillRect(x - 1, y - 1, w + 2, 6);
+    ctx.fillStyle = '#300a12'; ctx.fillRect(x, y, w, 4);
+    const k = Math.max(0, b.hp) / b.maxHp;
+    ctx.fillStyle = b.stunT > 0 && ((t * 10) | 0) % 2 ? '#ffffff' : b.phase === 2 ? '#ff3048' : '#4a7aff'; ctx.fillRect(x, y, Math.round(w * k), 4);
+    ctx.fillStyle = b.phase === 2 ? '#ff9aa8' : '#a8c4ff'; ctx.fillRect(x, y, Math.round(w * k), 1);
+    if (!b.duel && b.phase === 1) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + w / 2, y - 2, 1, 8); }
+    let sub = null, col = '#7a9ab8';
+    if (b.shield) {
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = '#9cc4ff';
+      for (let i = 0; i < w; i += 2) if (((i + ((t * 20) | 0)) >> 1) % 3) ctx.fillRect(x + i, y, 1, 4);
+      ctx.globalAlpha = 1;
+      sub = b.cracks ? `SHIELD CRACKED ${b.cracks}/${SHIELD_CRACKS}` : 'SHIELDED: RETURN ITS BOLTS OR ITS GRENADE'; col = '#9cc4ff';
+    } else if (b.stunT > 0) { sub = 'STUNNED'; col = '#ffffff'; }
+    else if (b.phase === 1 && !b.dying) sub = 'SHIELD BACK IN ' + Math.ceil(b.shieldDownT);
+    if (sub) drawText(ctx, sub, VIEW_W / 2, y + 7, { align: 'center', color: col });
+  },
+  // Its riposte (gold: parry) or red flash (red: dash to its back) in bullet time: a reticle on its eye closes
+  // as the flash nears, with what to do under it.
+  drawParryCue(ctx, k, t) {
+    const r = Game.btOwner, p = Game.player, peril = Game.btKind === 'peril';
+    if (!r || r.dead || !p || p.dead || !r.visorPos) return;
+    const s = this.project(r.visorPos());
+    if (!s) return;
+    const col = peril ? '#ff2a3a' : '#ffd070', q = r.cueProgress ? r.cueProgress() : 1;
+    // speed lines converging on the middle of the view, where you are
+    ctx.globalAlpha = 0.3 * k;
+    ctx.fillStyle = peril ? '#ffd0d4' : '#fff4d0';
+    const cx = VIEW_W / 2, cy = VIEW_H / 2;
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * TAU + Math.sin(i * 5.1) * 0.2, r0 = 50 + ((i * 29 + ((t * 260) | 0)) % 80), r1 = r0 + 22 + (i % 3) * 8;
+      pline(ctx, cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, cx + Math.cos(a) * r1, cy + Math.sin(a) * r1, 1);
+    }
+    ctx.globalAlpha = 1;
+    const rr = Math.round(4 + (1 - q) * 16);
+    ctx.fillStyle = q >= 1 && ((t * 20) | 0) % 2 ? '#ffffff' : col;
+    for (let i = 0; i < 4; i++) {
+      const a = i * (Math.PI / 2) + Math.PI / 4;
+      pline(ctx, s.x + Math.cos(a) * rr, s.y + Math.sin(a) * rr, s.x + Math.cos(a) * (rr + 4), s.y + Math.sin(a) * (rr + 4), 1);
+    }
+    if (q >= 1) drawText(ctx, peril ? 'DASH BEHIND IT' : 'PARRY', s.x, s.y + rr + 6, { align: 'center', color: col });
+  },
+  // Cutscene letterbox bars, the skip prompt, captions, and the title and knockout cards.
+  drawCine(ctx, C, t) {
+    const k = easeOutCubic(clamp(C.bars, 0, 1)), bh = Math.round(30 * k);
+    if (bh <= 0) return;
+    ctx.fillStyle = '#050308';
+    ctx.fillRect(0, 0, VIEW_W, bh); ctx.fillRect(0, VIEW_H - bh, VIEW_W, bh);
+    if (C.skippable && !C.closing && k > 0.9) {
+      const hold = clamp(C.skipHold / 0.5, 0, 1);
+      drawText(ctx, 'HOLD ' + hudKey('sheathe') + ' TO SKIP', VIEW_W - 8, VIEW_H - 12, { align: 'right', color: hold > 0 ? '#ffffff' : '#7a6a7a' });
+      ctx.fillStyle = '#3a3040'; ctx.fillRect(VIEW_W - 58, VIEW_H - 5, 50, 1);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(VIEW_W - 58, VIEW_H - 5, Math.round(50 * hold), 1);
+    }
+    if (C.caption && k > 0.9) {
+      const cap = C.caption;
+      drawText(ctx, cap.text, VIEW_W / 2, VIEW_H - bh + 7, { align: 'center', color: cap.color || '#ffffff', scale: 2 });
+      if (cap.sub) drawText(ctx, cap.sub, VIEW_W / 2, VIEW_H - bh + 20, { align: 'center', color: '#9a8aa8' });
+    }
+    if (C.big && C.big.style === 'title') this.drawTitleCard(ctx, C.big, C.bigT);
+    else if (C.big) {
+      const bt = C.bigT, sc = bt < 0.08 ? 9 : bt < 0.16 ? 7 : 6;
+      const shake = bt < 0.3 ? Math.round((Math.random() - 0.5) * 4 * (1 - bt / 0.3)) : 0;
+      drawText(ctx, C.big.text, VIEW_W / 2 + shake, VIEW_H / 2 - sc * 3 + shake, { align: 'center', color: C.big.color || '#ffd070', scale: sc, outline: '#0b0910' });
+      if (C.big.sub && bt > 0.5) drawText(ctx, C.big.sub, VIEW_W / 2, VIEW_H / 2 + sc * 3 + 6, { align: 'center', color: '#e8d8e0', outline: '#0b0910' });
+    }
+  },
+  // A boss title: rules wipe out from the centre, the name slams in, then the subtitle.
+  drawTitleCard(ctx, B, bt) {
+    const y = 52, col = B.color || '#7aa8ff', cxm = VIEW_W / 2;
+    const w = Math.round(easeOutCubic(clamp(bt / 0.22, 0, 1)) * 150);
+    ctx.fillStyle = col;
+    ctx.fillRect(cxm - w, y - 9, w * 2, 1); ctx.fillRect(cxm - w, y + 40, w * 2, 1);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(cxm - w - 1, y - 11, 1, 5); ctx.fillRect(cxm + w, y - 11, 1, 5);
+    ctx.fillRect(cxm - w - 1, y + 38, 1, 5); ctx.fillRect(cxm + w, y + 38, 1, 5);
+    if (B.tag && bt > 0.1) drawText(ctx, B.tag, cxm, y - 19, { align: 'center', color: '#7a9aa6' });
+    if (bt > 0.12) {
+      const t2 = bt - 0.12, sc = t2 < 0.05 ? 8 : 6;
+      const shake = t2 < 0.25 ? Math.round((Math.random() - 0.5) * 4 * (1 - t2 / 0.25)) : 0;
+      drawText(ctx, B.text, cxm + shake, y + (6 - sc) * 2.5 + 3 + shake, { align: 'center', color: t2 < 0.08 ? '#ffffff' : col, scale: sc, outline: '#0b0910' });
+    }
+    if (B.sub && bt > 0.55) drawText(ctx, B.sub, cxm, y + 45, { align: 'center', color: '#e8d8e0', outline: '#0b0910' });
   },
   // Bullet time on a tethered grenade: speed lines converging on it, a closing reticle, and the line
   // the kick will send it along (toward the crosshair).
