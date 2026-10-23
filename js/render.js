@@ -45,11 +45,15 @@ const Render = {
     const decal = Gfx.decalMaterial('crack', o);
     g.add(new THREE.Mesh(new THREE.PlaneGeometry(1, 1), decal));
     Views.prewarmShow(g);
+    // the sawblade and the tutorial's marker, built now so they never compile mid-run
+    SawView.build(); Tutorial.buildMarker();
+    SawView.g.visible = Tutorial.marker.visible = true;
     Gfx.scene.add(g);
     this.playerRig.mesh.visible = true;
     Gfx.renderer.compile(Gfx.scene, Gfx.camera);
     this.playerRig.mesh.visible = false;
     Views.prewarmHide();
+    SawView.g.visible = Tutorial.marker.visible = false;
     Gfx.scene.remove(g);
     this.keep.push(r.mat, r.outline.material, ra.mat, ra.blade.children[0].material, decal, ...FX.detachAll());
   },
@@ -61,11 +65,13 @@ const Render = {
     const app = document.getElementById('app');
     app.style.width = w + 'px';
     app.style.height = h + 'px';
-    app.style.setProperty('--ui-scale', (h / 720).toFixed(3));
+    // touch screens get larger menus and buttons (a finger, not a cursor)
+    app.style.setProperty('--ui-scale', (typeof Touch !== 'undefined' && Touch.on() ? Math.max(h / 720, Math.min(1, h / 540)) : h / 720).toFixed(3));
     document.getElementById('scanlines').style.backgroundSize = '100% ' + Math.max(2, Math.round(scale)) + 'px';
     // Retro renders at the 2D game's 480x270; the canvas is already scaled up without smoothing
     if (S.visuals.retro) { Gfx.resize(VIEW_W, VIEW_H); return; }
-    const k = Math.min(2, window.devicePixelRatio || 1) * S.visuals.resScale;
+    // phones have very dense screens and less to draw with: touch caps the pixel ratio lower
+    const k = Math.min(typeof Touch !== 'undefined' && Touch.on() ? 1.5 : 2, window.devicePixelRatio || 1) * S.visuals.resScale;
     Gfx.resize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
   },
   // Characters are drawn between simulation ticks, so nothing stutters on fast screens.
@@ -158,7 +164,9 @@ const Render = {
     for (const [pk, m] of this.pickups) if (!live.has(pk)) { Gfx.scene.remove(m); this.pickups.delete(pk); }
     // the player: posed from the 2D pose, fading when the camera comes close, blinking while hurt
     const P = Game.player, R = this.playerRig;
-    R.mesh.visible = !!P;
+    // the sawblade stands in for the body (ultimates.js)
+    R.mesh.visible = !!P && !P.ult;
+    SawView.sync();
     if (P) {
       const p = P.rp || P.pos, py = P.pivotY || 0;
       R.mesh.rotation.set(P.tilt || 0, P.yaw, P.bank || 0);
@@ -186,6 +194,7 @@ const Render = {
   // the drawn blade lights what's around it
   bladeLight() {
     const P = Game.player, R = this.playerRig;
+    if (P && P.ult) { const c = P.rp || P.pos; Gfx.light(c.x, c.y + SAW.R, c.z, '#ff2a48', 3, 7); return; }
     if (!P || P.dead || !R.mesh.visible) return;
     const v = this._v.set(0, 0.55, 0.03);
     R.bones.weapon.localToWorld(v);
@@ -202,6 +211,7 @@ const Render = {
     Gfx.processRebake();
     this.syncModels(realDt);
     Views.sync();
+    Tutorial.syncMarker(t);
     FX.sync(Gfx.camera);
     // bullet time drains the colour from the lit world; glowing parts and effects stay bright
     Gfx.desat.value = G.bulletK() * 0.85;
@@ -313,7 +323,7 @@ const Render = {
       ctx.fillStyle = fl ? '#ffffff' : C ? '#3a1a24' : k >= 1 ? '#ff3a52' : '#3a1a24'; this.diamond(ctx, ux, uy, 3);
       if (C) this.fillDiamond(ctx, ux, uy, Math.max(0.05, C.k), C.k >= 1 ? (((t * 16) | 0) % 2 ? '#ffffff' : '#ffd070') : '#ffd0d8');
       else if (k < 1) this.fillDiamond(ctx, ux, uy, k, '#a01c30');
-      drawText(ctx, hudKey('utility') + ' ' + U.hud, ux + 7, y2 + 8, { color: k >= 1 ? '#7a849c' : '#5a4a5a' });
+      drawText(ctx, (hudKey('utility') + ' ' + U.hud).trim(), ux + 7, y2 + 8, { color: k >= 1 ? '#7a849c' : '#5a4a5a' });
     }
     // wave info
     const D = Director;
@@ -374,6 +384,32 @@ const Render = {
       else if (bt > 0) this.drawReboundCue(ctx, p, bt, t);
       this.drawCrosshair(ctx, p);
     }
+    if (G.mode === 'training') Training.drawHud(ctx, t);
+    if (p.ult && G.state === 'playing') SawView.drawHud(ctx, p, t);
+    this.drawUltMeter(ctx, x + 9, y2 + 31, p, t);
+  },
+  // the ultimate's meter: twelve teeth filling round a disc as kills charge it, spinning and flashing when
+  // it's ready (hold the key), turning while the saw runs
+  drawUltMeter(ctx, cx, cy, p, t) {
+    const ready = p.ultCharge >= 1, active = !!p.ult;
+    const spin = active ? p.ult.spin : ready ? t * 4 : 0, n = 12;
+    for (let i = 0; i < n; i++) {
+      const a = spin + (i / n) * TAU - Math.PI / 2;
+      const lit = active || i / n < p.ultCharge;
+      ctx.fillStyle = '#0b0910';
+      pline(ctx, cx + Math.cos(a) * 5, cy + Math.sin(a) * 5, cx + Math.cos(a + 0.3) * 9, cy + Math.sin(a + 0.3) * 9, 3);
+      ctx.fillStyle = lit ? (ready && ((t * 8) | 0) % 2 ? '#ffffff' : '#ff3048') : '#3a1a24';
+      pline(ctx, cx + Math.cos(a) * 5, cy + Math.sin(a) * 5, cx + Math.cos(a + 0.3) * 8, cy + Math.sin(a + 0.3) * 8, 1);
+    }
+    ctx.fillStyle = '#0b0910'; pdisc(ctx, cx, cy, 5);
+    ctx.fillStyle = active || ready ? '#b8142a' : '#3a1a24'; pdisc(ctx, cx, cy, 4);
+    if (p.ultHold > 0) {
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 16 * p.ultHold; i++) { const a = -Math.PI / 2 + (i / 16) * TAU; ctx.fillRect(Math.round(cx + Math.cos(a) * 11), Math.round(cy + Math.sin(a) * 11), 1, 1); }
+    }
+    const key = hudKey('ultimate');
+    if (active) drawText(ctx, 'SAWBLADE', cx + 13, cy - 3, { color: '#ffffff' });
+    else drawText(ctx, (ready ? key + ' ' : '') + 'SAWBLADE', cx + 13, cy - 3, { color: ready ? (((t * 3) | 0) % 2 ? '#ff8a9a' : '#ffffff') : '#5a4a5a' });
   },
   // ---------- the rival ----------
   // Its health along the bottom of the screen with the half-health mark of phase 1 and its shield.
@@ -424,7 +460,7 @@ const Render = {
     ctx.fillRect(0, 0, VIEW_W, bh); ctx.fillRect(0, VIEW_H - bh, VIEW_W, bh);
     if (C.skippable && !C.closing && k > 0.9) {
       const hold = clamp(C.skipHold / 0.5, 0, 1);
-      drawText(ctx, 'HOLD ' + hudKey('sheathe') + ' TO SKIP', VIEW_W - 8, VIEW_H - 12, { align: 'right', color: hold > 0 ? '#ffffff' : '#7a6a7a' });
+      drawText(ctx, 'HOLD ' + (Touch.on() ? 'PARRY' : hudKey('sheathe')) + ' TO SKIP', VIEW_W - 8, VIEW_H - 12, { align: 'right', color: hold > 0 ? '#ffffff' : '#7a6a7a' });
       ctx.fillStyle = '#3a3040'; ctx.fillRect(VIEW_W - 58, VIEW_H - 5, 50, 1);
       ctx.fillStyle = '#ffffff'; ctx.fillRect(VIEW_W - 58, VIEW_H - 5, Math.round(50 * hold), 1);
     }

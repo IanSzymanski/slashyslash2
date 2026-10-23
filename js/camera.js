@@ -40,7 +40,8 @@ const Camera = {
   // base is the top of the head: the pivot is kept in open space between it and where the smoothing wants it.
   follow(p, realDt) {
     const r = p.rp || p.pos;
-    this.fp = S.camera.distance <= 0;
+    // the sawblade is watched from behind, whatever the setting
+    this.fp = S.camera.distance <= 0 && !p.ult;
     if (this.fp) {
       // the model's eyes (render.js keeps their offset from the body as the pose moves the head), easing back
       // over the chest looking down so the body is in view below; what's at the lens is cut away (Gfx.nearCut)

@@ -19,7 +19,7 @@
     // the lock as the browser has it; playing without it for more than a moment (a hotkey took it, say) pauses,
     // so the resume panel is there to take it back
     Input.syncLock();
-    unlockedT = Game.state === 'playing' && Input.lockRequired && !Input.pointerLocked && !Input.lockPending ? unlockedT + realDt : 0;
+    unlockedT = Game.state === 'playing' && Input.lockRequired && !Touch.on() && !Input.pointerLocked && !Input.lockPending ? unlockedT + realDt : 0;
     if (unlockedT > 0.35) { unlockedT = 0; Game.pause(); }
     const look = Input.takeLook();
     // a bug in one frame is logged, not allowed to stop the loop
@@ -34,7 +34,8 @@
         else {
           if (Camera.cineView) Camera.endCine(p, C && C.focus);
           Camera.follow(p, realDt);
-          Camera.update(realDt, S.camera.distance, p.dashT > 0 || p.iaido ? 8 : 5 * clamp((Controller.hspeed(p) - PC.RUN) / (PC.SPRINT - PC.RUN), 0, 1));
+          // the camera pulls back while the sawblade runs
+          Camera.update(realDt, p.ult ? Math.max(S.camera.distance, 7.5) : S.camera.distance, p.dashT > 0 || p.iaido ? 8 : 5 * clamp((Controller.hspeed(p) - PC.RUN) / (PC.SPRINT - PC.RUN), 0, 1));
         }
       } else if (Game.state === 'menu') {
         // the title screen: a slow orbit framed for the arena
@@ -48,6 +49,7 @@
       }
     } catch (err) { console.error(err); Input.consume(); }
     try { Render.draw(realDt); } catch (err) { console.error(err); }
+    Touch.sync();
     requestAnimationFrame(frame);
   }
   function start() {
@@ -60,11 +62,12 @@
     Arena.load('crossroads');
     Render.prewarm();
     Input.init(gl);
+    Touch.init();
     Input.gameKeysActive = () => Game.state === 'playing';
     // Esc never reaches the page while the pointer is locked, so losing the lock is what pauses; a lock that turns
     // up while a panel is open (and nothing asked for it) is handed back, so the panel keeps its cursor
     Input.onLockChange = (locked) => {
-      if (!locked && Game.state === 'playing') Game.pause();
+      if (!locked && Game.state === 'playing' && !Touch.on()) Game.pause();
       else if (locked && Game.state !== 'playing' && !Input.lockPending) Input.releaseLock();
     };
     UI.init();
@@ -82,7 +85,7 @@
     // clicking it mid-run without the lock, after an upgrade pick say, takes the lock back
     gl.addEventListener('mousedown', () => {
       if (Game.state === 'paused' && UI.openPanel() === UI.pausePanel()) UI.resumeGame();
-      else if (Game.state === 'playing' && Input.lockRequired && !Input.pointerLocked) Input.requestLock();
+      else if (Game.state === 'playing' && Input.lockRequired && !Touch.on() && !Input.pointerLocked) Input.requestLock();
     });
     const wake = () => { Sound.init(); Sound.startMusic(); };
     document.addEventListener('pointerdown', wake, { once: true });

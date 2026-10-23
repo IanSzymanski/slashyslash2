@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Headless smoke test. Boots the 3D page and checks WebGL draws, runs scripted checks of the moves
-// (Phases 1 and 2), the nav graph, each enemy type's answer and the wave modes (Phase 3) and the rival's
-// rules (Phase 5), then plays Endless from wave 6 and the rival fight with random input and mouse look.
+// (Phases 1 and 2), the nav graph, each enemy type's answer and the wave modes (Phase 3), the rival's
+// rules (Phase 5), and Training's tutorial, touch controls and the Sawblade (Phase 6), then plays Endless
+// from wave 6, the rival fight and the training hall with random input and mouse look.
 // Fails on any page error, a camera inside a box or under the street, a body inside a box or outside the
 // arena, a shader compiled mid-fight, or a failed check.
 // Needs the dev dependencies:  npm install
@@ -855,6 +856,136 @@ async function run(browser, file, errors) {
     ok(koCine && R.dead && husk && husk.rig, 'the last hit plays the knockout cutscene and leaves its husk lying in the street');
     S.gameplay.invincible = false;
 
+    // ---------- Training, the tutorial, touch controls and the Sawblade ----------
+    {
+      Game.toMenu(); SaveData.tutorialDone = false; S.gameplay.invincible = false;
+      UI.act('training'); T.frame(5);
+      const P = Game.player, D = Training.dummy, St = World.def.tutorialStart;
+      ok(Arena.id === 'training' && Tutorial.active && Tutorial.step().id === 'move' && distXZ(P.pos, St) < 0.5 && D && D.type === 'dummy' && !document.getElementById('tut').hidden,
+        'Training opens in the training hall with the tutorial at the course start, its text up, and the dummy on its mat');
+      const face = (x, z) => { Camera.yaw = yawOf(x - P.pos.x, z - P.pos.z); };
+      // the orbit camera moves as it pitches, so aim until the crosshair settles on the point
+      const aimHard = (c) => { for (let i = 0; i < 8; i++) T.aimAt(c); };
+      const walkTo = (x, z, max = 300) => { for (let i = 0; i < max; i++) { face(x, z); T.press('KeyW'); T.frame(1); if (Math.hypot(P.pos.x - x, P.pos.z - z) < 0.5) break; } T.release('KeyW'); T.frame(20); };
+      walkTo(0, 28); T.frame(70);
+      walkTo(0, 21); T.frame(70);
+      ok(Tutorial.step().id === 'jump' && P.pos.y > 2.4, `walking to the marker and into the orange block finishes the first two steps (${Tutorial.step().id}, on top at ${P.pos.y.toFixed(1)} m)`);
+      // the teal block takes a jump, the tower a double jump from it
+      face(9, 19); T.press('KeyW'); T.press('Space'); T.frame(40); T.release('Space'); T.frame(30); T.release('KeyW'); T.frame(70);
+      walkTo(9, 18.2, 100);
+      face(9, 12); T.press('KeyW'); T.press('Space'); T.frame(14); T.release('Space'); T.frame(4); T.press('Space'); T.frame(30); T.release('Space'); T.frame(20); T.release('KeyW'); T.frame(70);
+      ok(Tutorial.step().id === 'dash', `a jump onto the teal block and a double jump onto the tower finish the platforming (${Tutorial.step().id})`);
+      // the laser door: walking in throws you back; a dash goes through
+      Training.place(P, { x: 0, y: 0, z: 12, yaw: 0 }); T.frame(3);
+      const zaps = Training.n('zap');
+      for (let i = 0; i < 80; i++) { face(0, 0); T.press('KeyW'); T.frame(1); }
+      T.release('KeyW'); T.frame(20);
+      const zapped = Training.n('zap') > zaps && P.pos.z > 7.5;
+      Training.place(P, { x: 0, y: 0, z: 11, yaw: 0 }); T.frame(3);
+      face(0, 0); T.press('KeyW'); T.frame(20); T.tap('ShiftLeft'); T.frame(30); T.release('KeyW'); T.frame(70);
+      ok(zapped && P.pos.z < 7.5 && Tutorial.step().id === 'slide', `the red lasers throw back a walk and let a dash through (${P.pos.z.toFixed(1)} m past them)`);
+      // the slot under the wall: too low to walk under, a slide goes through
+      Training.place(P, { x: 0, y: 0, z: -4, yaw: 0 }); T.frame(3);
+      for (let i = 0; i < 60; i++) { face(0, -20); T.press('KeyW'); T.frame(1); }
+      T.release('KeyW'); T.frame(10);
+      const blocked = P.pos.z > -9;
+      Training.place(P, { x: 0, y: 0, z: 2, yaw: 0 }); T.frame(3);
+      face(0, -20); T.press('KeyW'); T.frame(30); T.press('KeyC'); T.frame(50); T.release('KeyC'); T.release('KeyW'); T.frame(70);
+      ok(blocked && P.pos.z < -10.5 && Tutorial.step().id === 'zip', `the slot stops you standing and lets a slide under (${P.pos.z.toFixed(1)})`);
+      // the tether: hold zips up the 14 m ledge; a tap at the floating platform's edge throws you onto it
+      Training.place(P, { x: 0, y: 0, z: -20, yaw: 0 }); T.frame(3);
+      aimHard({ x: 0, y: 13.8, z: -26 }); T.press('Mouse2'); T.frame(120); T.release('Mouse2'); T.frame(70);
+      const zipped = Tutorial.step().id === 'fling' && P.pos.y > 13.9;
+      walkTo(0, -34.5, 200);
+      aimHard({ x: 0, y: 15.8, z: -47 }); T.tap('Mouse2', 2); T.frame(120); T.frame(30);
+      ok(zipped && Tutorial.step().id === 'slash' && P.pos.y > 15.9, `a held tether zips up the ledge, a tap flings you onto the platform (${Tutorial.step().id} at ${P.pos.y.toFixed(1)} m)`);
+      // the dummy: a string, a heavy
+      const faceD = () => { Camera.yaw = yawOf(D.pos.x - P.pos.x, D.pos.z - P.pos.z); Camera.pitch = -0.1; };
+      Training.place(P, { x: 0, y: 0, z: -59.8, yaw: 0 }); faceD(); T.frame(5);
+      for (let i = 0; i < 3; i++) { T.tap('Mouse0'); T.frame(16); }
+      T.frame(70); faceD(); T.press('Mouse0'); T.frame(30); T.release('Mouse0'); T.frame(80);
+      ok(Tutorial.step().id === 'fight', `a three-hit string and a heavy on the dummy finish the attack steps (${Tutorial.step().id})`);
+      // two scrappers, the sword beam
+      for (let i = 0; i < 900 && Tutorial.step().id === 'fight'; i++) {
+        const e = Game.enemies.find((x) => x.tutorial && !x.dead && !x.spawning);
+        if (e) { Camera.yaw = yawOf(e.pos.x - P.pos.x, e.pos.z - P.pos.z); if (i % 12 === 0) T.tap('Mouse0'); }
+        T.frame(1);
+      }
+      T.frame(80); Training.place(P, { x: 0, y: 0, z: -55, yaw: 0 }); faceD(); T.frame(3);
+      T.press('KeyF'); T.frame(80); T.release('KeyF'); T.frame(100);
+      ok(Tutorial.step().id === 'parry', `the scrappers go down and a full sword beam hits the dummy (${Tutorial.step().id})`);
+      // yellow: E on the flash parries it; then a counter
+      const parryLoop = (id) => {
+        Training.place(P, { x: 0, y: 0, z: -60, yaw: 0 }); faceD(); T.frame(3);
+        let armed = true;
+        for (let i = 0; i < 1500 && Tutorial.step().id === id; i++) {
+          faceD();
+          if (distXZ(P.pos, D.pos) > 2.6 && D.state === 'idle') Training.place(P, { x: 0, y: 0, z: -60, yaw: 0 });
+          if (D.state !== 'windup') armed = true;
+          if (armed && D.state === 'windup' && D.st >= D.tele(DUMMY.WIND) - 0.14) { T.press('KeyE'); armed = false; }
+          if (Input.down.has('KeyE') && (!P.sheathe || (P.sheathe.empowered && P.sheathe.t > P.sheathe.parriedAt + 0.12))) T.release('KeyE');
+          T.frame(1);
+        }
+        T.release('KeyE'); T.frame(70);
+      };
+      parryLoop('parry'); parryLoop('counter');
+      ok(Tutorial.step().id === 'red' && Training.n('parry') >= 3 && Training.n('iaido') >= 1, `E on the dummy's yellow flash parries it, and letting go counters (${Training.n('parry')} parries)`);
+      // red: no parry stops it in front; a dash through its body to its back beats it
+      Training.place(P, { x: 0, y: 0, z: -58, yaw: 0 }); faceD(); T.frame(3);
+      const h0 = Training.n('redHit');
+      for (let i = 0; i < 400 && Training.n('redHit') === h0; i++) { faceD(); if (D.state === 'redWind' && !P.sheathe && D.st > 0.6) T.tap('KeyE'); T.frame(1); }
+      const redHit = Training.n('redHit') > h0;
+      for (let i = 0; i < 2400 && Tutorial.step().id === 'red'; i++) {
+        if (D.state === 'idle' && P.dashT <= 0) { if (distXZ(P.pos, D.pos) > 3.2 || D.behindMe(P)) { T.release('KeyW'); Training.place(P, { x: 0, y: 0, z: -59, yaw: 0 }); } D._dashed = false; }
+        faceD();
+        if (D.state === 'redWind' && D.st > 0.3 && !D._dashed) { T.press('KeyW'); T.tap('ShiftLeft'); D._dashed = true; continue; }
+        if (P.dashT <= 0 && P.dashEndT <= 0) T.release('KeyW');
+        T.frame(1);
+      }
+      T.release('KeyW'); T.frame(80);
+      ok(redHit && Training.n('redDodge') >= 2 && Tutorial.step().id === 'done', `the dummy's red flash goes through a parry in front, and dashing through to its back beats it (${Training.n('redDodge')} dodged)`);
+      for (let i = 0; i < 600 && Tutorial.active; i++) T.frame(1);
+      ok(!Tutorial.active && SaveData.tutorialDone && Game.training.dummy === 'still' && document.getElementById('tut').hidden, 'finishing the tutorial saves it as done and leaves the hall as a practice area');
+      // practice: you can't die, the panel spawns things, and the tutorial can be replayed
+      P.shield = 0; P.iframes = 0; P.takeHit({ dmg: 999, from: { x: P.pos.x + 1, y: 1, z: P.pos.z } });
+      const alive = !P.dead && P.hp >= 1;
+      Game.pause(); const panel = UI.openPanel() === 'train' && document.querySelector('#train-body [data-act="train-tutorial"]');
+      const n0 = Game.enemies.length; Training.act('train-spawn', { dataset: { type: 'scrapper' } }); await new Promise((r) => setTimeout(r, 30)); T.frame(5);
+      ok(alive && panel && Game.enemies.length === n0 + 1 && Game.state === 'playing', `in practice a 999 hit leaves you at ${Math.round(P.hp)}, and pause opens the training panel, which spawns a scrapper`);
+      Game.pause(); Training.act('train-tutorial'); await new Promise((r) => setTimeout(r, 30)); T.frame(5);
+      ok(Tutorial.active && Tutorial.step().id === 'move' && distXZ(P.pos, St) < 0.5 && Game.state === 'playing', 'Replay the tutorial puts you back at the start of the course');
+      Game.toMenu(); UI.act('training'); T.frame(5);
+      ok(!Tutorial.active && distXZ(Game.player.pos, World.def.playerStart) < 0.5, 'once done, Training opens straight into practice in the hall');
+
+      // touch: a button presses its action, the stick walks, no lock is needed, and the layer only shows in play
+      Game.toMenu(); S.controls.touch = 'on'; Touch.changed();
+      const hiddenInMenu = document.getElementById('touch').hidden;
+      await UI.startRun('test'); T.frame(3); Touch.sync();
+      const tp = Game.player, shown = !document.getElementById('touch').hidden;
+      Input.pressCode('T:attack'); T.frame(1); Input.releaseCode('T:attack'); T.frame(2);
+      const swung = !!(tp.attack || tp.atkPend);
+      T.frame(40);
+      const x0 = { x: tp.pos.x, z: tp.pos.z };
+      Touch.stick = { id: 9, x0: 0, y0: 0, x: 0, y: 1 }; T.frame(30); Touch.stick = null; T.frame(20);
+      const walked = distXZ(tp.pos, x0);
+      ok(hiddenInMenu && shown && Game.state === 'playing' && swung && walked > 3, `touch controls: no mouse lock needed, the layer shows in play only, ATTACK swings and the stick walks (${walked.toFixed(1)} m)`);
+      S.controls.touch = 'auto'; Touch.changed(); Touch.sync();
+      Game.toMenu();
+
+      // the Sawblade: hold R for a second on a full meter; it can't be hurt, grinds what it touches, ends after 7 s
+      const sp = T.fresh(), near = T.enemy('scrapper', 3, 0, { hp: 500 }), far = T.enemy('scrapper', -12, 0, { hp: 3000 });
+      sp.ultCharge = 1; T.frame(2);
+      T.press('KeyR'); T.frame(40); const early = !sp.ult; T.frame(30); T.release('KeyR'); T.frame(2);
+      const sawOn = !!sp.ult && early && 500 - near.hp >= 40;
+      const immune = sp.takeHit({ dmg: 50, from: { x: sp.pos.x + 1, y: 1, z: sp.pos.z } }) === 'immune';
+      for (let i = 0; i < 8; i++) T.aimAt(far.center());
+      T.press('Mouse2'); T.frame(60);
+      const ground = 3000 - far.hp, grind = sp.tether && sp.tether.mode === 'grind';
+      T.release('Mouse2');
+      for (let i = 0; i < 60 * 8 && sp.ult; i++) T.frame(1);
+      ok(sawOn && immune && grind && ground > 60 && !sp.ult && sp.h > 1.7, `the Sawblade starts after a 1 s hold, shrugs off hits, grinds a tethered scrapper (${Math.round(ground)}) and ends after 7 s`);
+    }
+
     // Retro renders at the 2D game's 480x270
     S.visuals.retro = true; Render.resize();
     const gl = Gfx.renderer.getContext(), retro = [gl.drawingBufferWidth, gl.drawingBufferHeight];
@@ -869,7 +1000,7 @@ async function run(browser, file, errors) {
 
   // ---------- random play ----------
   // Endless from wave 6, so every enemy type turns up; then the rival fight
-  for (const [mode, secs] of [['endless', seconds], ['boss', Math.min(seconds, 30)]]) {
+  for (const [mode, secs] of [['endless', seconds], ['boss', Math.min(seconds, 30)], ['training', Math.min(seconds, 15)]]) {
   const res = await page.evaluate(async ([frames, mode]) => {
     const problems = [];
     const fail = (m) => problems.push(m);
@@ -933,7 +1064,8 @@ async function run(browser, file, errors) {
   if (mode === 'endless') {
     console.log(`  endless from wave 6: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies (${res.types}), style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
     if (res.kills < 1) errors.push(`${name}: random play killed nothing`);
-  } else console.log(`  rival fight: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
+  } else if (mode === 'boss') console.log(`  rival fight: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
+  else console.log(`  training hall: ${res.time}s simulated, ${res.calls} draw calls, ${res.progs} shader programs`);
   errors.push(...res.problems.map((m) => `${name}: ${mode}: ${m}`));
   }
   await page.waitForTimeout(300);

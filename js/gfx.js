@@ -14,7 +14,15 @@ const TEX_STYLES = {
   dirt: ['#3e3026', '#2e241c', '#52402e'], bricks: ['#5a2e28', '#3a1e1a', '#6e3a30'], timber: ['#5a4632', '#3e3022', '#705a40'],
   yellow: ['#a8841c', '#7a5e14', '#c8a028'], tread: ['#262428', '#18161a', '#38363a'], cab: ['#2a3038', '#1a1e24', '#5a7088'],
   dumpster: ['#2e4a3a', '#203428', '#3e5e4a'], potty: ['#2a4a7a', '#1e365a', '#3a5e94'],
+  // the training hall: light tiled floor, white panelled walls and ceiling, coloured course blocks, the
+  // dummy's mat, a dark wall behind it, and hazard stripes over the gaps
+  tile: ['#a2aaba', '#7e8696', '#bcc4d2'], wall: ['#c8ced8', '#a4acba', '#e0e4ec'], ceiling: ['#d2d6de', '#b0b6c2', '#e6e8ee'],
+  wallDark: ['#3e4452', '#2e3440', '#4e5666'], mat: ['#34446a', '#263252', '#46588a'],
+  block: ['#d8843a', '#a8601e', '#f0a45a'], block2: ['#2e98a6', '#1e7480', '#52b8c4'], block3: ['#7a68c8', '#5848a0', '#9c8ce0'],
+  stripe: ['#e8b820', '#1a1a1e', '#f4d050'],
 };
+// grid-lined styles: a line every metre, with a lit edge beside it
+const GRID_STYLES = new Set(['tile', 'wall', 'ceiling', 'wallDark', 'mat', 'block', 'block2', 'block3']);
 // Facades carry windows: a 256x192 texture covering 8 m x 6 m (4 x 2 windows), some of them lit.
 const FACADES = new Set(['brick', 'brick2', 'concrete', 'panel', 'shop', 'shop2']);
 const TEX_METRES = (style) => (FACADES.has(style) ? [8, 6] : [2, 2]);
@@ -206,6 +214,16 @@ const Gfx = {
         g.fillStyle = '#c8a020'; g.fillRect(0, 0, 64, 64);
         g.fillStyle = '#1a2230'; g.fillRect(6, 6, 52, 34);
         g.fillStyle = light; g.fillRect(10, 10, 14, 3); g.fillRect(10, 14, 6, 2);
+      } else if (GRID_STYLES.has(style)) {
+        speckle(70);
+        g.fillStyle = dark;
+        for (let i = 0; i < W; i += 32) { g.fillRect(i, 0, 1, Ht); g.fillRect(0, i, W, 1); }
+        g.fillStyle = light;
+        for (let i = 1; i < W; i += 32) { g.fillRect(i, 1, 1, Ht - 1); g.fillRect(1, i, W - 1, 1); }
+      } else if (style === 'stripe') {
+        // yellow and black hazard bands on the diagonal
+        g.fillStyle = dark;
+        for (let x = -64; x < 64; x += 16) for (let y = 0; y < Ht; y++) g.fillRect(x + y, y, 8, 1);
       } else if (style === 'car') {
         speckle(300);
         g.fillStyle = light;
@@ -376,6 +394,9 @@ const Gfx = {
       this.level.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
     }
     this.fireMats = []; this.lampMats = []; this.buzzMats = []; this.blinkMats = []; this.baked = []; this._rebakeQ = [];
+    // each arena has its own sky and fog: the city's night, the training hall's light grey
+    const bg = def.bg || '#0b0710', fog = def.fog || { near: 28, far: 95 };
+    this.scene.background.set(bg); this.scene.fog.color.set(bg); this.scene.fog.near = fog.near; this.fogFar = fog.far;
     const group = new THREE.Group();
     const buckets = new Map();
     const bucket = (style) => { if (!buckets.has(style)) buckets.set(style, { pos: [], nrm: [], uv: [], baked: [], fire: [], buzz: [], idx: [] }); return buckets.get(style); };
@@ -646,7 +667,7 @@ const Gfx = {
   // lamp heads go dark in a Blackout; the fog closes in a little
   syncLamps() {
     for (const m of this.lampMats) m.color.copy(World.blackout ? new THREE.Color('#2a2426') : m.userData.base);
-    this.scene.fog.far = World.blackout ? 75 : 95;
+    this.scene.fog.far = (this.fogFar || 95) * (World.blackout ? 0.79 : 1);
   },
   // Flicker for this frame: fires waver continuously; neon and failing lamps hold steady and now and then
   // stutter out for a moment. Applied to the baked light, the glowing shapes and characters' light.

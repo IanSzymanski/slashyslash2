@@ -248,7 +248,7 @@ const Views = {
     this.wLast = 0;
   },
   syncWeather() {
-    const on = S.visuals.weather;
+    const on = S.visuals.weather && !(World.def && World.def.indoor);
     this.rain.visible = this.ash.visible = on;
     if (!on) return;
     const now = Game.realTime, dt = clamp(now - this.wLast, 0, 0.1) * (Game.state === 'playing' || Game.state === 'menu' ? Game.slowScale : 0);

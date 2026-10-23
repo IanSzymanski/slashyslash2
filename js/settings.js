@@ -54,7 +54,8 @@ const DEFAULT_SETTINGS = {
     scrapper: true, gunner: true, drone: true, brute: true, shielder: true, crawler: true, grenadier: true, sniper: true, bossEndless: true,
   },
   gameplay: { parryWindow: 0.2, ultKills: 12, invincible: false, ultimate: 'sawblade' },
-  controls: { bindings: deepClone(DEFAULT_BINDINGS) },
+  // touch: 'auto' turns the touch controls on for touch screens; sizes and look speed are multipliers
+  controls: { bindings: deepClone(DEFAULT_BINDINGS), touch: 'auto', touchSize: 1, touchOpacity: 0.6, touchLook: 1, vibrate: true, fullscreen: true },
   // distance in metres behind the pivot; fovKick widens the view on dashes and zips
   camera: { distance: 5, sensitivity: 1, invertY: false, fovKick: true },
   audio: { master: 0.8, sfx: 0.9, music: 0.45, muteOnBlur: true },
@@ -127,6 +128,14 @@ const SETTINGS_SCHEMA = {
     { type: 'toggle', key: 'gameplay.invincible', label: 'Invincible (practice)' },
   ],
   controls: [
+    { type: 'heading', label: 'Touch screen' },
+    { type: 'choice', key: 'controls.touch', label: 'Touch controls', options: [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']] },
+    { type: 'range', key: 'controls.touchSize', label: 'Button size', min: 0.7, max: 1.4, step: 0.05, fmt: '%' },
+    { type: 'range', key: 'controls.touchOpacity', label: 'Button opacity', min: 0.2, max: 1, step: 0.05, fmt: '%' },
+    { type: 'range', key: 'controls.touchLook', label: 'Look speed (drag)', min: 0.3, max: 3, step: 0.05, fmt: 'x' },
+    { type: 'toggle', key: 'controls.vibrate', label: 'Vibrate on hits and parries' },
+    { type: 'toggle', key: 'controls.fullscreen', label: 'Full screen and landscape when a mode starts' },
+    { type: 'heading', label: 'Keyboard and mouse' },
     { type: 'bindings' },
   ],
   camera: [

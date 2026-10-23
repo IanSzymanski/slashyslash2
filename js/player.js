@@ -60,7 +60,7 @@ class Player {
     this.attack = null; this.comboTimer = 0; this.attackQueued = null; this.attackCD = 0;
     this.atkPend = null; this.strN = 0; this.strLights = 0; this.lastDir = 1;
     this.postPose = 0; this.sheathe = null; this.parryCD = 0; this.parryFlash = 0; this.iaido = null; this.shieldOffT = 0;
-    this.tether = null; this.ult = null; this.ultCharge = 0; this.ultHold = 0;
+    this.tether = null; this.ult = null; this.ultCharge = 0; this.ultHold = 0; this.ultReadyPlayed = false;
     this.dead = false; this.deadT = 0; this.hoverAvail = true; this.animT = 0; this.stepT = 0; this.aimHold = 0;
     this.aim = { x: pos.x, y: pos.y + 1, z: pos.z - 10 }; this.aimDir = { x: 0, y: 0, z: -1 }; this.aimYaw = 0;
     this.hitMarks = [];
@@ -104,6 +104,9 @@ class Player {
     const fb = (Input.isDown('forward') ? 1 : 0) - (Input.isDown('back') ? 1 : 0);
     const lr = (Input.isDown('right') ? 1 : 0) - (Input.isDown('left') ? 1 : 0);
     let mx = fx * fb + rx * lr, mz = fz * fb + rz * lr;
+    // the touch stick is analog: a small push walks
+    const A = !fb && !lr && typeof Touch !== 'undefined' ? Touch.axis() : null;
+    if (A) { mx = fx * A.y + rx * A.x; mz = fz * A.y + rz * A.x; }
     const l = Math.hypot(mx, mz);
     if (l > 1) { mx /= l; mz /= l; }
     return {
@@ -144,7 +147,11 @@ class Player {
       if (this.utilCD <= 0) { this.utilCD = 0; Sound.play('utilReady'); FX.ring(this.center(), 0.4, 1.5, 0.25, { c: '#ff3a52', flat: false }); }
     }
 
+    if (this.ultCharge >= 1 && !this.ultReadyPlayed) { this.ultReadyPlayed = true; Sound.play('ultReady'); }
     if (this.dead) { if (this.charging) this.cancelCharge(); this.updateDead(dt); return; }
+    // the ultimate: R held for a second once the meter is full; while it runs it drives the body itself
+    this.updateUltHold(dt);
+    if (this.ult) { getUltimate(this.ult.id).update(this, dt); return; }
 
     const I = this.intent();
     this.updateSheathe(dt);
@@ -930,6 +937,7 @@ class Player {
       this.shield = Math.min(PC.MAX_SHIELD, this.shield + PC.PARRY_COST);
     }
     Sound.play('parry');
+    if (Touch.on()) Touch.buzz(25);
     Game.slowmo(0.22, 0.42);
     Game.hitstop(0.07);
     Game.shake(0.28);
@@ -1127,7 +1135,8 @@ class Player {
   // the enemy, barrel or tetherable grenade nearest the crosshair's line, within the assist angle and in reach
   tetherTarget(hand) {
     const o = Camera.pos, d = Camera.dir, near = Camera.curDist;
-    let best = null, ba = PC.TETHER_ASSIST;
+    // a thumb aims less finely than a mouse: the tether's aim assist is twice as wide on touch
+    let best = null, ba = PC.TETHER_ASSIST * (Touch.on() ? 2 : 1);
     const consider = (obj, kind, c, r, range) => {
       const vx = c.x - o.x, vy = c.y - o.y, vz = c.z - o.z, l = Math.hypot(vx, vy, vz);
       if (l < near || dist3(c, hand) > range + r) return;
@@ -1195,6 +1204,8 @@ class Player {
       return;
     }
     if (kind === 'enemy') hurtEnemy(target, 4, { cause: 'tether', stagger: 0.25, noKnock: true, hitstop: 0.02, dir: { x: 0, y: 1, z: 0 } });
+    // the sawblade latches on and grinds while the button is held
+    if (kind === 'enemy' && this.ult && Input.isDown('tether')) { T.mode = 'grind'; T.grindT = 0; T.grindN = 0; T.grindTotal = 0; }
   }
   // the flying hook against enemies, barrels and grenades
   tetherHit(T) {
@@ -1244,7 +1255,7 @@ class Player {
         if (!Input.isDown('tether') || T.t > 5) this.throwTowed();
         return;
       }
-      if (T.mode === 'rebound') return;
+      if (T.mode === 'rebound' || T.mode === 'grind') return;
       if (!T.mode) {
         const held = Input.isDown('tether'), since = Game.time - T.firedAt;
         if (!held) T.mode = 'fling';
@@ -1439,6 +1450,39 @@ class Player {
     Game.shake(0.35);
   }
 
+  // ---------- ultimate (R) ----------
+  updateUltHold(dt) {
+    const ready = this.ultCharge >= 1 && !this.ult;
+    if (ready && Input.isDown('ultimate') && !this.sheathe && !this.iaido && !this.plunge && !Game.cineActive()) {
+      if (this.ultHold === 0) { this.loops.ult = Sound.loop('ultHold'); if (this.charging) this.cancelCharge(); }
+      this.ultHold += dt;
+      if (this.loops.ult) this.loops.ult.set(clamp(this.ultHold, 0, 1));
+      // lightning closing in on the chest
+      const c = this.chest();
+      if (Math.random() < 0.6) {
+        const a = rand(0, TAU), up = rand(-0.6, 0.8), r = 3 * (1 - this.ultHold) + 0.5;
+        FX.bolt({ x: c.x + Math.cos(a) * r, y: c.y + up * r, z: c.z + Math.sin(a) * r }, c, 0.05, { jag: 0.27 });
+      }
+      if (this.ultHold >= 1) { this.stopLoop('ult'); this.ultHold = 0; this.activateUlt(); }
+    } else if (this.ultHold > 0) {
+      this.ultHold = 0;
+      this.stopLoop('ult');
+    }
+  }
+  activateUlt() {
+    const def = getUltimate(S.gameplay.ultimate);
+    this.attack = null; this.attackQueued = null; this.atkPend = null; this.plunge = null; this.iaido = null; this.kickAnim = null;
+    if (this.sheathe) this.cancelSheathe();
+    if (this.charging) this.cancelCharge();
+    if (this.tether) this.releaseTether();
+    if (this.cling) Controller.dropCling(this);
+    this.mantle = null; this.vault = null; this.skid = null;
+    this.ult = { id: def.id, t: 0, dur: def.duration };
+    this.ultCharge = 0; this.ultReadyPlayed = false;
+    def.start(this);
+    Game.stats.ults++;
+  }
+
   // ---------- utility (F) ----------
   // Each character has one utility on a cooldown; CHARACTERS names it and js/utilities.js defines it.
   utility() { const c = CHARACTERS[this.charId]; return c && c.utility ? getUtility(c.utility) : null; }
@@ -1526,6 +1570,9 @@ class Player {
       } else Sound.play('shieldHit');
       FX.ring(c, 0.5, 1.5, 0.18, { c: '#2a8ad0', flat: false });
     }
+    // Training: hits still land, but never the last point of health
+    if (Game.mode === 'training') dmg = Math.min(dmg, Math.max(0, this.hp - 1));
+    if (Touch.on()) Touch.buzz(dmg > 0 ? 45 : 20);
     if (dmg > 0) {
       this.hp -= dmg;
       Sound.play('hurt');

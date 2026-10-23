@@ -49,6 +49,7 @@ const UI = {
   // A run starts on the click that asked for it, since locking the pointer needs one. If the browser
   // refuses (it does for about a second after Esc), the run waits paused with a hint.
   startRun(mode) {
+    Touch.enterPlay();
     Game.newRun(mode);
     return Input.requestLock().then((ok) => { if (!ok) { Game.pause(); this.lockHint(true); } });
   },
@@ -129,10 +130,12 @@ const UI = {
 
   // ---------- how to play ----------
   renderHowTo() {
+    // on a touch screen, the buttons' names stand in for the keys
+    const touch = Touch.on(), actionLabel = (a) => (touch ? Touch.label(a) : window.actionLabel(a));
     const rows = [
-      ['Look (click the game to lock the mouse)', 'Mouse'],
-      ['Zoom the camera; all the way in is first person', 'Mouse wheel'],
-      ['Move (relative to the camera); keep running and it builds to a sprint', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
+      touch ? ['Look (drag anywhere on the right; a held button drags too)', 'Right thumb'] : ['Look (click the game to lock the mouse)', 'Mouse'],
+      touch ? ['Switch first and third person', '1P / 3P button'] : ['Zoom the camera; all the way in is first person', 'Mouse wheel'],
+      touch ? ['Move: the stick appears under your thumb; push further to run', 'Left thumb'] : ['Move (relative to the camera); keep running and it builds to a sprint', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
       ['Skid turn: reverse at speed to plant a hand and push off', `${actionLabel('back')} while sprinting`],
       ['Vault over cars and anything chest-high', 'Run into it'],
       ['Climb a ledge you can reach (a container from the street)', 'Walk or jump into it'],
@@ -159,7 +162,7 @@ const UI = {
       ['AEGIS-07 red flash: no parry stops it; dash through to its back', actionLabel('dash')],
       ['Pause (training: spawn panel)', actionLabel('pause')],
       ['Skip a cutscene you have seen', `Hold ${actionLabel('sheathe')}`],
-      ['Pick an endless upgrade', 'Click, or 1 / 2 / 3'],
+      ['Pick an endless upgrade', touch ? 'Tap a card' : 'Click, or 1 / 2 / 3'],
     ];
     document.getElementById('howto-table').innerHTML = rows.map(([a, k]) => `<tr><td>${a}</td><td><kbd>${k}</kbd></td></tr>`).join('');
   },
@@ -178,7 +181,10 @@ const UI = {
     safeStorageSet('slashyslash3d.tab', this.tab);
     const body = document.getElementById('settings-body');
     body.innerHTML = '';
-    for (const item of SETTINGS_SCHEMA[this.tab]) body.appendChild(this.renderItem(item));
+    let items = SETTINGS_SCHEMA[this.tab];
+    // the controls you're using come first
+    if (this.tab === 'controls' && !Touch.on()) { const k = items.findIndex((i) => i.type === 'heading' && i.label.startsWith('Keyboard')); items = items.slice(k).concat(items.slice(0, k)); }
+    for (const item of items) body.appendChild(this.renderItem(item));
   },
   renderItem(item) {
     const id = item.key ? 'set-' + item.key.replace(/\./g, '-') : '';
@@ -263,6 +269,22 @@ const UI = {
       }
       wrap.appendChild(table);
       return wrap;
+    }
+    if (item.type === 'choice') {
+      const row = document.createElement('div'); row.className = 'row preset';
+      row.innerHTML = `<label>${item.label}</label><div class="seg" role="group"></div>`;
+      const seg = row.querySelector('.seg'), v = getPath(S, item.key);
+      for (const [val, name] of item.options) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.textContent = name; b.classList.toggle('on', v === val);
+        b.addEventListener('click', () => {
+          Sound.play('ui'); setPath(S, item.key, val); saveSettings();
+          if (item.key === 'controls.touch') Touch.changed();
+          this.renderSettings();
+        });
+        seg.appendChild(b);
+      }
+      return row;
     }
     if (item.type === 'test-sound') {
       const row = document.createElement('div'); row.className = 'row';

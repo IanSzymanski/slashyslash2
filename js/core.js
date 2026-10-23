@@ -36,6 +36,7 @@ const Game = {
     Sound.setSlow(false);
     Sound.setIntensity(0);
     this.announcements = [];
+    Tutorial.active = false; Tutorial.show(null);
     UI.refreshBest();
     UI.show('menu');
   },
@@ -47,8 +48,9 @@ const Game = {
     Sound.stopAll();
     this.mode = mode;
     this.runs[mode] = (this.runs[mode] || 0) + 1;
-    // every mode plays in the crossroads except the 2D street's free roam
-    if (!Arena.load(mode === 'street' ? 'street' : 'crossroads')) Props.reset();
+    // every mode plays in the crossroads except the 2D street's free roam and Training, in its own hall
+    if (!Arena.load(mode === 'street' ? 'street' : mode === 'training' ? 'training' : 'crossroads')) Props.reset();
+    Tutorial.active = false; Tutorial.show(null);
     Arena.setBlackout(false);
     this.state = 'playing';
     FX.clear();
@@ -197,7 +199,7 @@ const Game = {
     UI.hideAll();
     this.announce(UPGRADES[id].name.toUpperCase(), null, '#ffd070', 2.2, true);
     // the pick was a click or a key press, so the mouse can be locked again straight away
-    if (Input.lockRequired) Input.requestLock().then((ok) => { if (!ok && this.state === 'playing') { this.pause(); UI.lockHint(true); } });
+    if (Input.lockRequired && !Touch.on()) Input.requestLock().then((ok) => { if (!ok && this.state === 'playing') { this.pause(); UI.lockHint(true); } });
   },
   rankMul() { const r = this.rank(); return r ? r.mul : 1; },
   // getting hit costs most of your style
@@ -288,6 +290,7 @@ const Game = {
     World.dyn.length = 0;
     for (const p of this.props) if (!p.dead && p.q && p.q.on) World.dyn.push(p.q);
     this.player.update(dt);
+    if (this.mode === 'training') Training.update(dt);
     Nav.update(this.player.pos, this.time);
     const cine = this.cineActive() ? this.cine : null;
     for (const e of this.enemies) if (!e.dead && (!cine || e === cine.owner)) e.update(dt);
