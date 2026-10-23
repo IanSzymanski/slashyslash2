@@ -250,7 +250,7 @@ class Rival extends Enemy {
   }
   blockBeam(o) {
     const p = Game.player, c = this.chest(), u = flat(p.pos.x - this.pos.x, p.pos.z - this.pos.z);
-    this.yaw = this.faceYaw = this.yawTo(p.pos);
+    if (!(this.act && this.act.lockYaw !== undefined)) this.yaw = this.faceYaw = this.yawTo(p.pos);
     FX.sparks({ x: c.x + u.x * 0.8, y: c.y, z: c.z + u.z * 0.8 }, o.full ? 24 : 10, { x: u.x, y: 0.2, z: u.z }, 1.6, 6, 20, AEGIS_SPARK);
     Sound.play('clash', {}, c);
   }
@@ -895,11 +895,13 @@ class Rival extends Enemy {
     const m = RIVAL_MOVES[name], p = Game.player;
     this.attack = null; this.lunge = null;
     this.act = { kind: 'melee', move: name, m, phase: 'wind', t: 0, combo };
+    // the red flash picks its line once, at you, as it flares, and holds it to the end
+    if (m.zone) { this.yaw = this.faceYaw = this.yawTo(p.pos); this.act.lockYaw = this.yaw; }
+    else this.faceYaw = this.yawTo(p.pos);
     // the arc it will swing, for the wind-up pose; level swings alternate sides
     const dir = m.down ? -1 : m.rising ? 1 : (this.lastDir = -this.lastDir);
     this.windArc = { yaw: this.yaw, tilt: m.tilt, span: m.span, dir, pa: 0 };
     this.bladeWant = true;
-    if (!m.zone) this.faceYaw = this.yawTo(p.pos);
     Sound.play('enemyWindup', { pm: name === 'riposte' ? 1.4 : 0.6 }, this.center());
     if (m.air && this.onGround) {
       this.vel.y = 16; this.onGround = false;
@@ -922,11 +924,13 @@ class Rival extends Enemy {
         if (Math.random() < 0.25 + 0.4 * k) { const u = coneDir(null, TAU), R = lerp(3.2, 1.6, k); FX.bolt({ x: c.x + u.x * R, y: c.y + u.y * R, z: c.z + u.z * R }, this.bladeTip(), 0.07, { outer: PERIL_RED, core: '#ffffff', jag: 0.35, w: 0.05 }); }
         if (Math.random() < 0.5) Game.shake(0.04 + 0.08 * k);
       }
-      // it tracks you through most of the wind-up; the red flash tracks you until its eye flashes, then locks
-      if (m.zone ? !a.glinted : a.t < wind * 0.75) this.face(p.pos, m.close ? 14 : 6, dt);
+      // it tracks you through most of the wind-up; the red flash neither turns nor steps once it flares, so
+      // getting behind it is the answer
+      if (m.zone) this.yaw = this.faceYaw = a.lockYaw;
+      else if (a.t < wind * 0.75) this.face(p.pos, m.close ? 14 : 6, dt);
       else this.faceYaw = this.yaw;
       this.windArc.yaw = this.yaw;
-      if (m.close && a.t < wind * 0.8) this.steerTo(p.pos, 1.5);
+      if (m.close && !m.zone && a.t < wind * 0.8) this.steerTo(p.pos, 1.5);
       if (!a.glinted && a.t >= Math.max(0, wind - (m.close ? CUE_LEAD : GLINT_LEAD))) {
         a.glinted = true;
         if (m.close) this.eyeGlint(m.unparryable ? PERIL_RED : '#ffd070', 2.2);
@@ -1026,7 +1030,7 @@ class Rival extends Enemy {
     const u = flat(tx - this.pos.x, tz - this.pos.z);
     const base = m.air ? Math.max(this.pos.y, p.pos.y) + 1.9 : this.pos.y + 1.0;
     const at = { x: this.pos.x + u.x * 1.2, y: base, z: this.pos.z + u.z * 1.2 };
-    Game.projectiles.push(new BladeWave(at, u, 12 * this.dmgMul, this, !!m.air, (chance(0.5) ? 1 : -1) * BLADE_WAVE.TILT));
+    Game.projectiles.push(new BladeWave(at, u, 24 * this.dmgMul, this, !!m.air, (chance(0.5) ? 1 : -1) * BLADE_WAVE.TILT));
     FX.light(at, '#4a8aff', 5, 8, 0.2);
     Sound.play('heavySwing', {}, c);
   }
@@ -1042,6 +1046,7 @@ class Rival extends Enemy {
   }
   // the red flash lands everywhere in front of it at once, a beat into the swing
   runPerilSwing(a, m, p) {
+    this.yaw = this.faceYaw = a.lockYaw;
     if (!a.resolved && a.t >= CLOSE_CONNECT) {
       a.resolved = true;
       const c = this.chest(), pc = p.chest(), f = this.fwd();

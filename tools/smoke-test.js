@@ -522,7 +522,7 @@ async function run(browser, file, errors) {
     // fires waver and neon stutters, in the baked light and on characters
     let fmin = 9, fmax = 0;
     for (let i = 0; i < 90; i++) { T.frame(1); fmin = Math.min(fmin, World.flick.fire); fmax = Math.max(fmax, World.flick.fire); }
-    Gfx._buzz.next = 0; T.frame(2);
+    Gfx._buzz.t = 0; Gfx._buzz.next = 0; T.frame(2);
     ok(fmax - fmin > 0.05 && World.flick.buzz < 1 && Gfx.uBuzz.value === World.flick.buzz, `fires flicker (${fmin.toFixed(2)}-${fmax.toFixed(2)}) and neon stutters (${World.flick.buzz.toFixed(2)})`);
     // a Blackout wave turns the street lamps off with a rebake, and clearing the wave turns them back on
     const lampAt = World.def.lights.find((l) => l.street && l.group === 'lamp'), under = { x: lampAt.x, y: lampAt.y - 4, z: lampAt.z };
@@ -714,7 +714,7 @@ async function run(browser, file, errors) {
     R = rival(0, -3, { phase2: true });
     p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
     R.yaw = R.faceYaw = R.yawTo(p.pos); R.startPeril();
-    // it tracks you until its eye flashes, so get behind it after that
+    // it holds the line it flared on, so getting behind it at any point beats it
     for (let i = 0; i < 90 && R.act && R.act.move === 'peril' && !R.act.glinted; i++) T.frame(1);
     const f1 = R.fwd();
     p.pos.x = p.prev.x = R.pos.x - f1.x * 2.5; p.pos.z = p.prev.z = R.pos.z - f1.z * 2.5;
@@ -731,6 +731,15 @@ async function run(browser, file, errors) {
     T.release('KeyW');
     ok(p.hp === PC.MAX_HP && R.stunT > 0, `dashing straight through its body beats the red flash (ended ${distXZ(p.pos, R.pos).toFixed(1)} m behind it)`);
     S.gameplay.invincible = true;
+    // once it flares red it holds its line: you circle to its side and it neither turns nor steps after you
+    R = rival(0, -3, { phase2: true });
+    R.yaw = R.faceYaw = R.yawTo(p.pos) + 0.5; R.startPeril();
+    const lockY = R.yaw, lockAt = { x: R.pos.x, z: R.pos.z }, lockF = R.fwd(), aimed = Math.abs(angDiff(lockY, R.yawTo(p.pos)));
+    T.frame(3);
+    p.pos.x = p.prev.x = R.pos.x - lockF.z * 4; p.pos.z = p.prev.z = R.pos.z + lockF.x * 4;
+    let swung = 0;
+    for (let i = 0; i < 90 && R.act && R.act.move === 'peril'; i++) { T.frame(1); swung = Math.max(swung, Math.abs(angDiff(lockY, R.yaw))); }
+    ok(aimed < 0.01 && swung < 0.01 && distXZ(R.pos, lockAt) < 0.5, `the red flash aims at you as it flares, then holds its line (turned ${swung.toFixed(3)} rad, moved ${distXZ(R.pos, lockAt).toFixed(2)} m)`);
     // a sword dash chain: to one side of the line to you, to the other, then a cut through where you stand
     R = rival(0, -14, { phase2: true });
     R.startChain('zigzag'); R.act.side = 1;
