@@ -634,11 +634,12 @@ const PlayerPose = {
       return o;
     }
     if (p.sheathe) {
-      const ch = p.sheathe.empowered ? 1 : 0;
+      // after a parry the stance tightens and shakes harder as the counter charges
+      const sh = p.sheathe, ch = sh.empowered ? 0.4 + 0.6 * (sh.charge || 0) : 0;
       o.lean = 0.5 + ch * 0.1; o.hipY = -7 + ch; o.fF = [6, -1]; o.fB = [-5, -1];
       if (!p.onGround) { o.fF = [4, -4]; o.fB = [-3, -2]; }
       o.sword = 'sheathed'; o.sheathAng = Math.PI - 0.15; o.hF = [3, -9 + ch]; o.hB = [-2, -8 + ch];
-      o.tremble = ch;
+      o.tremble = sh.empowered ? ch * (0.6 + 0.8 * (sh.charge || 0)) : 0;
       return o;
     }
     if (p.plunge) {

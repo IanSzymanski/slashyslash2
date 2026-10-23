@@ -44,9 +44,13 @@ const HEAVIES = {
 const IAIDO = {
   dash: { len: 7.45, path: 1.27, dmg: 26, arcR: 4.18, span: 3.0, lineW: 0.22, delayed: false, empowered: false, chain: false, post: 0.16, flash: 0.08, shake: 0.18 },
   dashHeavy: { len: 10.9, path: 1.5, dmg: 42, arcR: 5.27, span: 3.6, lineW: 0.36, delayed: true, empowered: false, chain: false, post: 0.22, flash: 0.14, shake: 0.32, heavy: true },
-  // the parry counter: you stay put and the cut explodes out from you (still)
-  counter: { len: 15, path: 2.0, dmg: 135, arcR: 10.45, span: 4.4, lineW: 0.8, delayed: true, empowered: true, chain: true, post: 0.32, flash: 0.35, shake: 0.7, still: true },
+  // the parry counter: you stay put and the cut explodes out from you (still). dmg is at full charge
+  counter: { len: 15, path: 2.0, dmg: 135, arcR: 10.45, span: 4.4, lineW: 0.8, delayed: true, empowered: true, post: 0.32, flash: 0.35, shake: 0.7, still: true },
 };
+// Holding E after a parry charges the counter: a tap throws it at a heavy's damage, CHARGE seconds of holding
+// take it to full, and it fires by itself HOLD seconds after that. TIERS steps of the charge each land with a
+// chime and a burst; a hit while charging (after the parry's own short window) shatters it.
+const COUNTER = { CHARGE: 0.9, HOLD: 0.55, TIERS: 3 };
 
 class Player {
   constructor(pos) {
@@ -874,12 +878,59 @@ class Player {
     if (!s) return;
     s.t += dt;
     const sp = { x: this.pos.x - fwdX(this.yaw) * 0.45, y: this.pos.y + 0.65, z: this.pos.z - fwdZ(this.yaw) * 0.45 };
+    const T = this.counterCharge();
     if (s.empowered) {
-      if (Math.random() < 0.8) FX.elec(sp, 0.9, 1, { outer: '#ffb040', core: '#ffffff' });
-      if (Math.random() < 0.4) FX.sparks(sp, 1, { x: 0, y: 1, z: 0 }, 1.5, 1.8, 5.5, { g: -5, c1: '#ffd070' });
+      s.charge = clamp((s.t - s.parriedAt) / T, 0, 1);
+      if (this.loops.charge) this.loops.charge.set(0.12 + 0.88 * s.charge);
+      const tier = s.charge >= 1 ? COUNTER.TIERS : Math.floor(s.charge * COUNTER.TIERS);
+      if (tier > s.tier) { s.tier = tier; this.counterTier(tier); }
+      this.counterGather(s, dt);
     } else if (s.t <= s.parryUntil && Math.random() < 0.5) FX.elec(sp, 0.5, 1);
-    const maxT = s.empowered ? s.parriedAt + 1.0 : PC.STANCE_MAX;
+    const maxT = s.empowered ? s.parriedAt + T + COUNTER.HOLD : PC.STANCE_MAX;
     if (!Input.isDown('sheathe') || s.releaseQueued || s.t >= maxT) this.releaseSheathe();
+  }
+  // seconds to a full counter (Arc Conductor halves it)
+  counterCharge() { return COUNTER.CHARGE * (Game.has('arc') ? 0.5 : 1); }
+  // The counter gathering: gold motes streaming into the blade, faster and from further as it builds, a ring
+  // closing in round your feet, sparks lifting off you, and at full a pulsing aura.
+  counterGather(s, dt) {
+    const k = s.charge, b = this.bladeAt(0.55), full = k >= 1;
+    const GOLD = { c0: '#ffffff', c1: '#ffd070', c2: '#ff8a2a', g: 0, life: 0.32 };
+    const rate = (10 + 70 * k) * dt, n = Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      const u = coneDir(null, TAU), R = lerp(1.4, 2.8, k) * rand(0.7, 1), q = { x: b.x + u.x * R, y: b.y + u.y * R * 0.7, z: b.z + u.z * R };
+      FX.sparks(q, 1, { x: -u.x, y: -u.y * 0.7, z: -u.z }, 0.05, R * 2.8, R * 3.2, GOLD);
+    }
+    if ((s.ringT = (s.ringT || 0) - dt) <= 0) {
+      s.ringT = full ? 0.22 : lerp(0.34, 0.16, k);
+      FX.ring({ x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z }, full ? 2.6 : lerp(3.4, 1.8, k), full ? 0.4 : 0.5, 0.22, { c: full ? '#fff0c0' : '#ffb040' });
+    }
+    if (Math.random() < dt * (6 + 30 * k)) FX.sparks(this.chest(), 1, { x: 0, y: 1, z: 0 }, 0.8, 2 + 4 * k, 5 + 8 * k, { c0: '#ffffff', c1: '#ffe080', c2: '#ff8a2a', g: -6 });
+    if (k > 0.5 && Math.random() < dt * 14 * k) FX.elec(b, 0.4 + 0.6 * k, 1, { outer: '#ffb040', core: '#ffffff' });
+    if (full && Math.random() < dt * 10) FX.sparks(b, 2, null, TAU, 1, 4, { c0: '#ffffff', c1: '#ffffff', c2: '#ffd070', g: 0, life: 0.2 });
+  }
+  // a step of the counter's charge: a rising chime and a burst off the blade; the last flashes it white
+  counterTier(tier) {
+    const b = this.bladeAt(0.55), full = tier >= COUNTER.TIERS, c = this.chest();
+    Sound.play('counterTier', { tier, full });
+    FX.ring(c, 0.2, 1.1 + 0.5 * tier, 0.22, { c: full ? '#ffffff' : '#ffd070', flat: false });
+    FX.sparks(b, 8 + 6 * tier, null, TAU, 3, 8 + 4 * tier, { c0: '#ffffff', c1: '#ffd070', c2: '#ff8a2a' });
+    FX.light(b, full ? '#fff0c0' : '#ffd070', 2 + 2 * tier, 4 + 2 * tier, 0.25);
+    this.eyeGlint(full ? '#ffffff' : '#ffd070', 0.6 + 0.4 * tier);
+    FPFX.kick('parry', { scale: 0.3 + 0.15 * tier });
+    Game.shake(0.05 * tier);
+    if (full) { FX.flash('#fff4d0', 0.12); FX.ring({ x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, 0.5, 4.5, 0.3, { c: '#fff0c0' }); }
+    if (Touch.on()) Touch.buzz(full ? 30 : 10);
+  }
+  // hit while charging: the gathered light shatters, and no counter
+  breakCounter() {
+    const s = this.sheathe, k = s.charge || 0, b = this.bladeAt(0.55);
+    this.stopLoop('charge');
+    this.sheathe = null;
+    this.parryCD = Math.max(this.parryCD, PC.PARRY_CD_HIT);
+    FX.sparks(b, 10 + Math.round(26 * k), null, TAU, 4, 14 + 10 * k, { c0: '#ffffff', c1: '#ffd070', c2: '#8a4a1a' });
+    FX.ring(b, 0.2, 1 + 1.2 * k, 0.2, { c: '#ffb040', flat: false });
+    Sound.play('beamBreak', { power: k });
   }
   tryStance() {
     if (this.parryCD > 0) { Sound.play('denied'); this.parryFlash = 0.35; return; }
@@ -895,7 +946,7 @@ class Player {
     // pressing again right after a stance shrinks the window, so mashing is worse than timing
     const win = S.gameplay.parryWindow * (Game.has('openGuard') ? 1.6 : 1) * (1 - 0.25 * Math.min(2, Math.ceil(this.parrySpam - 0.01)));
     this.parrySpam = Math.min(3, this.parrySpam + 1);
-    this.sheathe = { t: 0, charge: 0, empowered: false, parryUntil: win, hover: this.hoverAvail ? 1.0 : 0, parried: 0, parriedAt: 0, refunded: false, releaseQueued: false };
+    this.sheathe = { t: 0, charge: 0, tier: 0, ringT: 0, empowered: false, parryUntil: win, hover: this.hoverAvail ? 1.0 : 0, parried: 0, parriedAt: 0, refunded: false, releaseQueued: false };
     if (!this.onGround) this.hoverAvail = false;
     Sound.play('sheathe');
     this.eyeGlint('#ffe0a0', 0.6);
@@ -918,7 +969,7 @@ class Player {
     if (s.t < s.parryUntil && !s.parried) { s.releaseQueued = true; return; }
     this.stopLoop('charge');
     this.sheathe = null;
-    if (s.empowered) { this.parryCD = PC.PARRY_CD_HIT; this.startIaido(IAIDO.counter); }
+    if (s.empowered) { this.parryCD = PC.PARRY_CD_HIT; this.startIaido(IAIDO.counter, s.charge); }
     else { this.parryCD = s.parried ? PC.PARRY_CD_HIT : PC.PARRY_CD; Sound.play('unsheathe'); }
   }
   doParry(h) {
@@ -928,9 +979,9 @@ class Player {
     // some foes meet a parry blade to blade: no counter, they guard instead
     const clash = !!(h.source && h.source.clashes && h.source.clashes(h));
     if (!s.empowered && !clash) {
-      s.empowered = true; s.parriedAt = s.t; s.charge = 1;
+      s.empowered = true; s.parriedAt = s.t; s.charge = 0; s.tier = 0;
       this.loops.charge = Sound.loop('charge');
-      this.loops.charge.set(1);
+      this.loops.charge.set(0.12);
     }
     s.parryUntil = s.t + 0.32;
     if (!s.refunded && this.shieldOffT <= 0 && !Game.has('openGuard')) {
@@ -961,8 +1012,10 @@ class Player {
   }
   // A drawn slash along the aim, kept near level so it doesn't bury itself in the street. Dash slashes carry
   // you along it; the parry counter (cfg.still) leaves you where you stand and the cut explodes out from you.
-  startIaido(cfg) {
-    const s = this.chest();
+  // power (0..1): how far a counter was charged; it sets the damage, from a heavy's up to cfg.dmg, and how big
+  // everything about the cut is
+  startIaido(cfg, power = 1) {
+    const s = this.chest(), still = !!cfg.still, pw = still ? clamp(power, 0, 1) : 1;
     let dir = { x: this.aimDir.x, y: clamp(this.aimDir.y, -0.3, 0.55), z: this.aimDir.z };
     const t = this.assistTarget(cfg.len * 0.75);
     if (t) { const tc = t.center(); dir = { x: tc.x - s.x, y: clamp((tc.y - s.y) / (distXZ(tc, s) || 1), -0.3, 0.55), z: tc.z - s.z }; }
@@ -976,43 +1029,57 @@ class Player {
     const hit = World.raycast(s, dir, len + 0.7, 0.3);
     if (hit) len = Math.max(0, hit.t - 0.7);
     this.yaw = yawOf(dir.x, dir.z);
-    const D = 0.09, still = !!cfg.still;
+    const D = 0.09;
     const end = { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len };
-    this.iaido = { t: 0, dur: D, dir, cfg, len, s, hit: new Set(), still, end: still ? end : null, vx: still ? 0 : (dir.x * len) / D, vy: still ? 0 : (dir.y * len) / D, vz: still ? 0 : (dir.z * len) / D };
+    const dmg = still ? Math.round(lerp(HEAVIES.rise.dmg, cfg.dmg, pw)) : cfg.dmg;
+    this.iaido = { t: 0, dur: D, dir, cfg, len, s, hit: new Set(), still, end: still ? end : null, vx: still ? 0 : (dir.x * len) / D, vy: still ? 0 : (dir.y * len) / D, vz: still ? 0 : (dir.z * len) / D, power: pw, dmg };
+    // a counter's look and weight grow with its charge
+    const big = still ? lerp(0.5, 1.25, pw) : 1;
     this.iframes = Math.max(this.iframes, cfg.empowered ? 0.5 : 0.3);
     if (this.crouching && Controller.canStand(this)) { this.crouching = false; Controller.setHeight(this, PC.H); }
     if (this.sliding) { this.sliding = false; Controller.setHeight(this, PC.H); }
-    FX.slashLine(s, end, { w: cfg.lineW, dur: cfg.empowered ? 0.45 : 0.3, pal: cfg.empowered ? 'gold' : 'red' });
-    if (still) this.counterBlast(s, dir, len);
-    // lightning runs the length of the draw
+    FX.slashLine(s, end, { w: cfg.lineW * big, dur: cfg.empowered ? 0.3 + 0.2 * pw : 0.3, pal: cfg.empowered ? 'gold' : 'red' });
+    if (still) this.counterBlast(s, dir, len, pw);
+    // the draw's line crackles along its length
     const lo = cfg.empowered ? '#ffb040' : '#ff2a44';
-    for (let i = 0; i < (cfg.empowered ? 3 : 2); i++) FX.bolt(s, end, cfg.empowered ? 0.4 : 0.26, { outer: lo, core: '#ffffff', jag: 0.25 + i * 0.12, w: 0.09, forks: 3 });
-    if (cfg.empowered) Sound.play('iaido', { power: 1, empowered: true });
+    for (let i = 0; i < (cfg.empowered ? 1 + Math.round(2 * pw) : 2); i++) FX.bolt(s, end, cfg.empowered ? 0.4 : 0.26, { outer: lo, core: '#ffffff', jag: 0.25 + i * 0.12, w: 0.09, forks: 3 });
+    if (cfg.empowered) { Sound.play('iaido', { power: pw, empowered: true }); Sound.play('counterRelease', { power: pw }); }
     else Sound.play('quickdraw');
     if (cfg.heavy) Sound.play('heavySwing');
-    Game.shake(cfg.shake);
-    FX.flash(cfg.empowered ? '#fff4d0' : '#ff3048', cfg.flash);
-    FPFX.kick(still ? 'counter' : 'draw', { scale: cfg.empowered || cfg.heavy ? 1.15 : 1, col: cfg.empowered ? [255, 200, 110] : null });
-    Game.hitstop(cfg.empowered ? 0.045 : 0.02);
-    FX.light(s, cfg.empowered ? '#ffe0a0' : '#ff3048', 4, cfg.empowered ? 9 : 5, 0.3);
-    if (cfg.empowered) Game.slowmo(0.3, 0.3);
+    Game.shake(cfg.shake * big);
+    FX.flash(cfg.empowered ? (pw >= 1 ? '#ffffff' : '#fff4d0') : '#ff3048', cfg.flash * big);
+    FPFX.kick(still ? 'counter' : 'draw', { scale: cfg.empowered ? lerp(0.85, 1.3, pw) : cfg.heavy ? 1.15 : 1, col: cfg.empowered ? [255, 200, 110] : null });
+    Game.hitstop(cfg.empowered ? lerp(0.03, 0.07, pw) : 0.02);
+    FX.light(s, cfg.empowered ? '#ffe0a0' : '#ff3048', 4 * big, cfg.empowered ? 9 * big : 5, 0.3);
+    if (cfg.empowered) Game.slowmo(lerp(0.55, 0.22, pw), lerp(0.15, 0.4, pw));
   }
   // The counter's explosion: a blast where you stand and bursts running out along the cut.
-  counterBlast(s, dir, len) {
-    const g = { x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, GOLD = { c0: '#ffffff', c1: '#ffd070', c2: '#ff6a2a' };
-    FX.ring(s, 0.5, 6.5, 0.4, { c: '#ffd070', flat: false });
-    FX.ring(g, 0.6, 9, 0.45, { c: '#ffe0a0' });
-    FX.sparks(s, 40, dir, 1.4, 8, 32, GOLD);
-    FX.dust(g, 16, { smax: 10, rise: 1.2 });
-    FX.decal('crack', g, { len: 3.4 });
-    FX.light(s, '#ffd070', 8, 16, 0.4);
+  // Bigger the more it was charged; a full one adds a second shockwave and a white-hot column.
+  counterBlast(s, dir, len, pw = 1) {
+    const g = { x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, GOLD = { c0: '#ffffff', c1: '#ffd070', c2: '#ff6a2a' }, big = lerp(0.55, 1.2, pw);
+    FX.ring(s, 0.5, 6.5 * big, 0.4, { c: '#ffd070', flat: false });
+    FX.ring(g, 0.6, 9 * big, 0.45, { c: '#ffe0a0' });
+    FX.sparks(s, Math.round(20 + 40 * pw), dir, 1.4, 8, 20 + 16 * pw, GOLD);
+    FX.dust(g, Math.round(6 + 14 * pw), { smax: 4 + 7 * pw, rise: 1.2 });
+    FX.decal('crack', g, { len: 1.8 + 2.2 * pw });
+    FX.light(s, '#ffd070', 5 + 5 * pw, 10 + 8 * pw, 0.4);
     Sound.play('slam');
-    for (let i = 1; i <= 5; i++) {
-      const k = i / 5, q = { x: s.x + dir.x * len * k, y: s.y + dir.y * len * k, z: s.z + dir.z * len * k };
+    const n = 3 + Math.round(3 * pw);
+    for (let i = 1; i <= n; i++) {
+      const k = i / n, q = { x: s.x + dir.x * len * k, y: s.y + dir.y * len * k, z: s.z + dir.z * len * k };
       Game.queueCut(0.025 * i, () => {
-        FX.ring(q, 0.2, 2.2 + k, 0.25, { c: '#ffd070', flat: false });
-        FX.sparks(q, 10, null, TAU, 5, 16, GOLD);
+        FX.ring(q, 0.2, (2.2 + k) * big, 0.25, { c: '#ffd070', flat: false });
+        FX.sparks(q, Math.round(6 + 8 * pw), null, TAU, 5, 16, GOLD);
         FX.light(q, '#ffb040', 4, 6, 0.2);
+      });
+    }
+    if (pw >= 1) {
+      Game.queueCut(0.1, () => {
+        FX.ring(g, 1, 13, 0.5, { c: '#ffffff' });
+        FX.ring(s, 0.4, 9, 0.45, { c: '#fff0c0', flat: false });
+        FX.sparks(s, 30, { x: 0, y: 1, z: 0 }, 0.5, 10, 28, { c0: '#ffffff', c1: '#fff0c0', c2: '#ffb040' });
+        FX.light(s, '#ffffff', 10, 22, 0.35);
+        Game.shake(0.35);
       });
     }
   }
@@ -1040,7 +1107,7 @@ class Player {
     if (I.still) this.vel.y = Math.max(this.vel.y, 0);
     // the closing arc swings the other way from the last swing
     const dir = (this.lastDir = -this.lastDir);
-    FX.swoosh({ x: c.x, y: c.y, z: c.z, oy: 0, yaw, tilt: cfg.empowered ? 0.2 : 0, r: cfg.arcR, span: cfg.span, dir, sweep: 0.08, dur: cfg.empowered ? 0.38 : 0.26, thick: 0.45, pal: cfg.empowered ? 'gold' : 'red', trail: 1, bolts: cfg.empowered ? 4 : 3 });
+    FX.swoosh({ x: c.x, y: c.y, z: c.z, oy: 0, yaw, tilt: cfg.empowered ? 0.2 : 0, r: cfg.arcR, span: cfg.span, dir, sweep: 0.08, dur: cfg.empowered ? 0.28 + 0.14 * I.power : 0.26, thick: cfg.empowered ? 0.3 + 0.25 * I.power : 0.45, pal: cfg.empowered ? 'gold' : 'red', trail: 1, bolts: cfg.empowered ? 2 + Math.round(2 * I.power) : 3 });
     const arc = { yaw, span: cfg.span, pa: 0, band: 1.8 };
     for (const e of Game.enemies) {
       if (e.dead || e.spawning || I.hit.has(e) || !this.inSwing(arc, c, cfg.arcR, e)) continue;
@@ -1059,7 +1126,6 @@ class Player {
       Game.slowmo(cfg.empowered ? 0.35 : 0.6, cfg.empowered ? 0.36 : 0.18);
       Game.queueCut(cfg.empowered ? 0.34 : 0.18, () => this.resolveIaido(I));
     } else this.resolveIaido(I);
-    if (cfg.chain) this.chainLightning(c, I);
     this.postPose = cfg.post;
     // a dash slash opens a string: follow it with lights or heavies
     if (I.kind) { this.strN = 1; this.strLights = I.kind === 'L' ? 1 : 0; this.comboTimer = 0.45; }
@@ -1082,44 +1148,25 @@ class Player {
         FX.slashLine({ x: c.x - ax * L, y: c.y - ay * L, z: c.z - az * L }, { x: c.x + ax * L, y: c.y + ay * L, z: c.z + az * L }, { w: 0.16, dur: 0.25, grow: 0.03, pal: cfg.empowered ? 'gold' : 'red' });
       }
       const k = cfg.heavy ? 32.7 : 25.5;
-      hurtEnemy(e, cfg.dmg, { kv: { x: hx * k, y: cfg.heavy ? 23.6 : 16.4, z: hz * k }, dir: { x: hx, y: 0.3, z: hz }, heavy: true, cause: 'iaido', stagger: cfg.empowered ? 0.9 : cfg.heavy ? 0.7 : 0.45, hitstop: 0, shake: 0, crit: cfg.empowered, guardBreak: cfg.heavy, heavyAtk: cfg.heavy && !cfg.empowered });
+      hurtEnemy(e, I.dmg, { kv: { x: hx * k, y: cfg.heavy ? 23.6 : 16.4, z: hz * k }, dir: { x: hx, y: 0.3, z: hz }, heavy: true, cause: 'iaido', stagger: cfg.empowered ? lerp(0.5, 0.9, I.power) : cfg.heavy ? 0.7 : 0.45, hitstop: 0, shake: 0, crit: cfg.empowered && I.power >= 1, guardBreak: cfg.heavy, heavyAtk: cfg.heavy && !cfg.empowered });
       if (cfg.empowered && (e.dead || e.dying)) kills++;
       n++;
     }
     if (kills) this.counterHeal(kills);
     if (n && cfg.delayed) {
       Sound.play('cut');
-      Game.shake(0.25 + n * 0.05);
-      Game.hitstop(0.06);
+      Game.shake((0.25 + n * 0.05) * (cfg.empowered ? lerp(0.6, 1.3, I.power) : 1));
+      Game.hitstop(cfg.empowered ? lerp(0.04, 0.09, I.power) : 0.06);
       FX.flash(cfg.empowered ? '#fff6e0' : '#ffffff', 0.2);
     } else if (n) Game.hitstop(0.04);
   }
-  // kills from a parry counter (and its chain lightning) patch you up a little
+  // kills from a parry counter patch you up a little
   counterHeal(kills) {
     if (this.dead) return;
     const n = Math.min(12, kills * 4);
     this.heal(n);
     FX.text('+' + n, { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#7dff8a', dur: 0.8, vy: 1.8 });
   }
-  chainLightning(c, I) {
-    const arc = Game.has('arc'), range = arc ? 27.3 : 18.2, chainDmg = arc ? 40 : 55;
-    const targets = Game.enemies.filter((e) => !e.dead && !e.spawning && !I.hit.has(e) && dist3(e.center(), c) < range)
-      .sort((a, b) => dist3(a.center(), c) - dist3(b.center(), c)).slice(0, arc ? 8 : 5);
-    let from = c;
-    targets.forEach((e, i) => {
-      const to = e.center();
-      FX.bolt(from, to, 0.25, { outer: '#ffb040', core: '#ffffff', jag: 0.5, w: 0.1 });
-      Game.queueCut(0.12 + i * 0.06, () => {
-        if (e.dead) return;
-        const dx = to.x - c.x, dz = to.z - c.z, l = Math.hypot(dx, dz) || 1;
-        hurtEnemy(e, chainDmg, { kv: { x: (dx / l) * 13.6, y: 10.9, z: (dz / l) * 13.6 }, dir: { x: dx / l, y: 0.5, z: dz / l }, cause: 'chain', stagger: 1.2, hitstop: 0.01 });
-        if (e.dead || e.dying) this.counterHeal(1);
-        FX.elec(e.center(), 1.3, 5, { outer: '#ffb040', core: '#ffffff' });
-      });
-      from = to;
-    });
-  }
-
   // ---------- tether ----------
   // Right mouse: a line fired from the hand down the crosshair's line (snapping to an enemy, barrel or
   // grenade within TETHER_ASSIST of it). Tap flings you toward the anchor, hold zips you in; an enemy
@@ -1555,7 +1602,7 @@ class Player {
     // on the tether, a bullet only hurts: no knockback, and you stay on the line. Anything bigger (a blade, a
     // blast, a sniper round, the beam) still throws you off it.
     const steady = this.tether && this.tether.phase === 'attached' && h.kind === 'projectile' && h.proj && h.proj.kind === 'bolt' && !h.proj.big;
-    if (this.sheathe) this.cancelSheathe();
+    if (this.sheathe) { if (this.sheathe.empowered) this.breakCounter(); else this.cancelSheathe(); }
     if (this.tether && this.zipping() && !steady) this.releaseTether();
     if (!steady) { this.attack = null; this.attackQueued = null; this.atkPend = null; this.postPose = 0; this.plunge = null; this.kickAnim = null; }
     const c = this.center(), hadShield = this.shield > 0, shield0 = this.shield;

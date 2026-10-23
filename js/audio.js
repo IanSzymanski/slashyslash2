@@ -220,6 +220,34 @@ const Sound = (() => {
         tone({ type: 'sine', f0: 70, f1: 20, dur: 0.9, vol: 0.8 });
       }
     },
+    // the counter charging after a parry: a chime a step higher each tier, a bell and a swell of choir-like
+    // fifths at full; the release booms harder the more it was charged
+    counterTier(p) {
+      const t = p.tier || 1, base = [0, 1046, 1318, 1568][Math.min(3, t)];
+      tone({ type: 'sine', f0: base, dur: 0.35 + 0.1 * t, vol: 0.07 + 0.015 * t, rev: 0.5 });
+      tone({ type: 'sine', f0: base * 2, dur: 0.25, vol: 0.03 + 0.01 * t, delay: 0.02, rev: 0.5 });
+      tone({ type: 'triangle', f0: base / 2, f1: base / 2 * 1.02, dur: 0.2, vol: 0.05 });
+      noise({ dur: 0.06, vol: 0.12 + 0.05 * t, type: 'highpass', f0: 5000 });
+      tone({ type: 'sine', f0: 90 + 30 * t, f1: 40, dur: 0.18, vol: 0.2 + 0.08 * t });
+      if (p.full) {
+        for (const [f, d] of [[2093, 0.04], [2637, 0.08], [3136, 0.12]]) tone({ type: 'sine', f0: f, dur: 0.7, vol: 0.06, delay: d, rev: 0.65 });
+        for (const f of [261, 392, 523]) tone({ type: 'sawtooth', f0: f, dur: 0.6, vol: 0.025, a: 0.08, rev: 0.6 });
+        crackle(0.3, 0.25, { f: 1500 });
+      }
+    },
+    counterRelease(p) {
+      const k = p.power === undefined ? 1 : p.power;
+      tone({ type: 'sine', f0: 60 + 30 * k, f1: 22, dur: 0.5 + 0.6 * k, vol: 0.4 + 0.5 * k });
+      noise({ dur: 0.3 + 0.5 * k, vol: 0.25 + 0.35 * k, type: 'lowpass', f0: 900 + 900 * k, f1: 50, rev: 0.35 + 0.25 * k });
+      for (const f of [1568, 2349, 3136].slice(0, 1 + Math.round(2 * k))) tone({ type: 'sine', f0: f, f1: f * 0.98, dur: 0.6 + 0.4 * k, vol: 0.04 + 0.03 * k, rev: 0.6 });
+      if (k >= 1) {
+        // the full one: a thunderclap after the boom, and a ring that hangs
+        noise({ dur: 0.9, vol: 0.55, type: 'bandpass', f0: 1800, f1: 120, q: 0.6, delay: 0.06, rev: 0.6 });
+        tone({ type: 'sine', f0: 45, f1: 18, dur: 1.2, vol: 0.7, delay: 0.05 });
+        for (const f of [523, 784, 1046]) tone({ type: 'triangle', f0: f, dur: 1.1, vol: 0.035, delay: 0.08, rev: 0.7 });
+        crackle(0.7, 0.4, { f: 600 });
+      }
+    },
     cut() {
       noise({ dur: 0.09, vol: 0.42, type: 'highpass', f0: 3200 });
       tone({ type: 'sine', f0: 190, f1: 38, dur: 0.26, vol: 0.62 });

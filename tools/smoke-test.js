@@ -190,15 +190,34 @@ async function run(browser, file, errors) {
     ok(p.sheathe && p.sheathe.empowered, 'a parry empowers the stance');
     ok(Math.abs(p.shield - shield) < 0.01, 'a parry refunds its shield cost');
     ok(e.stun > 0, 'a parried scrapper is staggered');
-    // releasing E throws the counter, a big explosive slash from where you stand, which cuts it down and a
-    // second scrapper 9 m off along the aim
-    e.hp = 60;
-    const e2 = T.scrapper(9, 0.3); e2.hp = 60;
+    // holding E charges the counter to full; releasing throws a big explosive slash from where you stand, which
+    // cuts it down and a second scrapper 9 m off along the aim
+    let tiers = 0;
+    for (let i = 0; i < 120 && p.sheathe && p.sheathe.charge < 1; i++) { T.frame(1); tiers = p.sheathe ? p.sheathe.tier : tiers; }
+    ok(p.sheathe && p.sheathe.charge >= 1 && tiers === COUNTER.TIERS, `holding E after the parry charges the counter to full through its ${COUNTER.TIERS} steps`);
+    e.hp = 120;
+    const e2 = T.scrapper(9, 0.3); e2.hp = 120;
     const px0 = p.pos.x, pz0 = p.pos.z;
     T.release('KeyE');
     let drift = 0;
     for (let i = 0; i < 60; i++) { T.frame(1); drift = Math.max(drift, Math.hypot(p.pos.x - px0, p.pos.z - pz0)); }
-    ok(e.dead && e2.dead && drift < 0.5, `the counter cuts down both scrappers without carrying you (moved ${drift.toFixed(2)} m)`);
+    ok(e.dead && e2.dead && drift < 0.5, `the full counter cuts down both scrappers without carrying you (moved ${drift.toFixed(2)} m)`);
+    // a tapped counter hits like a heavy; a hit while it charges shatters it
+    const counterOn = (hold, hitAt) => {
+      const q = T.fresh(), x = T.scrapper(2.0, 0, { cd: 0 }); x.hp = 999;
+      T.face(x.pos.x, x.pos.z);
+      for (let i = 0; i < 120 && !x.glinted; i++) T.frame(1);
+      T.frame(6); T.press('KeyE');
+      const n = Game.stats.parries;
+      for (let i = 0; i < 40 && Game.stats.parries === n; i++) T.frame(1);
+      for (let i = 0; i < hold * 60 && q.sheathe; i++) { if (i === hitAt) q.takeHit({ dmg: 10, from: { x: q.pos.x + 1, y: 1, z: q.pos.z } }); T.frame(1); }
+      const broke = !q.sheathe;
+      T.release('KeyE'); T.frame(60);
+      return { dmg: 999 - x.hp, broke };
+    };
+    const tap = counterOn(0, -1), broken = counterOn(1, 36);
+    ok(Math.abs(tap.dmg - HEAVIES.rise.dmg) <= 3, `a tapped counter hits like a heavy (${tap.dmg})`);
+    ok(broken.broke && broken.dmg === 0, `a hit while the counter charges shatters it (${broken.dmg} dealt)`);
 
     // an unparried strike costs shield, not health
     p = T.fresh();

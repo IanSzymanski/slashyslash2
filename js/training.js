@@ -786,7 +786,7 @@ const TUTORIAL_STEPS = [
   },
   {
     id: 'counter', title: 'Counter',
-    text: () => `Hold ${K('sheathe')} through the parry, then let go: you strike back with a big slash. Parry, then counter.`,
+    text: () => `Keep holding ${K('sheathe')} after a parry: the counter charges as the ring fills, harder the longer you hold, but a hit breaks it. Let go to strike back.`,
     at: { x: 0, y: 0, z: -80, r: 2.4, ring: true },
     enter: () => { Game.training.dummy = 'yellow'; Game.player.shield = PC.MAX_SHIELD; },
     count: 'iaido', need: 1,

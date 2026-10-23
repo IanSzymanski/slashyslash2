@@ -198,7 +198,7 @@ const Render = {
     if (!P || P.dead || !R.mesh.visible) return;
     const v = this._v.set(0, 0.55, 0.03);
     R.bones.weapon.localToWorld(v);
-    const ck = P.charging ? P.charging.k : 0;
+    const sh = P.sheathe, ck = P.charging ? P.charging.k : sh && sh.empowered ? sh.charge : 0;
     Gfx.light(v.x, v.y, v.z, ck >= 1 ? '#ffb040' : '#ff2030', P.sheathe || P.idleT > 2.5 ? 0.5 : 1.4 + 2.6 * ck, 3.5 + 3 * ck);
     // in a Blackout you carry a little light of your own, as in 2D
     if (World.blackout) { const c = P.rp || P.pos; Gfx.light(c.x, c.y + 2.2, c.z, '#c8a0b8', 2.2, 11); }
@@ -587,6 +587,25 @@ const Render = {
       for (const [px, py] of pts) ctx.fillRect(px - 1, py - 1, 3, 3);
       ctx.fillStyle = full ? (flick ? '#ffffff' : '#ffd070') : '#ff8a9a';
       for (const [px, py] of pts) ctx.fillRect(px, py, 1, 1);
+    }
+    // the parry counter's charge: a gold ring filling clockwise, with a tick at each tier; flickering white
+    // and pulsing out once full
+    const sh = p.sheathe;
+    if (sh && sh.empowered) {
+      const k = sh.charge, N = 40, full = k >= 1, flick = ((Game.realTime * 16) | 0) % 2;
+      const R = full ? 11 + Math.round(Math.abs(Math.sin(Game.realTime * 9)) * 2) : 11, n = Math.max(1, Math.ceil(k * N));
+      const pts = [];
+      for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + (i / N) * TAU; pts.push([Math.round(x + Math.cos(a) * R), Math.round(y + Math.sin(a) * R)]); }
+      ctx.fillStyle = '#0b0910';
+      for (const [px, py] of pts) ctx.fillRect(px - 1, py - 1, 3, 3);
+      for (let t = 1; t < COUNTER.TIERS; t++) { const a = -Math.PI / 2 + (t / COUNTER.TIERS) * TAU; ctx.fillRect(Math.round(x + Math.cos(a) * R) - 2, Math.round(y + Math.sin(a) * R) - 2, 5, 5); }
+      ctx.fillStyle = full ? (flick ? '#ffffff' : '#ffd070') : '#ffb040';
+      for (const [px, py] of pts) ctx.fillRect(px, py, 1, 1);
+      for (let t = 1; t < COUNTER.TIERS; t++) {
+        const a = -Math.PI / 2 + (t / COUNTER.TIERS) * TAU;
+        ctx.fillStyle = k >= t / COUNTER.TIERS ? '#ffffff' : '#5a4a3a';
+        ctx.fillRect(Math.round(x + Math.cos(a) * R) - 1, Math.round(y + Math.sin(a) * R) - 1, 3, 3);
+      }
     }
   },
 };
