@@ -2,11 +2,11 @@
 // AEGIS-07's effects in the world, synced each rendered frame: its shield bubble with the cracks your returned
 // bolts leave, the flames from its back thrusters, the shoulder cannon's charge and beam, the gun's aim line,
 // the pulse grenade charging in its hand with its arc, the dive bomb's mark, the beacon it arrives in, its
-// afterimages in a dash, and its hazards (blade waves and ground eruptions) and husk through Views. Every
+// afterimages in a dash, and its blade waves and husk through Views. Every
 // material is made once here and compiled in Render.prewarm.
 
 const BossViews = {
-  mats: null, geos: null, ready: false, kinds: new Set(['bladewave', 'eruption', 'husk']),
+  mats: null, geos: null, ready: false, kinds: new Set(['bladewave', 'husk']),
   ghosts: [], ghostRig: null, GHOSTS: 6,
 
   init() {
@@ -52,15 +52,39 @@ const BossViews = {
     this.beacon.userData = { co, cc, cp };
     // the dive bomb's mark on the street
     this.mark = new THREE.Group();
-    const mr = new THREE.Mesh(G.flatRing, add('#ff6a7a', { opacity: 0.9 })), mx1 = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.02, 0.12), add('#ff6a7a', { opacity: 0.9 })), mx2 = mx1.clone();
+    const mr = new THREE.Mesh(G.flatRing, add('#4a8aff', { opacity: 0.9 })), mx1 = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.02, 0.12), add('#4a8aff', { opacity: 0.9 })), mx2 = mx1.clone();
     mx1.rotation.y = Math.PI / 4; mx2.rotation.y = -Math.PI / 4; mx2.material = mx1.material;
     this.mark.add(mr, mx1, mx2);
     this.mark.userData = { mr, mx: mx1.material };
     this.zone = new THREE.Mesh(G.flatRing, add('#4a8aff', { opacity: 0.7 }));
+    // the machine gun's barrels spinning up: a ring of three blades at the muzzle
+    this.gunRing = new THREE.Mesh(this.bladeRingGeo(), add('#9cc4ff', { opacity: 0.8 }));
+    // the beam's charge: rings closing on the lens and a halo round it
+    this.chargeRings = [0, 1, 2].map(() => new THREE.Mesh(G.ring, add('#9cc4ff', { opacity: 0.8 })));
+    this.chargeHalo = new THREE.Mesh(G.sphere, add('#2f6bff', { opacity: 0.25, side: THREE.FrontSide }));
+    // the red flash's charge: a red shell closing on it and rings closing on its feet
+    this.perilAura = new THREE.Mesh(G.sphere, add('#ff2a3a', { opacity: 0.2, side: THREE.FrontSide }));
+    this.perilRings = [0, 1].map(() => new THREE.Mesh(G.flatRing, add('#ff2a3a', { opacity: 0.9 })));
     this.aimLine = FX.stripMesh(40); this.arcLine = FX.stripMesh(28); this.diveLine = FX.stripMesh(24); this.zipLine = FX.stripMesh(24);
-    for (const o of [this.shield, ...this.flames, this.beam, ...this.beamRings, this.flare, this.charge, this.orb, this.orbHalo, this.beacon, this.mark, this.zone]) { o.visible = false; o.renderOrder = 2; Gfx.scene.add(o); }
+    for (const o of [this.shield, ...this.flames, this.beam, ...this.beamRings, this.flare, this.charge, this.orb, this.orbHalo, this.beacon, this.mark, this.zone, ...this.chargeRings, this.chargeHalo, this.perilAura, ...this.perilRings, this.gunRing]) { o.visible = false; o.renderOrder = 2; Gfx.scene.add(o); }
     for (const m of [this.aimLine, this.arcLine, this.diveLine, this.zipLine]) m.visible = false;
     this.ready = true;
+  },
+  // three blades round a hub in the xy plane, radius 1, for the gun's spin-up
+  bladeRingGeo() {
+    const pos = [], idx = [];
+    for (let b = 0; b < 3; b++) {
+      const a0 = (b / 3) * TAU, a1 = a0 + 0.7, n = pos.length / 3;
+      for (let i = 0; i <= 6; i++) {
+        const a = lerp(a0, a1, i / 6);
+        pos.push(Math.cos(a) * 0.55, Math.sin(a) * 0.55, 0, Math.cos(a), Math.sin(a), 0);
+      }
+      for (let i = 0; i < 6; i++) { const q = n + i * 2; idx.push(q, q + 1, q + 3, q, q + 3, q + 2); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    return g;
   },
   // A crescent: a band across the wave's path, bulging forward in the middle and thinning at its tips, in
   // its own frame (x across, y up, forward -z), half-width and half-height 1.
@@ -103,10 +127,10 @@ const BossViews = {
   },
   prewarmShow(group) {
     if (!this.ready) this.init();
-    for (const o of [this.shield, this.flames[0], this.beam, this.beamRings[0], this.flare, this.beacon, this.mark]) o.visible = true;
+    for (const o of [this.shield, this.flames[0], this.beam, this.beamRings[0], this.flare, this.beacon, this.mark, this.chargeRings[0], this.chargeHalo, this.perilAura, this.perilRings[0]]) o.visible = true;
     group.add(new THREE.Mesh(this.geos.crescent, this.add('#2f6bff')));
   },
-  prewarmHide() { for (const o of [this.shield, this.flames[0], this.beam, this.beamRings[0], this.flare, this.beacon, this.mark]) o.visible = false; },
+  prewarmHide() { for (const o of [this.shield, this.flames[0], this.beam, this.beamRings[0], this.flare, this.beacon, this.mark, this.chargeRings[0], this.chargeHalo, this.perilAura, this.perilRings[0]]) o.visible = false; },
 
   // ---------- hazards through Views ----------
   make(o) {
@@ -117,11 +141,6 @@ const BossViews = {
       haze.scale.set(1.08, 1.25, 1.6); haze.position.z = 0.3;
       g.add(haze, outer, core);
       g.userData = { outer, core, haze };
-    } else if (o.kind === 'eruption') {
-      const warn = new THREE.Mesh(G.flatRing, this.add('#ff6a7a', { opacity: 0.8 })), glow = new THREE.Mesh(G.disc, this.add('#ff3a4a', { opacity: 0.3 }));
-      const co = new THREE.Mesh(G.tube, this.add('#ff3a4a', { opacity: 0.55 })), cc = new THREE.Mesh(G.tube, this.add('#fff0f0', { opacity: 0.9 }));
-      g.add(warn, glow, co, cc);
-      g.userData = { warn, glow, co, cc };
     } else if (o.kind === 'husk') {
       return { boss: true, husk: o };
     }
@@ -137,30 +156,12 @@ const BossViews = {
     const g = v.group, U = g.userData;
     g.position.set(o.pos.x, o.pos.y, o.pos.z);
     if (o.kind === 'bladewave') {
-      g.rotation.y = yawOf(o.dir.x, o.dir.z);
+      g.rotation.set(0, yawOf(o.dir.x, o.dir.z), o.roll || 0);
       g.scale.set(o.W, o.H, 1);
-      const f = clamp(o.life / 0.2, 0, 1) * clamp(o.t / 0.06, 0, 1), red = o.owner && o.owner.phase === 2;
-      U.outer.material.color.set(red ? '#ff3a4a' : '#2f6bff');
+      const f = clamp(o.life / 0.2, 0, 1) * clamp(o.t / 0.06, 0, 1);
+      U.outer.material.color.set('#2f6bff');
       U.haze.material.color.copy(U.outer.material.color);
       U.outer.material.opacity = 0.85 * f; U.core.material.opacity = (((t * 30) | 0) % 2 ? 1 : 0.8) * f; U.haze.material.opacity = 0.25 * f;
-    } else if (o.kind === 'eruption') {
-      const warn = o.t < o.warn;
-      U.warn.visible = U.glow.visible = warn;
-      U.co.visible = U.cc.visible = !warn;
-      if (warn) {
-        const k = o.t / o.warn, on = ((o.t * (6 + k * 18)) | 0) % 2;
-        U.warn.position.y = U.glow.position.y = 0.05;
-        U.warn.scale.setScalar(lerp(2.2, 0.8, k));
-        U.warn.material.color.set(on ? '#ffffff' : '#ff6a7a');
-        U.glow.scale.setScalar(0.3 + k * 0.7);
-        U.glow.material.opacity = 0.2 + 0.4 * k;
-        return;
-      }
-      // overshoots wide as it bursts, then settles; thins out as it collapses
-      const h = o.t - o.warn, f = h > o.hold ? (h - o.hold) / o.fade : 0;
-      const W = o.R * (h < 0.12 ? lerp(2, 1, h / 0.12) : 1) * (1 - f) * (1 + Math.sin(t * 25) * 0.06);
-      U.co.scale.set(W * 1.3, 30, W * 1.3); U.cc.scale.set(W * 0.45, 30, W * 0.45);
-      U.co.material.opacity = 0.55 * (1 - f); U.cc.material.opacity = 0.9 * (1 - f);
     }
   },
   dispose(v) {
@@ -177,12 +178,12 @@ const BossViews = {
   sync() {
     if (!this.ready) return;
     const t = Game.realTime, r = Game.enemies.find((e) => e.isBoss && !e.dead), R = r && r.model;
-    const hide = [this.shield, ...this.flames, this.beam, ...this.beamRings, this.flare, this.charge, this.orb, this.orbHalo, this.beacon, this.mark, this.zone, this.aimLine, this.arcLine, this.diveLine, this.zipLine];
+    const hide = [this.shield, ...this.flames, this.beam, ...this.beamRings, this.flare, this.charge, this.orb, this.orbHalo, this.beacon, this.mark, this.zone, this.aimLine, this.arcLine, this.diveLine, this.zipLine, ...this.chargeRings, this.chargeHalo, this.perilAura, ...this.perilRings, this.gunRing];
     for (const o of hide) o.visible = false;
     if (!r) { this.syncGhosts(null); return; }
     this.syncBeacon(r, t);
     if (!R || !R.mesh.visible) { this.syncGhosts(R); return; }
-    const red = r.phase === 2, a = r.act, cp = Gfx.camera.position;
+    const a = r.act, cp = Gfx.camera.position;
     // shield
     const S = this.shield;
     if (!r.dying && (r.shield || (r.phase === 1 && r.shieldDownT > 0 && r.shieldDownT < 2 && ((t * 10) | 0) % 2))) {
@@ -212,17 +213,34 @@ const BossViews = {
         F.quaternion.copy(q);
         const L = 0.2 + r.thrust * 1.5 * (0.85 + Math.random() * 0.3), w = 0.1 + r.thrust * 0.08;
         F.scale.set(w, L, w);
-        F.userData.outer.material.color.set(red ? '#ff5a2a' : r.mode === 'charge' && !D ? '#7aa8ff' : '#2f6bff');
+        F.userData.outer.material.color.set(r.mode === 'charge' && !D ? '#7aa8ff' : '#2f6bff');
         F.userData.outer.material.opacity = 0.5 + 0.4 * r.thrust;
       });
     }
-    // the gun's aim line through its wind-up: dashed while it settles, solid once it's about to fire
-    if (a && a.kind === 'gun' && a.t < r.tele(0.45)) {
-      const o = r.muzzle(), d = a.aimDir, hit = World.raycast(o, d, 40), len = hit ? hit.t : 40, N = 40, pts = [];
-      for (let i = 0; i < N; i++) { const k = (i / (N - 1)) * len; pts.push({ x: o.x + d.x * k, y: o.y + d.y * k, z: o.z + d.z * k }); }
-      const lock = a.t > r.tele(0.45) - 0.15, on = hexLinear(lock ? '#ffffff' : '#4a8aff'), off = [0, 0, 0];
+    // the machine gun: barrels spinning up at the muzzle, and a fan of tracer light opening over the area its
+    // spray will cover, flickering faster as it spins up and burning white just before it fires
+    if (a && a.kind === 'gun' && a.t < r.tele(GUN.WIND)) {
+      const o = r.muzzle(), d = a.aimDir, k = a.spin || 0, F = r.gunFan(a), L = 9 * easeOutCubic(Math.min(1, k * 1.6));
+      const yaw0 = yawOf(d.x, d.z), p0 = Math.asin(clamp(d.y, -1, 1)), side = a.pattern === 'sweep' ? a.side : 1;
+      const ray = (yo, po, s) => { const y = yaw0 + yo * side, pp = p0 + po; return { x: o.x + fwdX(y) * Math.cos(pp) * s, y: o.y + Math.sin(pp) * s, z: o.z + fwdZ(y) * Math.cos(pp) * s }; };
+      // its outline: out along one edge, round the far end, back along the other
+      const N = 10, pts = [o];
+      for (let i = 0; i <= N; i++) { const u = i / N; pts.push(ray(lerp(F[0], F[1], u), lerp(F[2], F[3], u), L)); }
+      pts.push(o);
+      const lock = a.t > r.tele(GUN.WIND) - 0.12, flick = ((t * (10 + 30 * k)) | 0) % 2;
+      const on = hexLinear(lock ? '#ffffff' : flick ? '#9cc4ff' : '#4a8aff');
       this.aimLine.visible = true;
-      FX.writeStrip(this.aimLine, pts, lock ? 0.05 : 0.035, cp, (i, out) => { const c = lock || (i >> 1) % 2 === 0 ? on : off; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; });
+      FX.writeStrip(this.aimLine, pts, lock ? 0.05 : 0.03, cp, (i, out) => { out[0] = on[0]; out[1] = on[1]; out[2] = on[2]; });
+      // the spinning barrel ring at the muzzle
+      this.gunRing.visible = true;
+      this.gunRing.position.set(o.x, o.y, o.z);
+      this.gunRing.quaternion.setFromUnitVectors(this._z || (this._z = new THREE.Vector3(0, 0, 1)), this._gd || (this._gd = new THREE.Vector3()));
+      this._gd.set(d.x, d.y, d.z);
+      this.gunRing.quaternion.setFromUnitVectors(this._z, this._gd);
+      this.gunRing.rotateZ(t * (8 + 40 * k));
+      this.gunRing.scale.setScalar(0.14 + 0.12 * k);
+      this.gunRing.material.color.set(lock ? '#ffffff' : '#9cc4ff');
+      this.gunRing.material.opacity = 0.5 + 0.5 * k;
     }
     // the beam: charging at the lens, then firing
     const B = r.beam;
@@ -232,8 +250,20 @@ const BossViews = {
         const k = clamp(B.k, 0, 1);
         this.charge.visible = true;
         this.charge.position.set(o.x, o.y, o.z);
-        this.charge.scale.setScalar(0.06 + 0.26 * k + Math.sin(t * 40) * 0.02);
-        this.charge.material.color.set(((t * 20) | 0) % 2 ? '#ffffff' : '#4a8aff');
+        this.charge.scale.setScalar(0.08 + 0.42 * k + Math.sin(t * 40) * 0.03);
+        this.charge.material.color.set(((t * (12 + 24 * k)) | 0) % 2 ? '#ffffff' : '#4a8aff');
+        this.chargeHalo.visible = true;
+        this.chargeHalo.position.set(o.x, o.y, o.z);
+        this.chargeHalo.scale.setScalar(0.4 + 0.9 * k + Math.sin(t * 25) * 0.05);
+        this.chargeHalo.material.opacity = 0.1 + 0.25 * k;
+        this.chargeRings.forEach((m, i) => {
+          const u = (t * (1.4 + 2 * k) + i / 3) % 1;
+          m.visible = true;
+          m.position.set(o.x, o.y, o.z);
+          m.quaternion.copy(Gfx.camera.quaternion);
+          m.scale.setScalar(lerp(2.4, 0.15, u));
+          m.material.opacity = 0.9 * u * (0.4 + 0.6 * k);
+        });
         // where it will fire, dashed
         const d = B.dir, N = 40, L = 30, pts = [];
         for (let i = 0; i < N; i++) { const s = (i / (N - 1)) * L; pts.push({ x: o.x + d.x * s, y: o.y + d.y * s, z: o.z + d.z * s }); }
@@ -267,6 +297,24 @@ const BossViews = {
         this.charge.material.color.set('#ffffff');
       }
     }
+    // the red flash gathering: a red shell closing on its body and rings closing on its feet, white once its eye
+    // flashes
+    if (a && a.move === 'peril' && a.phase === 'wind') {
+      const k = r.cueProgress(), c = r.chest(), flash = k >= 1, p = r.rp || r.pos;
+      this.perilAura.visible = true;
+      this.perilAura.position.set(c.x, c.y - 0.3, c.z);
+      this.perilAura.scale.set(lerp(4.6, 1.7, k), lerp(4, 2.2, k), lerp(4.6, 1.7, k));
+      this.perilAura.material.color.set(flash && ((t * 30) | 0) % 2 ? '#ffffff' : '#ff2a3a');
+      this.perilAura.material.opacity = flash ? 0.45 : 0.1 + 0.3 * k;
+      this.perilRings.forEach((m, i) => {
+        const u = flash ? 1 : (k * 1.6 + i * 0.5) % 1;
+        m.visible = true;
+        m.position.set(p.x, p.y + 0.06, p.z);
+        m.scale.setScalar(lerp(9, 1.6, u));
+        m.material.color.set(flash ? '#ffffff' : '#ff2a3a');
+        m.material.opacity = flash ? 0.9 : 0.3 + 0.6 * u;
+      });
+    }
     // the pulse grenade charging in its left hand, and the arc it will fly with where it lands
     if (a && a.kind === 'grenade' && !a.thrown && a.plan) {
       const o = r.orbPos(), k = clamp(a.t / r.tele(1.15), 0, 1);
@@ -291,12 +339,12 @@ const BossViews = {
       this.mark.visible = true;
       this.mark.position.set(a.tx, a.ty + 0.06, a.tz);
       this.mark.scale.setScalar(a.phase === 'crouch' ? lerp(2.4, 1.4, clamp(a.t / r.tele(DIVE.CHARGE), 0, 1)) : 1.4);
-      U.mr.material.color.set(a.locked ? '#ffffff' : on ? '#ff6a7a' : '#ff9aaa');
+      U.mr.material.color.set(a.locked ? '#ffffff' : on ? '#4a8aff' : '#9cc4ff');
       U.mx.color.copy(U.mr.material.color);
       if (a.phase === 'hang' && a.locked) {
         const c = r.chest(), N = 24, pts = [];
         for (let i = 0; i < N; i++) { const k = i / (N - 1); pts.push({ x: lerp(c.x, a.tx, k), y: lerp(c.y, a.ty, k), z: lerp(c.z, a.tz, k) }); }
-        const col = hexLinear('#ff9aaa'), off = [0, 0, 0];
+        const col = hexLinear('#9cc4ff'), off = [0, 0, 0];
         this.diveLine.visible = true;
         FX.writeStrip(this.diveLine, pts, 0.04, cp, (i, out) => { const c = (i >> 1) % 2 === 0 ? col : off; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; });
       }
@@ -309,7 +357,7 @@ const BossViews = {
         const u = i / (n - 1), j = i && i < n - 1 ? jag * Math.sin(u * Math.PI) : 0;
         pts.push({ x: lerp(h.x, b.x, u) + rand(-j, j), y: lerp(h.y, b.y, u) + rand(-j, j), z: lerp(h.z, b.z, u) + rand(-j, j) });
       }
-      const outer = hexLinear(red ? '#ff3a4a' : '#2f6bff'), core = hexLinear('#e8f0ff');
+      const outer = hexLinear('#2f6bff'), core = hexLinear('#e8f0ff');
       this.zipLine.visible = true;
       FX.writeStrip(this.zipLine, pts.concat(pts.slice().reverse()), 0.07, cp, (i, out) => { const c = i < n ? outer : core; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; }, n);
     }
@@ -351,7 +399,7 @@ const BossViews = {
         const sb = R.mesh.skeleton.bones;
         free.mesh.skeleton.bones.forEach((b, i) => b.matrixWorld.copy(sb[i].matrixWorld));
         free.t = 0; free.dur = 0.22;
-        free.mesh.material.color.set(r.phase === 2 ? '#ff4a5a' : '#2f6bff');
+        free.mesh.material.color.set('#2f6bff');
       }
     }
     for (const g of this.ghosts) {
@@ -379,13 +427,15 @@ const BossViews = {
     const r = Game.enemies.find((e) => e.isBoss && !e.dead);
     if (!r || !r.model || !r.model.mesh.visible) return;
     if (r.dying && r.ko && (r.ko.stage === 'collapse' || r.ko.stage === 'down')) return;
-    const red = r.phase === 2, v = r.visorPos();
-    Gfx.light(v.x, v.y, v.z, red ? '#ff3a4a' : '#4a8aff', 1.2, 3.5);
-    if (r.bladeOut > 0.5) { const b = r.bladeTip(); Gfx.light(b.x, b.y, b.z, red ? '#ff6a7a' : '#4a8aff', 1.6, 4.5); }
-    if (r.thrust > 0.3) { const n = r.boneAt('pack', 0, -0.4, 0.1); if (n) Gfx.light(n.x, n.y, n.z, red ? '#ff6a3a' : '#4a8aff', 2 * r.thrust, 5); }
+    const v = r.visorPos();
+    Gfx.light(v.x, v.y, v.z, '#4a8aff', 1.2, 3.5);
+    if (r.bladeOut > 0.5) { const b = r.bladeTip(); Gfx.light(b.x, b.y, b.z, '#4a8aff', 1.6, 4.5); }
+    if (r.thrust > 0.3) { const n = r.boneAt('pack', 0, -0.4, 0.1); if (n) Gfx.light(n.x, n.y, n.z, '#4a8aff', 2 * r.thrust, 5); }
     const B = r.beam;
+    if (B && !B.firing) Gfx.light(B.o.x, B.o.y, B.o.z, '#4a8aff', 1 + 4 * clamp(B.k, 0, 1), 3 + 7 * clamp(B.k, 0, 1));
+    const A = r.act;
+    if (A && A.move === 'peril' && A.phase === 'wind') { const k = r.cueProgress(), c = r.chest(); Gfx.light(c.x, c.y, c.z, k >= 1 ? '#ffffff' : '#ff2a3a', 2 + 5 * k, 6 + 8 * k); }
     if (B && B.firing) for (const k of [0.15, 0.5, 0.9]) { const s = B.len * k; Gfx.light(B.o.x + B.dir.x * s, B.o.y + B.dir.y * s, B.o.z + B.dir.z * s, '#4a8aff', 2.5, 7); }
     if (r.intro && r.spawning) Gfx.light(r.pos.x, r.pos.y + 3, r.pos.z, '#4a8aff', r.intro.stage === 'gather' ? 1.5 : 5, 16);
-    for (const h of Game.hazards) if (h.kind === 'eruption' && h.up && h.t < h.warn + h.hold) Gfx.light(h.pos.x, h.pos.y + 2, h.pos.z, '#ff4a5a', 2.5, 7);
   },
 };

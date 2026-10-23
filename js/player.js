@@ -44,7 +44,8 @@ const HEAVIES = {
 const IAIDO = {
   dash: { len: 7.45, path: 1.27, dmg: 26, arcR: 4.18, span: 3.0, lineW: 0.22, delayed: false, empowered: false, chain: false, post: 0.16, flash: 0.08, shake: 0.18 },
   dashHeavy: { len: 10.9, path: 1.5, dmg: 42, arcR: 5.27, span: 3.6, lineW: 0.36, delayed: true, empowered: false, chain: false, post: 0.22, flash: 0.14, shake: 0.32, heavy: true },
-  counter: { len: 15, path: 2.0, dmg: 135, arcR: 10.45, span: 4.4, lineW: 0.5, delayed: true, empowered: true, chain: true, post: 0.32, flash: 0.35, shake: 0.6 },
+  // the parry counter: you stay put and the cut explodes out from you (still)
+  counter: { len: 15, path: 2.0, dmg: 135, arcR: 10.45, span: 4.4, lineW: 0.8, delayed: true, empowered: true, chain: true, post: 0.32, flash: 0.35, shake: 0.7, still: true },
 };
 
 class Player {
@@ -80,9 +81,10 @@ class Player {
   stopLoop(k) { if (this.loops[k]) { this.loops[k].stop(); this.loops[k] = null; } }
   stopAllLoops() { for (const k in this.loops) this.stopLoop(k); }
   // where the line leaves the right hand (the model's hand is close to this)
+  // the free (left) hand, where the tether leaves from; the sword is in the right
   hand() {
     const c = this.chest(), Y = this.yaw;
-    return { x: c.x + Math.cos(Y) * 0.3 + fwdX(Y) * 0.25, y: c.y + 0.1, z: c.z - Math.sin(Y) * 0.3 + fwdZ(Y) * 0.25 };
+    return { x: c.x - Math.cos(Y) * 0.3 + fwdX(Y) * 0.25, y: c.y + 0.1, z: c.z + Math.sin(Y) * 0.3 + fwdZ(Y) * 0.25 };
   }
 
   // Movement intent from the keys, relative to where the camera faces.
@@ -833,7 +835,8 @@ class Player {
       if (this.ghostT <= 0) { this.ghostT = this.dashT > 0 ? 0.018 : 0.035; this.makeGhost('#ff2a48', 0.24, 0.55); }
     }
   }
-  makeGhost(color, dur, alpha) { FX.ghost(color, dur, alpha); }
+  // an afterimage of the body; none in first person, where it would sit over the lens
+  makeGhost(color, dur, alpha) { if (!Camera.fp) FX.ghost(color, dur, alpha); }
 
   // ---------- parry stance / iaido ----------
   // E opens a parry stance that costs shield. It only attacks after a successful parry.
@@ -862,7 +865,6 @@ class Player {
     if (!S.gameplay.invincible && this.shield < PC.PARRY_COST) {
       Sound.play('noShield');
       this.shieldFlash = 0.5;
-      FX.text('NO SHIELD', { x: this.pos.x, y: this.pos.y + 2.6, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.6, vy: 1.8 });
       return;
     }
     this.shield = Math.max(0, this.shield - PC.PARRY_COST);
@@ -935,7 +937,8 @@ class Player {
     this.iframes = Math.max(this.iframes, 0.2);
     Game.stats.parries++;
   }
-  // A drawn slash along the aim, kept near level so it doesn't bury itself in the street.
+  // A drawn slash along the aim, kept near level so it doesn't bury itself in the street. Dash slashes carry
+  // you along it; the parry counter (cfg.still) leaves you where you stand and the cut explodes out from you.
   startIaido(cfg) {
     const s = this.chest();
     let dir = { x: this.aimDir.x, y: clamp(this.aimDir.y, -0.3, 0.55), z: this.aimDir.z };
@@ -951,13 +954,14 @@ class Player {
     const hit = World.raycast(s, dir, len + 0.7, 0.3);
     if (hit) len = Math.max(0, hit.t - 0.7);
     this.yaw = yawOf(dir.x, dir.z);
-    const D = 0.09;
-    this.iaido = { t: 0, dur: D, dir, cfg, len, s, hit: new Set(), vx: (dir.x * len) / D, vy: (dir.y * len) / D, vz: (dir.z * len) / D };
+    const D = 0.09, still = !!cfg.still;
+    const end = { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len };
+    this.iaido = { t: 0, dur: D, dir, cfg, len, s, hit: new Set(), still, end: still ? end : null, vx: still ? 0 : (dir.x * len) / D, vy: still ? 0 : (dir.y * len) / D, vz: still ? 0 : (dir.z * len) / D };
     this.iframes = Math.max(this.iframes, cfg.empowered ? 0.5 : 0.3);
     if (this.crouching && Controller.canStand(this)) { this.crouching = false; Controller.setHeight(this, PC.H); }
     if (this.sliding) { this.sliding = false; Controller.setHeight(this, PC.H); }
-    const end = { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len };
     FX.slashLine(s, end, { w: cfg.lineW, dur: cfg.empowered ? 0.45 : 0.3, pal: cfg.empowered ? 'gold' : 'red' });
+    if (still) this.counterBlast(s, dir, len);
     // lightning runs the length of the draw
     const lo = cfg.empowered ? '#ffb040' : '#ff2a44';
     for (let i = 0; i < (cfg.empowered ? 3 : 2); i++) FX.bolt(s, end, cfg.empowered ? 0.4 : 0.26, { outer: lo, core: '#ffffff', jag: 0.25 + i * 0.12, w: 0.09, forks: 3 });
@@ -966,16 +970,36 @@ class Player {
     if (cfg.heavy) Sound.play('heavySwing');
     Game.shake(cfg.shake);
     FX.flash(cfg.empowered ? '#fff4d0' : '#ff3048', cfg.flash);
-    FPFX.kick('draw', { scale: cfg.empowered || cfg.heavy ? 1.15 : 1, col: cfg.empowered ? [255, 200, 110] : null });
+    FPFX.kick(still ? 'counter' : 'draw', { scale: cfg.empowered || cfg.heavy ? 1.15 : 1, col: cfg.empowered ? [255, 200, 110] : null });
     Game.hitstop(cfg.empowered ? 0.045 : 0.02);
     FX.light(s, cfg.empowered ? '#ffe0a0' : '#ff3048', 4, cfg.empowered ? 9 : 5, 0.3);
     if (cfg.empowered) Game.slowmo(0.3, 0.3);
+  }
+  // The counter's explosion: a blast where you stand and bursts running out along the cut.
+  counterBlast(s, dir, len) {
+    const g = { x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, GOLD = { c0: '#ffffff', c1: '#ffd070', c2: '#ff6a2a' };
+    FX.ring(s, 0.5, 6.5, 0.4, { c: '#ffd070', flat: false });
+    FX.ring(g, 0.6, 9, 0.45, { c: '#ffe0a0' });
+    FX.sparks(s, 40, dir, 1.4, 8, 32, GOLD);
+    FX.dust(g, 16, { smax: 10, rise: 1.2 });
+    FX.decal('crack', g, { len: 3.4 });
+    FX.light(s, '#ffd070', 8, 16, 0.4);
+    Sound.play('slam');
+    for (let i = 1; i <= 5; i++) {
+      const k = i / 5, q = { x: s.x + dir.x * len * k, y: s.y + dir.y * len * k, z: s.z + dir.z * len * k };
+      Game.queueCut(0.025 * i, () => {
+        FX.ring(q, 0.2, 2.2 + k, 0.25, { c: '#ffd070', flat: false });
+        FX.sparks(q, 10, null, TAU, 5, 16, GOLD);
+        FX.light(q, '#ffb040', 4, 6, 0.2);
+      });
+    }
   }
   moveIaido(dt) {
     const I = this.iaido;
     I.t += dt;
     this.vel.x = I.vx; this.vel.y = I.vy; this.vel.z = I.vz;
-    const c = this.chest(), lo = Math.min(I.s.y, c.y) - 1.3, hi = Math.max(I.s.y, c.y) + 1.3;
+    // a still cut reaches its full length at once; a dash slash cuts the path you've travelled
+    const c = I.end || this.chest(), lo = Math.min(I.s.y, c.y) - 1.3, hi = Math.max(I.s.y, c.y) + 1.3;
     for (const e of Game.enemies) {
       if (e.dead || e.spawning || I.hit.has(e)) continue;
       if (segDistXZ(e.pos.x, e.pos.z, I.s.x, I.s.z, c.x, c.z) < e.r + I.cfg.path && e.pos.y < hi && e.pos.y + e.h > lo) {
@@ -991,6 +1015,7 @@ class Player {
     this.iaido = null;
     this.vel.x *= 0.15; this.vel.z *= 0.15; this.vel.y = Math.max(this.vel.y * 0.15, 0);
     const c = this.chest(), yaw = yawOf(I.dir.x, I.dir.z);
+    if (I.still) this.vel.y = Math.max(this.vel.y, 0);
     // the closing arc swings the other way from the last swing
     const dir = (this.lastDir = -this.lastDir);
     FX.swoosh({ x: c.x, y: c.y, z: c.z, oy: 0, yaw, tilt: cfg.empowered ? 0.2 : 0, r: cfg.arcR, span: cfg.span, dir, sweep: 0.08, dur: cfg.empowered ? 0.38 : 0.26, thick: 0.45, pal: cfg.empowered ? 'gold' : 'red', trail: 1, bolts: cfg.empowered ? 4 : 3 });
@@ -1052,7 +1077,7 @@ class Player {
     if (this.dead) return;
     const n = Math.min(12, kills * 4);
     this.heal(n);
-    FX.text('+' + n + ' HP', { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#7dff8a', always: true, dur: 0.8, vy: 1.8 });
+    FX.text('+' + n, { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#7dff8a', dur: 0.8, vy: 1.8 });
   }
   chainLightning(c, I) {
     const arc = Game.has('arc'), range = arc ? 27.3 : 18.2, chainDmg = arc ? 40 : 55;
@@ -1113,7 +1138,6 @@ class Player {
     if (!free && !S.gameplay.invincible && this.shield < PC.TETHER_COST) {
       Sound.play('noShield');
       this.shieldFlash = 0.5;
-      FX.text('NO SHIELD', { x: this.pos.x, y: this.pos.y + 2.6, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.6, vy: 1.8 });
       return;
     }
     if (!free) { this.shield = Math.max(0, this.shield - PC.TETHER_COST); this.shieldDelay = Math.max(this.shieldDelay, 1.4); this.regenOn = false; }
@@ -1317,7 +1341,7 @@ class Player {
         Sound.play('pulse', {}, ec);
       } else if (dealt > 0 && T.paid && this.shieldOffT <= 0) {
         this.shield = Math.min(PC.MAX_SHIELD, this.shield + PC.TETHER_COST);
-        FX.text('+' + PC.TETHER_COST + ' SHIELD', { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.7, vy: 1.6 });
+        FX.text('+' + PC.TETHER_COST, { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#5ad8ff', dur: 0.7, vy: 1.6 });
       }
       this.yaw = yawOf(ux, uz);
       FX.swoosh({ follow: this, oy: this.chestH(), yaw: this.yaw, tilt: 0.3, r: 2.7, span: 3.2, dir: 1, sweep: 0.06, dur: 0.2, thick: 0.35 });
@@ -1424,9 +1448,12 @@ class Player {
     if (h.through) { this.iaido = null; this.dashT = 0; }
     let dmg = h.dmg * (Game.has('glass') ? 1.25 : 1);
     if (S.gameplay.invincible) dmg = 0;
+    // on the tether, a bullet only hurts: no knockback, and you stay on the line. Anything bigger (a blade, a
+    // blast, a sniper round, the beam) still throws you off it.
+    const steady = this.tether && this.tether.phase === 'attached' && h.kind === 'projectile' && h.proj && h.proj.kind === 'bolt' && !h.proj.big;
     if (this.sheathe) this.cancelSheathe();
-    if (this.tether && this.zipping()) this.releaseTether();
-    this.attack = null; this.attackQueued = null; this.atkPend = null; this.postPose = 0; this.plunge = null; this.kickAnim = null;
+    if (this.tether && this.zipping() && !steady) this.releaseTether();
+    if (!steady) { this.attack = null; this.attackQueued = null; this.atkPend = null; this.postPose = 0; this.plunge = null; this.kickAnim = null; }
     const c = this.center(), hadShield = this.shield > 0, shield0 = this.shield;
     // pierce: goes straight to health
     if (this.shield > 0 && !h.pierce) {
@@ -1438,7 +1465,6 @@ class Player {
         if (shield0 >= PC.SHIELD_OVERFLOW_AT) dmg = 0;
         Sound.play('shieldBreak');
         FX.sparks(c, 16, null, TAU, 5.5, 18, { c0: '#ffffff', c1: '#5ad8ff', c2: '#1a6aa0' });
-        FX.text('SHIELD BROKEN', { x: this.pos.x, y: this.pos.y + 2.6, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.8 });
         this.iframes = dmg > 0 ? 0.6 : 0.9;
       } else Sound.play('shieldHit');
       FX.ring(c, 0.5, 1.5, 0.18, { c: '#2a8ad0', flat: false });
@@ -1452,6 +1478,17 @@ class Player {
     }
     this.shieldDelay = PC.SHIELD_DELAY + (Game.has('bloodline') ? 1 : 0); this.regenOn = false;
     this.iframes = Math.max(this.iframes, hadShield && this.shield > 0 ? 0.35 : 0.6);
+    if (steady) {
+      // a flinch on the line, nothing more
+      this.blinkT = this.iframes;
+      if (h.from) this.hitMarks.push({ yaw: yawOf(h.from.x - this.pos.x, h.from.z - this.pos.z), t: 0.7 });
+      FPFX.kick(dmg > 0 ? 'hit' : 'guard', { from: h.from, scale: 0.5 });
+      Game.combo = 0; Game.comboT = 0; Game.styleHit();
+      Game.shake(0.12);
+      Game.stats.damageTaken += h.dmg;
+      if (this.hp <= 0) this.die();
+      return 'hit';
+    }
     this.hurtT = 0.22;
     this.blinkT = this.iframes;
     // a hit through the shield darkens the screen's edges toward it; one the shield eats glints blue
@@ -1492,10 +1529,9 @@ class Player {
   // Getting behind the rival's red flash as it swings: a moment of slow motion and a white afterimage.
   perilDodge(src) {
     const c = this.chest(), u = { x: c.x - src.pos.x, y: 0.3, z: c.z - src.pos.z };
-    FX.ghost('#ffffff', 0.5, 0.8);
+    this.makeGhost('#ffffff', 0.5, 0.8);
     FX.sparks(c, 14, u, 1.4, 5.5, 20, { c0: '#ffffff', c1: '#ff8a9a', c2: '#781e2a' });
     FX.light(c, '#ffffff', 4, 6, 0.3);
-    FX.text('DODGED', { x: this.pos.x, y: this.pos.y + 2.4, z: this.pos.z }, { c: '#ffffff', always: true, dur: 0.8, vy: 1.4 });
     Sound.play('perilDodge');
     Game.slowmo(0.3, 0.4, true);
     FPFX.kick('dodge');
@@ -1514,7 +1550,6 @@ class Player {
     this.shield = 0; this.shieldOffT = dur;
     this.shieldDelay = Math.max(this.shieldDelay, dur); this.regenOn = false;
     Sound.play('shieldBreak');
-    FX.text('SHIELD DISABLED', { x: this.pos.x, y: this.pos.y + 2.9, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 1.2, vy: 1.4 });
     FX.elec(this.center(), 1.3, 6, { outer: '#2ab8d8', core: '#ffffff' });
   }
   die() {

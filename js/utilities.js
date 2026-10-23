@@ -32,7 +32,6 @@ registerUtility({
       FX.bolt(c, ec, 0.2, { jag: 0.55 });
       if (e.isBoss) {
         FX.sparks(ec, 8, { x: -ux, y: 0, z: -uz }, 1.2, 5.5, 16.4, { c0: '#ffffff', c1: '#7af0ff', c2: '#145e6a' });
-        FX.text('RESISTED', { x: ec.x, y: e.pos.y + e.h + 0.7, z: ec.z }, { c: '#7af0ff', always: true, dur: 0.6, vy: 1.8 });
         continue;
       }
       const kv = { x: ux * 20, y: 14.5, z: uz * 20 };

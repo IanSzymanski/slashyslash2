@@ -194,7 +194,9 @@ const Game = {
     Sound.play('ultReady');
     Input.clear(); Input.consume();
     UI.hideAll();
-    this.announce(UPGRADES[id].name.toUpperCase(), UPGRADES[id].desc.toUpperCase(), '#ffd070', 2.6, true);
+    this.announce(UPGRADES[id].name.toUpperCase(), null, '#ffd070', 2.2, true);
+    // the pick was a click or a key press, so the mouse can be locked again straight away
+    if (Input.lockRequired) Input.requestLock().then((ok) => { if (!ok && this.state === 'playing') { this.pause(); UI.lockHint(true); } });
   },
   rankMul() { const r = this.rank(); return r ? r.mul : 1; },
   // getting hit costs most of your style

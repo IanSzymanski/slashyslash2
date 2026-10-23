@@ -80,7 +80,7 @@ const Director = {
   },
   nextWave() {
     this.wave++;
-    if (this.soloRival()) { this.bossWave = true; this.scale = { hp: 1, dmg: 1 }; this.waveName = this.mode === 'duel' ? 'LIMITERS OFF, FULL HEALTH' : 'RIVAL'; this.queue = []; }
+    if (this.soloRival()) { this.bossWave = true; this.scale = { hp: 1, dmg: 1 }; this.waveName = ''; this.queue = []; }
     else this.queue = this.mode === 'demo' ? this.buildDemo(this.wave) : this.buildEndless(this.wave);
     this.total = this.queue.length;
     this.spawnT = this.bossWave ? 4 : 0.8;
@@ -93,7 +93,7 @@ const Director = {
     if (this.bossWave) this.spawnRival();
     const title = this.mode === 'duel' ? 'MELEE DUEL' : this.mode === 'boss' ? 'RIVAL FIGHT' : 'WAVE ' + this.wave + (this.mode === 'demo' ? ' / ' + this.demoWaves() : '');
     Game.announce(title, this.waveName, this.mode === 'duel' ? '#ff6a7a' : this.bossWave ? '#4af0ff' : '#ff3a52', 2.2);
-    if (this.modifier) Game.announce(WAVE_MODIFIERS[this.modifier].name, WAVE_MODIFIERS[this.modifier].desc, '#ffd070', 2.6, true);
+    if (this.modifier) Game.announce(WAVE_MODIFIERS[this.modifier].name, null, '#ffd070', 2.2, true);
     Sound.play('waveStart');
     Sound.setIntensity(1);
     Game.resetProps();

@@ -3,7 +3,7 @@
 // runs in core.js at a fixed 120 Hz.
 
 (function boot() {
-  let last = performance.now();
+  let last = performance.now(), unlockedT = 0;
   function frame(now) {
     const realDt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
@@ -16,6 +16,11 @@
       else if (Game.state === 'paused' && !Input.pressed.has('Escape')) UI.resumeGame();
       Input.consume();
     }
+    // the lock as the browser has it; playing without it for more than a moment (a hotkey took it, say) pauses,
+    // so the resume panel is there to take it back
+    Input.syncLock();
+    unlockedT = Game.state === 'playing' && Input.lockRequired && !Input.pointerLocked && !Input.lockPending ? unlockedT + realDt : 0;
+    if (unlockedT > 0.35) { unlockedT = 0; Game.pause(); }
     const look = Input.takeLook();
     // a bug in one frame is logged, not allowed to stop the loop
     try {
@@ -56,8 +61,12 @@
     Render.prewarm();
     Input.init(gl);
     Input.gameKeysActive = () => Game.state === 'playing';
-    // Esc never reaches the page while the pointer is locked, so losing the lock is what pauses
-    Input.onLockChange = (locked) => { if (!locked && Game.state === 'playing') Game.pause(); };
+    // Esc never reaches the page while the pointer is locked, so losing the lock is what pauses; a lock that turns
+    // up while a panel is open (and nothing asked for it) is handed back, so the panel keeps its cursor
+    Input.onLockChange = (locked) => {
+      if (!locked && Game.state === 'playing') Game.pause();
+      else if (locked && Game.state !== 'playing' && !Input.lockPending) Input.releaseLock();
+    };
     UI.init();
     UI.applyVisualToggles();
     Game.toMenu();

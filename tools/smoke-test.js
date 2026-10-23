@@ -121,6 +121,24 @@ async function run(browser, file, errors) {
     await UI.startRun('test');
     ok(Game.state === 'paused' && !document.getElementById('lock-hint').hidden, 'refused pointer lock pauses with a hint');
     delete Input.canvas.requestPointerLock;
+    // a lock lost without the browser telling the page (a hotkey can do that) is still noticed: the run pauses
+    // within a moment, and Resume takes the lock back
+    {
+      let fake = null;
+      Object.defineProperty(document, 'pointerLockElement', { get: () => fake, configurable: true });
+      Input.canvas.requestPointerLock = () => { fake = Input.canvas; setTimeout(() => document.dispatchEvent(new Event('pointerlockchange')), 0); return Promise.resolve(); };
+      Game.toMenu();
+      await UI.startRun('test');
+      const ran = Game.state === 'playing' && Input.pointerLocked;
+      fake = null;
+      await new Promise((r) => setTimeout(r, 800));
+      const paused = Game.state === 'paused' && !!UI.openPanel();
+      await UI.resumeGame();
+      ok(ran && paused && Game.state === 'playing' && Input.pointerLocked, `a lock lost without its event pauses the run, and Resume locks again (${ran ? 'ran' : 'did not run'}, ${paused ? 'paused' : 'kept playing'})`);
+      delete Input.canvas.requestPointerLock;
+      delete document.pointerLockElement;
+      Game.toMenu(); Input.syncLock(true);
+    }
     Input.lockRequired = false;
 
     // mouse look drops a lone recentring jump mid-turn but keeps a fast flick whole
@@ -171,11 +189,15 @@ async function run(browser, file, errors) {
     ok(p.sheathe && p.sheathe.empowered, 'a parry empowers the stance');
     ok(Math.abs(p.shield - shield) < 0.01, 'a parry refunds its shield cost');
     ok(e.stun > 0, 'a parried scrapper is staggered');
-    // releasing E draws the counter, which cuts it down
+    // releasing E throws the counter, a big explosive slash from where you stand, which cuts it down and a
+    // second scrapper 9 m off along the aim
     e.hp = 60;
+    const e2 = T.scrapper(9, 0.3); e2.hp = 60;
+    const px0 = p.pos.x, pz0 = p.pos.z;
     T.release('KeyE');
-    T.frame(60);
-    ok(e.dead, 'the counter kills a staggered scrapper');
+    let drift = 0;
+    for (let i = 0; i < 60; i++) { T.frame(1); drift = Math.max(drift, Math.hypot(p.pos.x - px0, p.pos.z - pz0)); }
+    ok(e.dead && e2.dead && drift < 0.5, `the counter cuts down both scrappers without carrying you (moved ${drift.toFixed(2)} m)`);
 
     // an unparried strike costs shield, not health
     p = T.fresh();
@@ -546,6 +568,27 @@ async function run(browser, file, errors) {
       for (let i = 0; i < 220; i++) { if (p.onGround && !p.mantle && p.pos.y > 1) { top = p.pos.y; break; } T.frame(1); }
       ok(Math.abs(top - (A.top || 0)) < 0.05, `${label} (landed at ${top.toFixed(2)} m, top ${A.top} m)`);
     }
+    // on the tether a gunner's bolt hurts but doesn't knock you off the line; a sniper round does
+    for (const big of [false, true]) {
+      Game.toMenu(); UI.act('test'); T.frame(2);
+      p = Game.player; S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
+      p.pos.x = p.prev.x = 18; p.pos.z = p.prev.z = -6; p.pos.y = p.prev.y = 0; T.frame(2);
+      T.aimAt({ x: 32.5, y: 2.3, z: -6 }); T.press('Mouse2');
+      for (let i = 0; i < 40 && !p.zipping(); i++) T.frame(1);
+      T.frame(2);
+      // no shield left, so the bolt reaches health
+      p.shield = 0; p.iframes = 0;
+      const zipping = p.zipping(), v0 = { x: p.vel.x, z: p.vel.z }, c = p.center();
+      const b = new Bolt({ x: c.x, y: c.y, z: c.z + 1.2 }, { x: 0, y: 0, z: -1 }, 30, 10);
+      if (big) b.big = true;
+      p.takeHit({ dmg: 10, from: { x: c.x, y: c.y, z: c.z + 1.2 }, kind: 'projectile', proj: b, knock: 10.9 });
+      T.frame(2);
+      const still = p.zipping(), hurt = p.hp < PC.MAX_HP;
+      T.release('Mouse2'); T.frame(30);
+      ok(zipping && hurt && (big ? !still : still), big ? 'a sniper round knocks you off the tether' : `a gunner's bolt on the tether hurts but leaves you on the line (zip speed ${Math.hypot(v0.x, v0.z).toFixed(0)} m/s)`);
+    }
+    S.gameplay.invincible = false; p.hp = PC.MAX_HP;
+
     // ledges: walking into a 2.6 m shipping container climbs it; a held tether at its edge zips you up and over
     // onto it, and a tap at its edge throws you onto it
     for (const [hold, label] of [[0, 'walking into a shipping container climbs it'], [60, 'a zip at a container\'s edge climbs onto it'], [2, 'a tap of the tether at a container\'s edge throws you onto it']]) {
@@ -622,12 +665,16 @@ async function run(browser, file, errors) {
     ok(!R.shield, 'a pulse grenade kicked back into it breaks the shield at once');
     // phase 1 can't be skipped: hits stop at half health, and there it enrages into phase 2
     R = rival(0, -10); R.shield = false; R.hp = Math.floor(R.maxHp / 2) + 10;
+    Game.announcements = [];
     hurtEnemy(R, 60, { cause: 'slash' });
     const gated = R.hp === Math.floor(R.maxHp / 2);
     T.frame(2);
     const enr = !!(Game.cine && Game.cine.kind === 'enrage') && R.phase === 2;
     for (let i = 0; i < 60 * 6 && Game.cineActive(); i++) T.frame(1);
-    ok(gated && enr && !Game.cineActive() && R.phase === 2 && !R.shield && !!R.storm, 'damage stops at half health, where it enrages in a cutscene and fights on in phase 2 as the street erupts');
+    ok(gated && enr && !Game.cineActive() && R.phase === 2 && !R.shield && !Game.hazards.some((h) => h.kind === 'eruption'), 'damage stops at half health, where it enrages in a cutscene and fights on in phase 2 (no eruptions)');
+    // phase 2 keeps its blue, and the change puts no words on screen
+    const tints = Object.values(R.tints()), notBlue = tints.filter((c) => /^#ff/i.test(c) && c.toLowerCase() !== '#ffffff');
+    ok(!notBlue.length && !Game.announcements.length, `phase 2 keeps its blue lights (${notBlue.length ? 'red: ' + notBlue.join(' ') : 'no red'}) and no banner or caption (${Game.announcements.map((a) => a.text).join(', ') || 'none'})`);
     // phase 2: parrying its swing locks blades and it raises a guard; swinging into the guard gets you parried and a
     // riposte in bullet time; parrying the riposte stuns it
     R = rival(0, -3, { phase2: true });
@@ -655,6 +702,16 @@ async function run(browser, file, errors) {
     p.pos.x = p.prev.x = R.pos.x - f1.x * 2.5; p.pos.z = p.prev.z = R.pos.z - f1.z * 2.5;
     for (let i = 0; i < 90 && R.act && R.act.move === 'peril'; i++) T.frame(1);
     ok(tookIt && p.hp === PC.MAX_HP && R.stunT > 0, 'its red flash goes through a parry in front, but whiffs on you behind it and leaves it stunned');
+    // a dash straight through it gets you there too: its body doesn't stop or shove you
+    R = rival(0, -3, { phase2: true });
+    S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
+    R.yaw = R.faceYaw = R.yawTo(p.pos); R.startPeril();
+    for (let i = 0; i < 90 && R.act && R.act.move === 'peril' && !R.act.glinted; i++) T.frame(1);
+    Camera.yaw = yawOf(R.pos.x - p.pos.x, R.pos.z - p.pos.z);
+    T.press('KeyW'); T.tap('ShiftLeft');
+    for (let i = 0; i < 90 && R.act && R.act.move === 'peril'; i++) T.frame(1);
+    T.release('KeyW');
+    ok(p.hp === PC.MAX_HP && R.stunT > 0, `dashing straight through its body beats the red flash (ended ${distXZ(p.pos, R.pos).toFixed(1)} m behind it)`);
     S.gameplay.invincible = true;
     // a sword dash chain: to one side of the line to you, to the other, then a cut through where you stand
     R = rival(0, -14, { phase2: true });
@@ -668,8 +725,10 @@ async function run(browser, file, errors) {
     }
     const legAng = (L) => Math.abs(angDiff(yawOf(L.px - L.x, L.pz - L.z), yawOf(L.vx, L.vz))) * 180 / Math.PI;
     const legSide = (L) => sign((L.px - L.x) * L.vz - (L.pz - L.z) * L.vx);
-    ok(legs.length === 3 && legAng(legs[0]) > 40 && legAng(legs[1]) > 40 && legSide(legs[0]) !== legSide(legs[1]) && legs[2].cut && closest < 1.8,
-      `a sword dash chain goes side (${legs[0] ? legAng(legs[0]).toFixed(0) : '-'} deg), other side (${legs[1] ? legAng(legs[1]).toFixed(0) : '-'} deg), then cuts through you (closest ${closest.toFixed(1)} m)`);
+    // (still too far off for the cut after the side legs, it boosts straight in first)
+    const lastLeg = legs[legs.length - 1], boostIn = legs.length === 4 && !legs[2].cut && legAng(legs[2]) < 25;
+    ok((legs.length === 3 || boostIn) && legAng(legs[0]) > 40 && legAng(legs[1]) > 40 && legSide(legs[0]) !== legSide(legs[1]) && lastLeg && lastLeg.cut && closest < 1.8,
+      `a sword dash chain goes side (${legs[0] ? legAng(legs[0]).toFixed(0) : '-'} deg), other side (${legs[1] ? legAng(legs[1]).toFixed(0) : '-'} deg),${boostIn ? ' boosts in,' : ''} then cuts through you (closest ${closest.toFixed(1)} m)`);
     // zoning backs off to its range; charging (phase 2) closes in
     R = rival(0, -6, { move: true }); R.mode = 'zone'; R.modeT = 99;
     for (let i = 0; i < 60 * 3; i++) T.frame(1);
@@ -685,6 +744,22 @@ async function run(browser, file, errors) {
     let roofT = -1;
     for (let i = 0; i < 60 * 8 && roofT < 0; i++) { T.frame(1); if (R.onGround && Math.abs(R.pos.y - 6) < 0.3) roofT = i / 60; }
     ok(roofT >= 0, `on a 6 m rooftop it boosts up after you (${roofT >= 0 ? 'there in ' + roofT.toFixed(1) + ' s' : 'never got there'})`);
+    // charging from far off in phase 2, it takes a long dash chain in rather than leaping
+    R = rival(0, -24, { phase2: true, think: true, move: true }); R.mode = 'charge'; R.modeT = 99; R.cds.chain = 0; R.cds.closer = 0; R.cds.combo = 99; R.cds.wave = 99;
+    let longChain = '', leapt = false;
+    for (let i = 0; i < 60 * 2 && !longChain; i++) { T.frame(1); if (R.act && R.act.kind === 'chain') longChain = R.act.name; leapt = leapt || !!R.leap || (R.act && R.act.kind === 'dive'); }
+    ok(['blitz', 'longZigzag', 'sweep', 'zigzag3'].includes(longChain) && !leapt, `charging from 24 m it takes a long dash chain in (${longChain || 'none'}${leapt ? ', leapt first' : ''})`);
+    // its machine gun sprays a pattern round you, not a line at you: the burst's bolts spread over more than 15
+    // degrees
+    R = rival(0, -12);
+    R.startGun();
+    const pat = R.act.pattern, yaws = [], pitches = [];
+    for (let i = 0; i < 120 && R.act && R.act.kind === 'gun'; i++) {
+      T.frame(1);
+      for (const b of Game.projectiles) if (b.kind === 'bolt' && b.hostile && !b._seen) { b._seen = true; yaws.push(Math.atan2(b.vel.x, -b.vel.z)); pitches.push(Math.atan2(b.vel.y, Math.hypot(b.vel.x, b.vel.z))); }
+    }
+    const range = (a) => (a.length ? (Math.max(...a) - Math.min(...a)) * 180 / Math.PI : 0), spread = Math.max(range(yaws), range(pitches));
+    ok(yaws.length === 12 && spread > 12, `its machine gun bursts ${yaws.length} bolts in a ${pat} pattern spread over ${spread.toFixed(0)} degrees`);
     // phase 1 always zones: it never picks charging, tether-zips to a vantage at range, and cuts and boosts away
     // when you crowd it
     R = rival(0, -6, { move: true, think: true });
@@ -702,7 +777,7 @@ async function run(browser, file, errors) {
     ok(!charged && zipped && zipD > 8 && zipShot && shoved.startsWith('shove') && shoveD > 4,
       `phase 1 only zones: it zips to a vantage ${zipD.toFixed(1)} m from you ${zipped && zipped.land.y > 1 ? zipped.land.y.toFixed(1) + ' m up' : 'on the street'} with a clear shot, and crowded it cuts and boosts away (${shoved || 'nothing'}, to ${shoveD.toFixed(1)} m)`);
     // the dive bomb: a charge, a leap high over you, a flash as the mark locks, then a fast dive onto it
-    R = rival(0, -9, { phase2: true }); R.storm = null; Game.hazards = [];
+    R = rival(0, -9, { phase2: true });
     S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
     R.startDive(p);
     let diveTop = 0, flashAt = -1, diveAt = -1, impactAt = -1;
@@ -715,8 +790,28 @@ async function run(browser, file, errors) {
     }
     ok(diveTop > 12 && flashAt > 0 && diveAt > flashAt && impactAt - diveAt < 20 && p.hp + p.shield < PC.MAX_HP + PC.MAX_SHIELD,
       `its dive bomb leaps ${diveTop.toFixed(1)} m, flashes ${((diveAt - flashAt) / 60).toFixed(2)} s before diving, comes down in ${((impactAt - diveAt) / 60).toFixed(2)} s and hits you on the mark`);
+    // its blade waves fly fast, tilted 45 degrees, at where you're running to
+    R = rival(0, -14, { phase2: true });
+    p.vel.x = 9.5; p.vel.z = 0;
+    R.fireWave(RIVAL_MOVES.wave);
+    const fw = Game.projectiles.filter((b) => b.kind === 'bladewave').pop();
+    ok(fw && fw.dir.x > 0.15 && Math.abs(Math.abs(fw.roll) - Math.PI / 4) < 0.01 && fw.speed >= 36, `its blade waves lead you (aimed ${fw ? (Math.asin(fw.dir.x) * 180 / Math.PI).toFixed(0) : '-'} degrees ahead), fly at ${fw ? fw.speed.toFixed(0) : '-'} m/s and are tilted 45 degrees`);
+    Game.projectiles = [];
+    // phase 2 doesn't stand off and throw: waves and the dive only come when you run from it
+    const p2Acts = (run) => {
+      R = rival(0, -11, { phase2: true, think: true, move: true });
+      R.cds.wave = 0; R.cds.dive = 0; R.cds.chain = 99; R.cds.closer = 0; R.cds.combo = 99;
+      const seen = new Set();
+      if (run) { Camera.yaw = yawOf(p.pos.x - R.pos.x, p.pos.z - R.pos.z); T.press('KeyW'); }
+      for (let i = 0; i < 60 * 2.5; i++) { T.frame(1); if (R.act) seen.add(R.act.move || R.act.kind); }
+      if (run) T.release('KeyW');
+      return seen;
+    };
+    const stood = p2Acts(false), ran = p2Acts(true);
+    const ranged = (q) => q.has('wave') || q.has('waveAir') || q.has('dive');
+    ok(!ranged(stood) && ranged(ran), `phase 2 throws waves or dives only when you run (standing: ${[...stood].join(' ') || 'nothing'}; running: ${[...ran].join(' ') || 'nothing'})`);
     // its blade waves can't be sent back: a parry breaks one on the blade
-    R = rival(0, -12, { phase2: true }); R.storm = null; Game.hazards = [];
+    R = rival(0, -12, { phase2: true });
     p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0; p.parryCD = 0;
     const rhp = R.hp, w = new BladeWave({ x: R.pos.x, y: p.pos.y + 0.7, z: R.pos.z + 1.2 }, { x: 0, y: 0, z: 1 }, 12, R, false);
     Game.projectiles.push(w);

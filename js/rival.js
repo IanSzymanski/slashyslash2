@@ -3,26 +3,26 @@
 // that runs, boosts on its back thrusters and hovers, so it moves in ways the 2D one couldn't:
 //   Stance. In phase 1 it always zones: it holds a band of range, strafes, boosts away and tether-zips to new
 //   vantages (roof edges, balconies, the far side of the street), and only fights up close to cut you off it.
-//   In phase 2 it is either zoning or charging (closing in): keep away and it charges; crowd it or hurt it
-//   badly and it backs off to zone. Its thrusters burn hotter while it charges.
+//   In phase 2 it always presses in, and only throws blade waves or leaps on you when you try to get away.
+//   Its thrusters burn hotter while it charges.
 //   Dash chains. Thruster dashes come in chains of legs taken relative to you at the moment each starts:
-//   charging, it zigzags in (side, other side, then the cut), swings round your flank, or feints back before
-//   it comes; zoning, it dashes across your front and throws a blade wave from each new angle. Only a leg or a
-//   blow that attacks glints first, so it can be parried or dodged; repositioning boosts never glint.
+//   it zigzags in (side, other side, then the cut), swings round your flank, or feints back before it comes,
+//   and from far off takes long chains that cross the street in boosts. Only a leg or a blow that attacks
+//   glints first, so it can be parried or dodged; repositioning boosts never glint.
 // Phase 1 (above half health): shielded. It zones with a forearm gun (slash the bolts back: eight cracks break
 // the shield) and a shoulder beam it fires hovering, lobs a pulse grenade (tether it and kick it back to break
-// the shield at once), and when you get in its face it cuts and boosts away. At half health it throws you clear and enrages in a cutscene.
-// Phase 2: shield and guns offline, blade only, glows run red. Combos, guards that parry what you swing into
+// the shield at once), and when you get in its face it cuts and boosts away. At half health it throws you
+// clear and enrages in a cutscene.
+// Phase 2: shield and guns offline, blade only; it stays blue. Combos, guards that parry what you swing into
 // them and answer with a riposte in bullet time (parry it to stun it), the red flash (only a dash through to the
-// wedge behind it avoids it), sword dash chains, blade waves (jump, duck, dash through, or parry to break them; they can't be sent back), a dive bomb onto a mark
-// that tracks you, and the street erupting in columns for the first stretch.
+// wedge behind it avoids it), sword dash chains, blade waves (jump, duck, dash through, or parry to break them;
+// they can't be sent back), and a dive bomb onto a mark that tracks you.
 // The last hit plays a slow-motion knockout cutscene and leaves it lying in the street.
 
 Object.assign(PALETTES, {
   blue: [[240, 248, 255], [150, 196, 255], [47, 107, 255], [12, 30, 110]],
-  rage: [[255, 244, 244], [255, 130, 140], [235, 30, 52], [90, 8, 20]],
 });
-for (const k of ['blue', 'rage']) PAL_LIN[k] = PALETTES[k].map((c) => c.map(_lin));
+for (const k of ['blue']) PAL_LIN[k] = PALETTES[k].map((c) => c.map(_lin));
 
 ENEMY_DEFS.aegis = { hp: 900, r: 0.62, h: 2.5, speed: 7.0, score: 5000, mass: 6, dmg: 5, heavy: true, climb: 99, debris: ['#b4b8c0', '#868b96', '#33353e', '#2f6bff', '#c08a34'] };
 ENEMY_BASE_STATE.aegis = 'fight';
@@ -47,6 +47,11 @@ const AEGIS_G = 60;
 const DIVE = { CHARGE: 0.95, HIGH: 16, TRACK: 0.6, FLASH: 0.3, SPEED: 90 };
 // tether zips: the line's flight time, top reeling speed, and range from you of the vantages it zips to
 const ZIP = { FIRE: 0.14, SPEED: 34, NEAR: 9, FAR: 15 };
+// the machine gun: wind-up (s, scaled by the telegraph setting), bolts per burst, seconds between them, and the
+// reach of each pattern in radians (a sweep's half-width, how far short a walk starts, a scatter's half-width)
+const GUN = { WIND: 0.55, SHOTS: 12, GAP: 0.075, SWEEP: 0.26, WALK: 0.2, SCATTER: 0.16 };
+// blade waves: speed in m/s and the tilt (radians) of the crescent about its line of flight
+const BLADE_WAVE = { SPEED: 38, TILT: Math.PI / 4 };
 // the kinds of box whose tops it zips onto
 const VANTAGE_KINDS = new Set(['building', 'container', 'car', 'overpass', 'girder', 'scaffold', 'frame', 'plat', 'stack', 'pile', 'machine', 'site', 'roof', 'escape', 'balcony']);
 
@@ -79,10 +84,10 @@ const CHAINS = {
   flank: [['side', 1, 95], ['side', 1, 115], ['cut']],
   feint: [['fwd'], ['back'], ['cut']],
   straight: [['fwd'], ['cut']],
-  // zoning, phase 2: across your front, a wave from each new angle
-  crossfire: [['side', 1, 100], ['wave'], ['side', -1, 100], ['wave']],
-  strafe: [['side', 1, 95], ['side', 1, 95], ['wave']],
-  retreat: [['back'], ['side', 1, 90], ['waveAir']],
+  // charging from far off: long chains that cover the ground in boosts before the cut
+  blitz: [['fwd'], ['side', 1, 50], ['side', -1, 50], ['fwd'], ['cut']],
+  longZigzag: [['side', 1, 45], ['side', -1, 45], ['side', 1, 45], ['side', -1, 45], ['cut']],
+  sweep: [['side', 1, 75], ['side', 1, 40], ['fwd'], ['side', -1, 60], ['cut']],
   // phase 1, with you in its face: a cut to drive you back, then a boost out of reach
   shove: [['slash'], ['back'], ['side', 1, 110]],
   shoveCleave: [['cleave'], ['back'], ['back']],
@@ -126,7 +131,7 @@ class Rival extends Enemy {
     this.shield = true; this.shieldDownT = 0; this.cracks = 0;
     this.stunT = 0; this.flinchT = 0; this.deflectT = 0; this.guardT = 0; this.parryInvulnT = 0; this.transT = 0; this.dodgeT = 0; this.perilFlash = 0;
     this.act = null; this.attack = null; this.windArc = null; this.lunge = null; this.dash = null; this.leap = null; this.hoverY = null;
-    this.beam = null; this.grenade = null; this.beamLoop = null; this.storm = null; this.want = null; this.faceYaw = this.yaw;
+    this.beam = null; this.grenade = null; this.beamLoop = null; this.want = null; this.faceYaw = this.yaw;
     this.cds = { gun: 1.2, blade: 0, beam: 7, grenade: 3, combo: 0.5, closer: 0, chain: 2, dive: 3, wave: 2, guard: 2, dodge: 0, leap: 0, zip: 3, zipTry: 0 };
     this.mode = 'zone'; this.modeT = 0; this.farT = 0; this.closeT = 0; this.hurtRecent = 0;
     this.bladeOut = 0; this.bladeWant = false; this.thrust = 0; this.ghostT = 0; this.stuckT = 0; this.lastPos = { x: pos.x, z: pos.z };
@@ -187,30 +192,31 @@ class Rival extends Enemy {
     if (a && a.kind === 'guard') return ((this.t * 8) | 0) % 2 ? '#bff8ff' : '#4a9aff';
     return null;
   }
-  // the colours of its lights by phase: blue, red once enraged, dark when knocked out
+  // the colours of its lights: blue in both phases (its guns go dark and the wiring under the popped limiters
+  // glows once enraged), dark when knocked out
   tints() {
     const P = this._tint || (this._tint = {}), C = AEGIS_COL, ko = this.dying && this.ko && (this.ko.stage === 'collapse' || this.ko.stage === 'down');
-    const red = this.phase === 2, blink = ((this.t * 12) | 0) % 3 === 0;
+    const p2 = this.phase === 2, blink = ((this.t * 12) | 0) % 3 === 0;
     if (ko || (this.dying && this.ko && this.ko.stage === 'kneel' && blink)) {
       for (const k of ['visor', 'core', 'lens', 'jet', 'gun', 'muzzle']) P[k] = C.off;
       P.wire = '#3a1a20';
       return P;
     }
     const a = this.act, hot = this.windingUp() && ((this.t * 16) | 0) % 2;
-    P.visor = hot ? '#ffffff' : red ? C.red : '#5a8aff';
-    P.core = red ? '#ff3a4a' : C.glow;
-    P.lens = red ? C.off : a && a.kind === 'beam' ? (a.phase === 'fire' ? '#e0ecff' : ((this.t * 20) | 0) % 2 ? '#ffffff' : C.glow) : C.glow;
-    P.gun = red ? C.off : a && a.kind === 'gun' ? '#9cc4ff' : C.glow;
-    P.muzzle = red ? C.off : a && a.kind === 'gun' && a.t >= this.tele(0.45) ? '#ffffff' : C.glow;
-    P.jet = red ? '#ff6a3a' : this.mode === 'charge' ? '#9cc4ff' : C.glow;
-    P.wire = red ? '#ff3a3a' : C.wire;
-    for (let i = 0; i < 3; i++) P['lim' + i] = red || (a && a.kind === 'enrage' && a.done['pop' + i]) ? C.K : C.G;
+    P.visor = hot ? '#ffffff' : '#5a8aff';
+    P.core = C.glow;
+    P.lens = p2 ? C.off : a && a.kind === 'beam' ? (a.phase === 'fire' ? '#e0ecff' : ((this.t * 20) | 0) % 2 ? '#ffffff' : C.glow) : C.glow;
+    P.gun = p2 ? C.off : a && a.kind === 'gun' ? '#9cc4ff' : C.glow;
+    P.muzzle = p2 ? C.off : a && a.kind === 'gun' && a.t >= this.tele(GUN.WIND) ? '#ffffff' : C.glow;
+    P.jet = this.mode === 'charge' ? '#9cc4ff' : C.glow;
+    P.wire = p2 ? C.hi : C.wire;
+    for (let i = 0; i < 3; i++) P['lim' + i] = p2 || (a && a.kind === 'enrage' && a.done['pop' + i]) ? C.K : C.G;
     return P;
   }
   windingUp() {
     const a = this.act;
     if (!a) return false;
-    return (a.kind === 'gun' && a.t < this.tele(0.45)) || (a.kind === 'melee' && a.phase === 'wind') ||
+    return (a.kind === 'gun' && a.t < this.tele(GUN.WIND)) || (a.kind === 'melee' && a.phase === 'wind') ||
       (a.kind === 'beam' && a.phase !== 'fire') || a.kind === 'grenade' || (a.kind === 'dive' && (a.phase === 'crouch' || a.phase === 'hang')) ||
       (a.kind === 'chain' && a.pause && a.glinted);
   }
@@ -243,7 +249,6 @@ class Rival extends Enemy {
     if (o.cause === 'reflect' && this.phase === 1 && !this.dying) {
       this.cracks++;
       FX.ring(this.center(), 0.3, 1.8, 0.2, { c: '#9cc4ff', flat: false });
-      FX.text('CRACK ' + this.cracks + '/' + SHIELD_CRACKS, { x: this.pos.x, y: this.pos.y + this.h + 0.9, z: this.pos.z }, { c: '#ffffff', always: true, dur: 0.8, vy: 2 });
       Sound.play('reflect', {}, this.center());
       if (this.cracks >= SHIELD_CRACKS) { this.breakShield(); return; }
     }
@@ -252,10 +257,6 @@ class Rival extends Enemy {
     FX.sparks(at, 6, { x: u.x, y: 0.3, z: u.z }, 1.4, 5.5, 18, AEGIS_SPARK);
     this.deflectT = 0.2;
     Sound.play('shieldDeflect', {}, at);
-    if (!this._immuneT || Game.time > this._immuneT) {
-      this._immuneT = Game.time + 0.7;
-      FX.text('SHIELDED', { x: this.pos.x, y: this.pos.y + this.h + 0.6, z: this.pos.z }, { c: '#7aa8ff', always: true, dur: 0.6, vy: 1.8 });
-    }
   }
   breakShield() {
     this.shield = false; this.shieldDownT = 10; this.cracks = 0;
@@ -272,13 +273,11 @@ class Rival extends Enemy {
     Game.slowmo(0.25, 0.55, true);
     Game.shake(0.6);
     Game.hitstop(0.1);
-    Game.announce('SHIELD DOWN', null, '#7aa8ff', 1.6);
   }
   restoreShield() {
     this.shield = true; this.cracks = 0;
     FX.ring(this.center(), 2.6, 0.5, 0.4, { c: '#4a8aff', flat: false });
     Sound.play('shieldUp', {}, this.center());
-    Game.announce('SHIELD RESTORED', null, '#7aa8ff', 1.3, true);
   }
   // a pulse grenade kicked back into it
   pulseHit() {
@@ -338,7 +337,13 @@ class Rival extends Enemy {
   cueProgress() {
     const a = this.act;
     if (!a || !a.m || !a.m.close || a.phase !== 'wind') return 1;
-    return clamp(a.t / Math.max(0.05, this.tele(a.m.wind) - CUE_LEAD), 0, 1);
+    return clamp(a.t / Math.max(0.05, this.windOf(a.m) - CUE_LEAD), 0, 1);
+  }
+  // a move's wind-up at this difficulty; the red flash speeds up less than the rest on the harder settings
+  windOf(m) {
+    if (!m.zone) return this.tele(m.wind);
+    const T = S.enemies.telegraph;
+    return m.wind * (T < 1 ? 1 - (1 - T) * 0.55 : T) * this.windMul;
   }
   eyeGlint(c, size) { FX.glint(this.visorPos(), { c, size, dur: 0.24, follow: () => this.visorPos(), threat: this }); }
   parryPlayer(o) {
@@ -367,8 +372,13 @@ class Rival extends Enemy {
     this.perilFlash = 0.16;
     FX.light(this.chest(), PERIL_RED, 6, 12, 0.5);
     Game.shake(0.25);
-    const wind = this.tele(RIVAL_MOVES.peril.wind), real = wind / RIPOSTE_BT_SCALE;
+    const wind = this.windOf(RIVAL_MOVES.peril), real = wind / RIPOSTE_BT_SCALE;
     Game.bulletTime(real + 0.2, { kind: 'peril', scale: RIPOSTE_BT_SCALE, owner: this });
+    // a pillar of red light and a ring thrown out as it starts to gather
+    const g = { x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z };
+    FX.ring(g, 0.5, 7, 0.35, { c: PERIL_RED });
+    FX.ring(this.chest(), 0.4, 4.5, 0.3, { c: '#ffd0d4', flat: false });
+    FX.sparks(this.chest(), 26, { x: 0, y: 1, z: 0 }, 1.2, 6, 18, { c0: '#ffffff', c1: '#ff5a6a', c2: '#781e2a' });
     Sound.play('peril', { dur: Math.max(0.1, (wind - CUE_LEAD) / RIPOSTE_BT_SCALE) });
   }
 
@@ -396,7 +406,6 @@ class Rival extends Enemy {
     else if (!hum && this.beamLoop) this.stopLoops();
     this.bladeOut = approach(this.bladeOut, this.bladeWant || this.phase === 2 ? 1 : 0, dt * 7);
     if (this.dying) { this.updateDying(dt); return; }
-    if (this.storm && !Game.cineActive()) this.updateStorm(dt);
     if (this.phase === 1 && this.hp <= this.maxHp / 2 && !(this.act && this.act.kind === 'intro')) this.enterPhase2();
     if (this.phase === 1 && !this.shield) {
       this.shieldDownT -= dt;
@@ -423,8 +432,8 @@ class Rival extends Enemy {
     }
     if (this.phase === 2 && Math.random() < 0.25) {
       const q = this.local(rand(-0.4, 0.4), rand(0.8, 2.3), rand(-0.3, 0.3));
-      FX.sparks(q, 1, { x: 0, y: 1, z: 0 }, 1, 1.8, 5.5, Object.assign({ g: -3 }, AEGIS_RED));
-      if (Math.random() < 0.15) FX.bolt(q, { x: q.x + rand(-0.6, 0.6), y: q.y + rand(-0.4, 0.6), z: q.z + rand(-0.6, 0.6) }, 0.08, { outer: '#ff2a3a', core: '#ffffff', jag: 0.15, w: 0.04 });
+      FX.sparks(q, 1, { x: 0, y: 1, z: 0 }, 1, 1.8, 5.5, Object.assign({ g: -3 }, AEGIS_SPARK));
+      if (Math.random() < 0.15) FX.bolt(q, { x: q.x + rand(-0.6, 0.6), y: q.y + rand(-0.4, 0.6), z: q.z + rand(-0.6, 0.6) }, 0.08, { outer: '#2f6bff', core: '#ffffff', jag: 0.15, w: 0.04 });
     }
     this.physics(dt);
     this.thrusterFX(dt);
@@ -438,26 +447,10 @@ class Rival extends Enemy {
   }
   aimFrom(o, c) { const dx = c.x - o.x, dy = c.y - o.y, dz = c.z - o.z, l = Math.hypot(dx, dy, dz) || 1; return { x: dx / l, y: dy / l, z: dz / l }; }
 
-  // ---------- stance: zoning or charging ----------
-  pickMode(p, d) {
-    // phase 1 always zones
-    if (this.phase === 1) { this.mode = 'zone'; this.modeT = 99; return; }
-    // keep away and it comes for you; crowd it, or hurt it badly, and it backs off to zone
-    let zone = 0.35;
-    if (this.farT > 4) zone -= 0.3;
-    if (this.closeT > 3) zone += 0.25;
-    if (this.hurtRecent > 50) zone += 0.2;
-    if (this.mode === 'zone') zone -= 0.1; else zone += 0.1;
-    const was = this.mode;
-    this.mode = chance(clamp(zone, 0.1, 0.9)) ? 'zone' : 'charge';
-    this.modeT = this.mode === 'zone' ? rand(5, 8.5) : rand(4, 6.5);
-    if (this.mode !== was) {
-      // the tell: its jets flare (no glint: glints are kept for blows that are coming)
-      const back = this.local(0, 1.9, -0.5);
-      FX.sparks(back, this.mode === 'charge' ? 14 : 6, { x: -fwdX(this.yaw), y: -0.5, z: -fwdZ(this.yaw) }, 0.8, 5.5, 12.7, this.phase === 2 ? AEGIS_RED : AEGIS_SPARK);
-      Sound.play('dash', {}, this.center());
-    }
-  }
+  // ---------- stance ----------
+  // Phase 1 always zones (holding its range, boosting and zipping away); phase 2 always presses in, and only
+  // throws blade waves or leaps on you when you try to get away.
+  pickMode() { this.mode = this.phase === 1 ? 'zone' : 'charge'; this.modeT = 99; }
 
   // ---------- choosing what to do ----------
   chooseAct(p) {
@@ -465,12 +458,6 @@ class Rival extends Enemy {
     const d = distXZ(p.pos, this.pos), dy = p.pos.y - this.pos.y, near = d < 4.2 && Math.abs(dy) < 2.4;
     if (this.modeT <= 0) this.pickMode(p, d);
     if (this.phase === 2) {
-      // zoning with you in its face: usually it boosts back out and throws from range instead of trading blows
-      if (this.mode === 'zone' && near && this.cds.chain <= 0 && chance(0.65)) {
-        this.startChain(pick(['retreat', 'backstep']));
-        this.cds.chain = rand(1.8, 2.8);
-        return;
-      }
       if (this.cds.combo <= 0 && near) {
         // sometimes it opens with a guard and waits for you to swing into it
         if (d < 3.6 && this.cds.guard <= 0 && chance(0.3)) { this.raiseGuard(rand(1.3, 1.8), 'stance'); this.cds.guard = rand(5, 8); return; }
@@ -482,16 +469,16 @@ class Rival extends Enemy {
       if (!near && this.cds.closer <= 0 && Math.abs(dy) < 3.5) {
         this.cds.closer = rand(0.4, 0.8);
         const rage = this.rageK();
-        if (this.mode === 'charge') {
-          if (this.cds.chain <= 0 && d < 18) {
-            this.startChain(pick(rage > 0.5 ? ['zigzag', 'zigzag3', 'flank', 'feint', 'flank'] : ['zigzag', 'flank', 'feint', 'straight']));
-            this.cds.chain = rand(2.4, 3.6) * this.rageGap();
-            return;
-          }
-          if (this.cds.dive <= 0 && d > 6 && chance(0.35)) { this.startDive(p); this.cds.dive = rand(5, 7.5); return; }
-        } else {
-          if (this.cds.wave <= 0 && d > 6) { this.startChain(pick(d < 9 ? ['retreat', 'crossfire'] : ['crossfire', 'strafe', 'retreat'])); this.cds.wave = rand(3.4, 5.2) * this.rageGap(); return; }
-          if (this.cds.dive <= 0 && d > 7 && chance(0.4)) { this.startDive(p); this.cds.dive = rand(4.5, 7); return; }
+        // you're getting away: it throws a blade wave after you or leaps on you with the dive bomb
+        if (this.escaping(p, d)) {
+          if (this.cds.wave <= 0 && d > 6) { this.startMove(!this.onGround || chance(0.3) ? 'waveAir' : 'wave', null); this.cds.wave = rand(2.2, 3.4) * this.rageGap(); return; }
+          if (this.cds.dive <= 0 && d > 8 && chance(0.5)) { this.startDive(p); this.cds.dive = rand(6, 9); return; }
+        }
+        // otherwise it comes for you: long chains that cover the ground in boosts from far off, short ones near
+        if (this.cds.chain <= 0 && d < 34) {
+          this.startChain(pick(d > 12 ? ['blitz', 'longZigzag', 'sweep', 'zigzag3'] : rage > 0.5 ? ['zigzag', 'zigzag3', 'flank', 'feint', 'flank'] : ['zigzag', 'flank', 'feint', 'straight']));
+          this.cds.chain = rand(2.4, 3.6) * this.rageGap();
+          return;
         }
       }
       return;
@@ -515,6 +502,12 @@ class Rival extends Enemy {
     if (this.cds.gun <= 0 && this.blindT <= 0 && d < 30) { this.startGun(); return; }
     // nothing ready: it moves to another vantage now and then
     if (this.cds.zip <= 0 && this.startZip(p)) return;
+  }
+  // you're trying to get away: running off from it, or kept out at range for a while
+  escaping(p, d) {
+    if (d < 8) return false;
+    const ux = (p.pos.x - this.pos.x) / d, uz = (p.pos.z - this.pos.z) / d;
+    return p.vel.x * ux + p.vel.z * uz > 4.5 || this.farT > 0.8;
   }
   clearShot(from) {
     const c = Game.player.chest(), dx = c.x - from.x, dy = c.y - from.y, dz = c.z - from.z, d = Math.hypot(dx, dy, dz) || 1;
@@ -648,7 +641,7 @@ class Rival extends Enemy {
     this.faceYaw = this.yawTo(q);
     Sound.play('jump', {}, this.pos);
     FX.dust(this.pos, 8, { smax: 4.5 });
-    FX.ring({ x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z }, 0.3, 2.2, 0.25, { c: this.phase === 2 ? '#ff6a7a' : '#4a8aff' });
+    FX.ring({ x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z }, 0.3, 2.2, 0.25, { c: '#4a8aff' });
   }
   // A thruster dash along a flat direction: it skims at dash speed for dist metres. o.cut makes it a sword dash.
   dashTo(m, dist, o = {}) {
@@ -658,8 +651,8 @@ class Rival extends Enemy {
     this.lunge = null;
     Sound.play('dash', {}, this.center());
     const back = this.local(0, 1.9, -0.45);
-    FX.sparks(back, 8, { x: -m.x, y: -0.3, z: -m.z }, 0.6, 7.3, 16, this.phase === 2 ? AEGIS_RED : AEGIS_SPARK);
-    FX.ring({ x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z }, 0.3, 1.8, 0.2, { c: this.phase === 2 ? '#ff6a7a' : '#4a8aff' });
+    FX.sparks(back, 8, { x: -m.x, y: -0.3, z: -m.z }, 0.6, 7.3, 16, AEGIS_SPARK);
+    FX.ring({ x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z }, 0.3, 1.8, 0.2, { c: '#4a8aff' });
     if (this.onGround) FX.dust(this.pos, 4, { smax: 3.6 });
   }
   // open floor along m from here, up to L metres
@@ -756,8 +749,10 @@ class Rival extends Enemy {
     const wasGround = this.onGround, vy0 = v.y;
     World.moveBody(this, dt, { step: this.dash || this.onGround ? 1.0 : 0 });
     if (this.onGround && !wasGround && vy0 < -14 && !this.leap) this.landingBurst(0.25);
-    // it never stands inside you: it gives way round you (a dash or a cut passes through)
-    if (!this.dash && !p.dead && p.pos.y < this.pos.y + this.h && p.pos.y + p.h > this.pos.y) {
+    // it never stands inside you: it gives way round you. Your dashes and drawn cuts pass straight through it
+    // (and so does its own dash or cut through you), so it holds its ground while you go by.
+    const passing = p.dashT > 0 || p.dashEndT > 0 || !!p.iaido;
+    if (!this.dash && !passing && !p.dead && p.pos.y < this.pos.y + this.h && p.pos.y + p.h > this.pos.y) {
       const dx = this.pos.x - p.pos.x, dz = this.pos.z - p.pos.z, d = Math.hypot(dx, dz), R = this.r + p.r + 0.05;
       if (d < R) {
         const ux = d > 1e-3 ? dx / d : -fwdX(this.yaw), uz = d > 1e-3 ? dz / d : -fwdZ(this.yaw);
@@ -795,7 +790,7 @@ class Rival extends Enemy {
   landingBurst(k) {
     const g = { x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z };
     FX.dust(g, Math.round(14 * k + 3), { smax: 3 + 6 * k });
-    FX.ring(g, 0.3, 1.5 + 3 * k, 0.3, { c: this.phase === 2 ? '#ff6a7a' : '#4a8aff' });
+    FX.ring(g, 0.3, 1.5 + 3 * k, 0.3, { c: '#4a8aff' });
     if (k > 0.5) { FX.decal('crack', g, { len: 3.2 }); FX.debris(g, 10, GRIT, 12); Sound.play('slam', {}, g); }
     Sound.play('land', {}, g);
     Game.shake(0.1 + 0.3 * k);
@@ -813,7 +808,7 @@ class Rival extends Enemy {
     this.bladeWant = this.phase === 2 || pat.some((l) => l[0] === 'cut' || RIVAL_MOVES[l[0]]);
     Sound.play('enemyWindup', { pm: 0.7 }, this.center());
     const back = this.local(0, 1.9, -0.5);
-    FX.sparks(back, 6, { x: -fwdX(this.yaw), y: -0.6, z: -fwdZ(this.yaw) }, 0.6, 4.5, 9, this.phase === 2 ? AEGIS_RED : AEGIS_SPARK);
+    FX.sparks(back, 6, { x: -fwdX(this.yaw), y: -0.6, z: -fwdZ(this.yaw) }, 0.6, 4.5, 9, AEGIS_SPARK);
   }
   // the beat between legs: short, longer before the cut so its glint reads
   legPause(a) {
@@ -828,9 +823,10 @@ class Rival extends Enemy {
     this.face(p.pos, 12, dt);
     const next = a.legs[a.i + 1];
     if (!next) { this.act = { kind: 'recover', t: 0, dur: 0.35 }; return; }
-    if (next[0] === 'cut' && !a.glinted && a.pt >= a.pdur - GLINT_LEAD) {
+    // the cut glints in the beat before it (not before a boost in to get within reach of it)
+    if (next[0] === 'cut' && !a.glinted && a.pt >= a.pdur - GLINT_LEAD && distXZ(p.pos, this.pos) <= 9) {
       a.glinted = true;
-      FX.glint(this.bladeTip(), { c: this.phase === 2 ? '#ff9aaa' : '#9cc4ff', size: 1.3, follow: () => this.bladeTip(), threat: this });
+      FX.glint(this.bladeTip(), { c: '#9cc4ff', size: 1.3, follow: () => this.bladeTip(), threat: this });
       Sound.play('glint', {}, this.center());
     }
     if (a.pt < a.pdur) return;
@@ -853,8 +849,16 @@ class Rival extends Enemy {
     }
     let m, L;
     const len = this.phase === 2 ? AEGIS_DASH.LEN2 : AEGIS_DASH.LEN1;
+    if (kind === 'cut' && d > 9) {
+      // too far off for the cut to reach: one more boost in first
+      a.i--;
+      const Lf = Math.min(d - 4, 8, this.legRoom(u, 8));
+      if (Lf >= 0.8) { this.dashTo(u, Lf); return; }
+      a.i++;
+    }
     if (kind === 'side') {
-      m = turnFlat(u, a.side * next[1], next[2]); L = len;
+      // longer legs from far off, so a long chain covers the ground
+      m = turnFlat(u, a.side * next[1], next[2]); L = len * (d > 12 ? 1.5 : 1);
       // a wall that way mirrors the leg
       if (this.legRoom(m, L) < 2.2) { const m2 = turnFlat(u, -a.side * next[1], next[2]); if (this.legRoom(m2, L) > this.legRoom(m, L)) { m = m2; a.side = -a.side; } }
     } else if (kind === 'fwd') { m = u; L = clamp(d - 3.6, 1.2, 7); }
@@ -866,7 +870,7 @@ class Rival extends Enemy {
       const yaw = yawOf(m.x, m.z), dir = (this.lastDir = -this.lastDir);
       const pa = clamp(Math.atan2(p.chest().y - this.chest().y, Math.max(1, d)), -0.5, 0.5);
       this.attack = { yaw, tilt: 0.15, span: 2.8, dir, t: 0, sweep: L / AEGIS_DASH.V, r: 2.6, pa };
-      FX.swoosh({ follow: this, oy: 1.85, x: this.pos.x, y: this.pos.y + 1.85, z: this.pos.z, yaw, tilt: 0.15, pitch: pa, r: 2.6, span: 2.8, dir, sweep: L / AEGIS_DASH.V, dur: L / AEGIS_DASH.V + 0.16, thick: 0.45, pal: 'blue', trail: 0.95, bolts: 3, boltPal: this.phase === 2 ? 'rage' : null });
+      FX.swoosh({ follow: this, oy: 1.85, x: this.pos.x, y: this.pos.y + 1.85, z: this.pos.z, yaw, tilt: 0.15, pitch: pa, r: 2.6, span: 2.8, dir, sweep: L / AEGIS_DASH.V, dur: L / AEGIS_DASH.V + 0.16, thick: 0.45, pal: 'blue', trail: 0.95, bolts: 3 });
       Sound.play('swing', { stage: 3 }, this.center());
     }
     L = Math.min(L, this.legRoom(m, L));
@@ -895,7 +899,17 @@ class Rival extends Enemy {
     const m = a.m, c = this.chest();
     if (m.zone && !a.resolved) this.blockPassage(p);
     if (a.phase === 'wind') {
-      const wind = this.tele(m.wind);
+      const wind = this.windOf(m);
+      // the red flash gathers: red energy streams in from all round it into the blade
+      if (m.zone) {
+        const c = this.chest(), k = clamp(a.t / Math.max(0.05, wind - CUE_LEAD), 0, 1);
+        for (let i = 0; i < 3; i++) {
+          const u = coneDir(null, TAU), R = lerp(3.6, 1.8, k), q = { x: c.x + u.x * R, y: c.y + u.y * R * 0.8, z: c.z + u.z * R };
+          FX.sparks(q, 1, { x: -u.x, y: -u.y, z: -u.z }, 0.05, R * 3, R * 3.6, { c0: '#ffffff', c1: '#ff4a5a', c2: '#781e2a', g: 0, life: 0.8 });
+        }
+        if (Math.random() < 0.25 + 0.4 * k) { const u = coneDir(null, TAU), R = lerp(3.2, 1.6, k); FX.bolt({ x: c.x + u.x * R, y: c.y + u.y * R, z: c.z + u.z * R }, this.bladeTip(), 0.07, { outer: PERIL_RED, core: '#ffffff', jag: 0.35, w: 0.05 }); }
+        if (Math.random() < 0.5) Game.shake(0.04 + 0.08 * k);
+      }
       // it tracks you through most of the wind-up; the red flash tracks you until its eye flashes, then locks
       if (m.zone ? !a.glinted : a.t < wind * 0.75) this.face(p.pos, m.close ? 14 : 6, dt);
       else this.faceYaw = this.yaw;
@@ -904,7 +918,7 @@ class Rival extends Enemy {
       if (!a.glinted && a.t >= Math.max(0, wind - (m.close ? CUE_LEAD : GLINT_LEAD))) {
         a.glinted = true;
         if (m.close) this.eyeGlint(m.unparryable ? PERIL_RED : '#ffd070', 2.2);
-        else FX.glint(this.bladeTip(), { c: this.phase === 2 ? '#ff9aaa' : '#9cc4ff', size: 1.25, follow: () => this.bladeTip(), threat: this });
+        else FX.glint(this.bladeTip(), { c: '#9cc4ff', size: 1.25, follow: () => this.bladeTip(), threat: this });
         Sound.play('glint', {}, this.center());
       }
       if (a.t >= wind) this.beginSwing(a, m, p);
@@ -933,7 +947,7 @@ class Rival extends Enemy {
         FX.dust(at, 12, { smax: 7 });
         FX.debris(at, 10, GRIT, 14);
         FX.decal('crack', at, { len: 3.4 });
-        FX.ring({ x: at.x, y: at.y + 0.06, z: at.z }, 0.3, 3.2, 0.3, { c: this.phase === 2 ? '#ff6a7a' : '#4a8aff' });
+        FX.ring({ x: at.x, y: at.y + 0.06, z: at.z }, 0.3, 3.2, 0.3, { c: '#4a8aff' });
         Game.shake(0.25);
         Sound.play('slam', {}, at);
       }
@@ -978,22 +992,30 @@ class Rival extends Enemy {
     }
     if (!m.thrust) {
       FX.swoosh({ follow: this, oy: 1.85, x: c.x, y: c.y, z: c.z, yaw: this.yaw, tilt: m.tilt, pitch: pa, r: m.r, span: m.span, dir: W.dir, sweep: m.swing * 0.6, dur: m.swing + 0.12, thick: m.r > 3 ? 0.45 : 0.38,
-        pal: m.unparryable ? 'red' : a.move === 'riposte' ? 'gold' : 'blue', trail: 0.95, bolts: m.r > 3 || m.spin ? 4 : 3, boltPal: m.unparryable || a.move === 'riposte' ? null : this.phase === 2 ? 'rage' : null });
+        pal: m.unparryable ? 'red' : a.move === 'riposte' ? 'gold' : 'blue', trail: 0.95, bolts: m.r > 3 || m.spin ? 4 : 3, boltPal: null });
     } else {
       const end = { x: c.x + f.x * m.r, y: c.y, z: c.z + f.z * m.r };
       FX.slashLine(c, end, { w: 0.3, dur: 0.25, pal: 'blue' });
-      FX.bolt(c, end, 0.22, { outer: this.phase === 2 ? '#ff2a3a' : '#2f6bff', core: '#ffffff', jag: 0.25, w: 0.08, forks: 2 });
+      FX.bolt(c, end, 0.22, { outer: '#2f6bff', core: '#ffffff', jag: 0.25, w: 0.08, forks: 2 });
     }
     Sound.play('swing', { stage: m.r > 3 || m.spin ? 3 : 1 }, c);
   }
   // A wide crescent of energy thrown off the swing along the ground at where you stand; the air version flies
   // at head height.
+  // A crescent of energy thrown off the swing, tilted 45 degrees one way or the other, at where you'll be when it
+  // gets there (it leads your run); the air version flies at head height.
   fireWave(m) {
-    const p = Game.player, c = this.chest(), u = flat(p.pos.x - this.pos.x, p.pos.z - this.pos.z);
-    const base = m.air ? Math.max(this.pos.y, p.pos.y) + 1.9 : this.pos.y + 0.7;
+    const p = Game.player, c = this.chest(), V = BLADE_WAVE.SPEED * Math.sqrt(S.enemies.speed);
+    let tx = p.pos.x, tz = p.pos.z;
+    for (let i = 0; i < 2; i++) {
+      const t = Math.min(0.9, distXZ({ x: tx, z: tz }, this.pos) / V);
+      tx = p.pos.x + p.vel.x * t; tz = p.pos.z + p.vel.z * t;
+    }
+    const u = flat(tx - this.pos.x, tz - this.pos.z);
+    const base = m.air ? Math.max(this.pos.y, p.pos.y) + 1.9 : this.pos.y + 1.0;
     const at = { x: this.pos.x + u.x * 1.2, y: base, z: this.pos.z + u.z * 1.2 };
-    Game.projectiles.push(new BladeWave(at, u, 12 * this.dmgMul, this, !!m.air));
-    FX.light(at, this.phase === 2 ? '#ff4a5a' : '#4a8aff', 5, 8, 0.2);
+    Game.projectiles.push(new BladeWave(at, u, 12 * this.dmgMul, this, !!m.air, (chance(0.5) ? 1 : -1) * BLADE_WAVE.TILT));
+    FX.light(at, '#4a8aff', 5, 8, 0.2);
     Sound.play('heavySwing', {}, c);
   }
   // its body is a wall through the red flash: only a dash carries you past it to its back
@@ -1068,12 +1090,12 @@ class Rival extends Enemy {
       const charge = this.tele(DIVE.CHARGE), k = clamp(a.t / charge, 0, 1);
       if ((a.pulse -= dt) <= 0) {
         a.pulse = lerp(0.2, 0.07, k);
-        FX.ring({ x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, 3 - k, 0.5, 0.2, { c: '#ff6a7a' });
-        FX.light({ x: this.pos.x, y: this.pos.y + 0.6, z: this.pos.z }, '#ff4a5a', 2 + 4 * k, 5 + 5 * k, a.pulse + 0.05);
-        if (k > 0.4) FX.bolt(this.local(rand(-0.5, 0.5), rand(0.6, 2.2), 0), this.local(rand(-1.4, 1.4), rand(0.2, 2.6), rand(-1, 1)), 0.08, { outer: '#ff2a3a', core: '#ffffff', jag: 0.2, w: 0.05 });
+        FX.ring({ x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, 3 - k, 0.5, 0.2, { c: '#4a8aff' });
+        FX.light({ x: this.pos.x, y: this.pos.y + 0.6, z: this.pos.z }, '#4a8aff', 2 + 4 * k, 5 + 5 * k, a.pulse + 0.05);
+        if (k > 0.4) FX.bolt(this.local(rand(-0.5, 0.5), rand(0.6, 2.2), 0), this.local(rand(-1.4, 1.4), rand(0.2, 2.6), rand(-1, 1)), 0.08, { outer: '#2f6bff', core: '#ffffff', jag: 0.2, w: 0.05 });
         for (let i = 0; i < 3; i++) {
           const ang = rand(0, TAU), R = rand(1.4, 2.4), q = { x: this.pos.x + Math.cos(ang) * R, y: this.pos.y + rand(0.2, 2.6), z: this.pos.z + Math.sin(ang) * R };
-          FX.sparks(q, 1, { x: -Math.cos(ang), y: 0.2, z: -Math.sin(ang) }, 0.2, 4, 7, Object.assign({ g: 0 }, AEGIS_RED));
+          FX.sparks(q, 1, { x: -Math.cos(ang), y: 0.2, z: -Math.sin(ang) }, 0.2, 4, 7, Object.assign({ g: 0 }, AEGIS_SPARK));
         }
         Game.shake(0.03 + 0.08 * k);
       }
@@ -1085,10 +1107,10 @@ class Rival extends Enemy {
         if (room) a.top = Math.min(a.top, this.pos.y + Math.max(2.5, room.t - 0.3));
         this.vel.y = Math.sqrt(2 * AEGIS_G * Math.max(1, a.top - this.pos.y)); this.onGround = false;
         const g = { x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z };
-        FX.ring(g, 0.4, 4.2, 0.3, { c: '#ff6a7a' });
+        FX.ring(g, 0.4, 4.2, 0.3, { c: '#4a8aff' });
         FX.dust(g, 18, { smax: 9, rise: 1.2 });
         FX.decal('crack', g, { len: 3 });
-        FX.light({ x: g.x, y: g.y + 1, z: g.z }, '#ff6a3a', 5, 10, 0.3);
+        FX.light({ x: g.x, y: g.y + 1, z: g.z }, '#4a8aff', 5, 10, 0.3);
         Sound.play('jump', {}, this.pos); Sound.play('dash', {}, this.pos);
         Game.shake(0.3);
       }
@@ -1099,7 +1121,7 @@ class Rival extends Enemy {
       // drifts over toward a point short of the mark
       const dx = a.tx - this.pos.x, dz = a.tz - this.pos.z, dd = Math.hypot(dx, dz) || 1, k = Math.max(0, dd - 3) / dd;
       this.vel.x = approach(this.vel.x, clamp(dx * k * 2.2, -20, 20), 50 * dt); this.vel.z = approach(this.vel.z, clamp(dz * k * 2.2, -20, 20), 50 * dt);
-      if (Math.random() < 0.7) FX.sparks(this.local(0, 1.4, -0.4), 1, { x: 0, y: -1, z: 0 }, 0.3, 6, 12, AEGIS_RED);
+      if (Math.random() < 0.7) FX.sparks(this.local(0, 1.4, -0.4), 1, { x: 0, y: -1, z: 0 }, 0.3, 6, 12, AEGIS_SPARK);
       if (this.vel.y <= 1 || a.t > 1.3) { a.phase = 'hang'; a.t = 0; }
       return;
     }
@@ -1112,10 +1134,10 @@ class Rival extends Enemy {
         this.diveFlash = 0.14;
         const c = this.chest();
         FX.glint(c, { c: '#ffffff', size: 3.2, dur: 0.3, follow: () => this.chest(), threat: this });
-        this.eyeGlint('#ff9aaa', 2.4);
-        FX.light(c, '#ff8a9a', 7, 22, 0.35);
+        this.eyeGlint('#9cc4ff', 2.4);
+        FX.light(c, '#9cc4ff', 7, 22, 0.35);
         FX.ring(c, 0.4, 3.4, 0.25, { c: '#ffffff', flat: false });
-        FX.sparks(c, 18, null, TAU, 6, 16, AEGIS_RED);
+        FX.sparks(c, 18, null, TAU, 6, 16, AEGIS_SPARK);
         Sound.play('glint', {}, c);
       }
       if (a.t >= lockT + this.tele(DIVE.FLASH)) {
@@ -1126,8 +1148,8 @@ class Rival extends Enemy {
         a.v = { x: (dx / L) * DIVE.SPEED, y: (dy / L) * DIVE.SPEED, z: (dz / L) * DIVE.SPEED };
         a.dir = { x: dx / L, y: dy / L, z: dz / L };
         const c = this.chest();
-        FX.slashLine(c, { x: tx, y: ty + 0.5, z: tz }, { w: 0.4, dur: 0.4, pal: 'red' });
-        FX.swoosh({ follow: this, oy: 1.85, x: c.x, y: c.y, z: c.z, yaw: yawOf(dx, dz), tilt: 1.3, pitch: Math.asin(clamp(dy / L, -1, 1)) * 0.5, r: 2.8, span: 2.4, dir: -1, sweep: 0.15, dur: 0.35, thick: 0.45, pal: 'blue', trail: 0.95, bolts: 3, boltPal: 'rage' });
+        FX.slashLine(c, { x: tx, y: ty + 0.5, z: tz }, { w: 0.4, dur: 0.4, pal: 'blue' });
+        FX.swoosh({ follow: this, oy: 1.85, x: c.x, y: c.y, z: c.z, yaw: yawOf(dx, dz), tilt: 1.3, pitch: Math.asin(clamp(dy / L, -1, 1)) * 0.5, r: 2.8, span: 2.4, dir: -1, sweep: 0.15, dur: 0.35, thick: 0.45, pal: 'blue', trail: 0.95, bolts: 3, boltPal: null });
         Sound.play('dash', {}, c); Sound.play('swing', { stage: 3 }, c);
       }
       return;
@@ -1152,14 +1174,14 @@ class Rival extends Enemy {
     if (!this.onGround) return;
     const g = { x: this.pos.x, y: this.pos.y, z: this.pos.z }, up = { x: g.x, y: g.y + 0.06, z: g.z };
     Game.hazards.push(new GroundWave(g, 22 * S.enemies.speed, 12 * this.dmgMul, this));
-    FX.ring(up, 0.4, 7.5, 0.4, { c: '#ff6a7a' });
+    FX.ring(up, 0.4, 7.5, 0.4, { c: '#4a8aff' });
     FX.ring(up, 0.3, 4.2, 0.3, { c: '#ffffff' });
-    FX.ring({ x: g.x, y: g.y + 1.2, z: g.z }, 0.5, 3.6, 0.3, { c: '#ff3a4a', flat: false });
+    FX.ring({ x: g.x, y: g.y + 1.2, z: g.z }, 0.5, 3.6, 0.3, { c: '#2f6bff', flat: false });
     FX.dust(g, 28, { smax: 13, rise: 1.4 });
     FX.debris(g, 22, GRIT, 22);
     FX.decal('crack', g, { len: 6.5 });
-    FX.sparks({ x: g.x, y: g.y + 0.4, z: g.z }, 24, { x: 0, y: 1, z: 0 }, 1.4, 8, 22, AEGIS_RED);
-    FX.light({ x: g.x, y: g.y + 0.8, z: g.z }, '#ff4a5a', 8, 16, 0.4);
+    FX.sparks({ x: g.x, y: g.y + 0.4, z: g.z }, 24, { x: 0, y: 1, z: 0 }, 1.4, 8, 22, AEGIS_SPARK);
+    FX.light({ x: g.x, y: g.y + 0.8, z: g.z }, '#4a8aff', 8, 16, 0.4);
     Game.shake(0.75); Game.hitstop(0.05);
     Sound.play('slam', {}, g); Sound.play('land', {}, g);
   }
@@ -1257,28 +1279,54 @@ class Rival extends Enemy {
   }
 
   // ---------- phase 1: gun, beam, grenade ----------
+  // The forearm machine gun: its barrels spin up, a fan of tracer light opens over the area it will spray,
+  // then a burst of GUN.SHOTS bolts that follows a pattern round you rather than a straight line at you:
+  //   sweep: across you from one side to the other; walk: in from the street in front of you and up onto you;
+  //   scatter: a wide cone of loose fire.
   startGun() {
-    this.act = { kind: 'gun', t: 0, shots: 0, next: 0, aimDir: { x: this.aimDir.x, y: this.aimDir.y, z: this.aimDir.z } };
+    const pattern = pick(['sweep', 'sweep', 'walk', 'scatter']);
+    this.act = { kind: 'gun', t: 0, shots: 0, next: 0, aimDir: { x: this.aimDir.x, y: this.aimDir.y, z: this.aimDir.z }, pattern, side: chance(0.5) ? 1 : -1, spin: 0 };
     this.bladeWant = false;
-    Sound.play('enemyWindup', { pm: 0.9 }, this.center());
+    Sound.play('gunSpin', { dur: this.tele(GUN.WIND) }, this.muzzle());
+  }
+  // where in its pattern shot i of the burst goes, as yaw and pitch offsets (radians) from the aim at you
+  gunOffset(a, i) {
+    const k = i / Math.max(1, GUN.SHOTS - 1);
+    if (a.pattern === 'sweep') return { yaw: a.side * lerp(-GUN.SWEEP, GUN.SWEEP, k) + rand(-0.03, 0.03), pitch: rand(-0.04, 0.04) + Math.sin(k * 9) * 0.02 };
+    if (a.pattern === 'walk') return { yaw: rand(-0.06, 0.06) + Math.sin(k * 7) * 0.05 * a.side, pitch: lerp(-GUN.WALK, 0.03, Math.min(1, k * 1.4)) };
+    return { yaw: rand(-GUN.SCATTER, GUN.SCATTER), pitch: rand(-0.08, 0.1) };
+  }
+  // the extent of the pattern, for the fan the views draw: [yaw0, yaw1, pitch0, pitch1]
+  gunFan(a) {
+    if (a.pattern === 'sweep') return [-GUN.SWEEP, GUN.SWEEP, -0.05, 0.05];
+    if (a.pattern === 'walk') return [-0.1, 0.1, -GUN.WALK, 0.04];
+    return [-GUN.SCATTER, GUN.SCATTER, -0.08, 0.1];
   }
   runGun(dt, a, p) {
-    const tele = this.tele(0.45), want = this.aimFrom(this.shoulderR(), p.chest());
-    if (a.t < tele) a.aimDir = want;
-    else {
+    const tele = this.tele(GUN.WIND), want = this.aimFrom(this.shoulderR(), p.chest());
+    a.spin = Math.min(1, a.t / tele);
+    if (a.t < tele) {
+      a.aimDir = want;
+      // the barrels spinning up: sparks flung round the muzzle, faster as it nears
+      if (Math.random() < 0.3 + 0.6 * a.spin) {
+        const m = this.muzzle(), ang = rand(0, TAU), f = a.aimDir, rx = -f.z, rz = f.x, rl = Math.hypot(rx, rz) || 1;
+        const t = { x: (rx / rl) * Math.cos(ang), y: Math.sin(ang), z: (rz / rl) * Math.cos(ang) };
+        FX.sparks(m, 1, t, 0.3, 3 + 6 * a.spin, 6 + 8 * a.spin, Object.assign({ g: 0, life: 0.5 }, AEGIS_SPARK));
+      }
+    } else {
       a.aimDir = turnDir(a.aimDir, want, 2.4 * dt);
       a.next -= dt;
-      if (a.next <= 0 && a.shots < 8) {
-        a.next = 0.09; a.shots++;
-        const m = this.muzzle(), s = 0.035, d = a.aimDir;
-        const dir = { x: d.x + rand(-s, s), y: d.y + rand(-s, s), z: d.z + rand(-s, s) }, l = Math.hypot(dir.x, dir.y, dir.z);
-        dir.x /= l; dir.y /= l; dir.z /= l;
+      if (a.next <= 0 && a.shots < GUN.SHOTS) {
+        a.next = GUN.GAP; a.shots++;
+        const m = this.muzzle(), o = this.gunOffset(a, a.shots - 1), d = a.aimDir;
+        const yaw = yawOf(d.x, d.z) + o.yaw, pitch = clamp(Math.asin(clamp(d.y, -1, 1)) + o.pitch, -1.2, 1.2);
+        const dir = { x: fwdX(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: fwdZ(yaw) * Math.cos(pitch) };
         Game.projectiles.push(new Bolt({ x: m.x + dir.x * 0.3, y: m.y + dir.y * 0.3, z: m.z + dir.z * 0.3 }, dir, 26 * S.enemies.speed, this.def.dmg * this.dmgMul, AEGIS_BOLT));
         Sound.play('bossGun', {}, m);
         FX.sparks(m, 3, dir, 0.5, 5.5, 14.5, AEGIS_SPARK);
         FX.light(m, '#4a8aff', 2.5, 4, 0.06);
       }
-      if (a.shots >= 8 && a.next <= -0.15) { this.act = null; this.cds.gun = rand(2.2, 3.4); }
+      if (a.shots >= GUN.SHOTS && a.next <= -0.15) { this.act = null; this.cds.gun = rand(2.4, 3.6); }
     }
     this.aimDir = a.aimDir;
     this.faceYaw = yawOf(a.aimDir.x, a.aimDir.z) + 0.25; this.turnRate = 10;
@@ -1303,16 +1351,28 @@ class Rival extends Enemy {
     const o = this.lensPos(), want = this.aimFrom(o, p.center());
     if (a.phase === 'rise') {
       this.faceYaw = this.yawTo(p.pos) - 0.4;
-      if (Math.abs(this.pos.y - this.hoverY) < 0.3 || a.t > 0.7) { a.phase = 'charge'; a.t = 0; a.dir = want; Sound.play('beamCharge', {}, o); }
+      if (Math.abs(this.pos.y - this.hoverY) < 0.3 || a.t > 0.7) { a.phase = 'charge'; a.t = 0; a.dir = want; Sound.play('laserCharge', { dur: this.tele(0.85) }, o); }
       return;
     }
     if (a.phase === 'charge') {
       a.dir = want;
       this.faceYaw = yawOf(want.x, want.z) - 0.4;
-      if (Math.random() < 0.6) FX.elec(o, 0.6, 1, { outer: '#2f6bff', core: '#ffffff' });
-      if (Math.random() < 0.5) FX.sparks(o, 1, { x: -want.x, y: -want.y, z: -want.z }, 1.5, 1.8, 4, Object.assign({ g: 0 }, AEGIS_SPARK));
+      // energy drawn into the lens from all round it, faster and closer as the charge builds
+      const k = clamp(a.t / this.tele(0.85), 0, 1);
+      for (let i = 0; i < 2 + Math.round(k * 3); i++) {
+        const u = coneDir(null, TAU), R = lerp(2.8, 1.2, k), q = { x: o.x + u.x * R, y: o.y + u.y * R, z: o.z + u.z * R };
+        FX.sparks(q, 1, { x: -u.x, y: -u.y, z: -u.z }, 0.05, R * 3.2, R * 3.8, Object.assign({ g: 0, life: 0.8 }, AEGIS_SPARK));
+      }
+      if (Math.random() < 0.4 + 0.5 * k) FX.elec(o, 0.5 + 0.5 * k, 1, { outer: '#2f6bff', core: '#ffffff' });
+      if (Math.random() < 0.15 + 0.3 * k) { const u = coneDir(null, TAU); FX.bolt({ x: o.x + u.x * 2, y: o.y + u.y * 2, z: o.z + u.z * 2 }, o, 0.06, { outer: '#2f6bff', core: '#ffffff', jag: 0.3, w: 0.04 }); }
+      Game.shake(0.01 + 0.03 * k);
       this.beam = { o, dir: a.dir, len: 0, firing: false, k: a.t / this.tele(0.85) };
-      if (a.t >= this.tele(0.85)) { a.phase = 'fire'; a.t = 0; }
+      if (a.t >= this.tele(0.85)) {
+        a.phase = 'fire'; a.t = 0;
+        FX.ring(o, 0.2, 2.6, 0.25, { c: '#9cc4ff', flat: false });
+        FX.light(o, '#c8dcff', 6, 12, 0.25);
+        Game.shake(0.15);
+      }
       return;
     }
     // firing: the beam has angular momentum, so it is slow to change direction
@@ -1385,10 +1445,8 @@ class Rival extends Enemy {
     if (quick) {
       // straight into the blade phase: duel retries skip the cutscene
       this.act = null; this.transT = 0.3; this.cds.combo = 1.2;
-      FX.ring(this.center(), 0.4, 5.5, 0.4, { c: '#ff6a7a', flat: false });
+      FX.ring(this.center(), 0.4, 5.5, 0.4, { c: '#4a8aff', flat: false });
       Sound.play('bossRoar', {}, this.center());
-      Game.announce('MELEE DUEL', null, '#ff6a7a', 2.2);
-      this.startStorm();
       return;
     }
     const hadShield = this.shield, p = Game.player;
@@ -1401,13 +1459,13 @@ class Rival extends Enemy {
       FX.sparks(b.pos, 6, null, TAU, 3.6, 12.7, AEGIS_SPARK);
     }
     const c = this.center();
-    FX.ring(c, 0.5, 13.6, 0.55, { c: '#ff6a7a', flat: false });
+    FX.ring(c, 0.5, 13.6, 0.55, { c: '#4a8aff', flat: false });
     FX.ring(c, 0.4, 9, 0.45, { c: '#4a8aff', flat: false });
-    FX.ring({ x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, 0.5, 11.8, 0.5, { c: '#ff6a7a' });
+    FX.ring({ x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, 0.5, 11.8, 0.5, { c: '#4a8aff' });
     if (hadShield) FX.sparks(c, 40, null, TAU, 11, 33, AEGIS_SPARK);
-    FX.sparks(c, 30, null, TAU, 7.3, 27, AEGIS_RED);
+    FX.sparks(c, 30, null, TAU, 7.3, 27, AEGIS_SPARK);
     FX.dust(this.pos, 24, { smax: 18, rise: 1 });
-    FX.light(c, '#ff6a7a', 8, 20, 0.5);
+    FX.light(c, '#4a8aff', 8, 20, 0.5);
     FX.flash('#ffffff', 0.45);
     Sound.play('bossShieldBreak', {}, c);
     Sound.play('shockwave', { power: 1 }, c);
@@ -1425,14 +1483,14 @@ class Rival extends Enemy {
     else if (ct < 1.75) {
       a.stage = 'charge';
       if (once('rise')) { this.hoverY = this.pos.y + 2.2; Sound.play('enrageCharge', {}, c); }
-      if (Math.random() < 0.7) FX.elec(c, 1.1 + (ct - 0.55) * 1.4, 1, { outer: '#ff6a7a', core: '#ffffff' });
-      if (Math.random() < 0.5) FX.sparks(this.local(rand(-0.7, 0.7), 0.3, rand(-0.5, 0.5)), 1, { x: 0, y: 1, z: 0 }, 0.6, 3.6, 12.7, Object.assign({ g: -11 }, AEGIS_RED));
+      if (Math.random() < 0.7) FX.elec(c, 1.1 + (ct - 0.55) * 1.4, 1, { outer: '#4a8aff', core: '#ffffff' });
+      if (Math.random() < 0.5) FX.sparks(this.local(rand(-0.7, 0.7), 0.3, rand(-0.5, 0.5)), 1, { x: 0, y: 1, z: 0 }, 0.6, 3.6, 12.7, Object.assign({ g: -11 }, AEGIS_SPARK));
       [0.8, 1.05, 1.3].forEach((tt, i) => { if (ct >= tt && once('pop' + i)) this.limiterPop(i); });
     } else if (ct < 2.85) {
       a.stage = 'roar';
       if (once('roar')) this.roar();
-      if (Math.random() < 0.8) FX.sparks(c, 2, null, TAU, 7.3, 23.6, AEGIS_RED);
-      if (Math.random() < 0.35) { const d = coneDir(null, TAU); FX.bolt(c, { x: c.x + d.x * 3.6, y: c.y + d.y * 3.6, z: c.z + d.z * 3.6 }, 0.08, { outer: '#ff3a52', core: '#ffffff', jag: 0.55, forks: 2 }); }
+      if (Math.random() < 0.8) FX.sparks(c, 2, null, TAU, 7.3, 23.6, AEGIS_SPARK);
+      if (Math.random() < 0.35) { const d = coneDir(null, TAU); FX.bolt(c, { x: c.x + d.x * 3.6, y: c.y + d.y * 3.6, z: c.z + d.z * 3.6 }, 0.08, { outer: '#2f6bff', core: '#ffffff', jag: 0.55, forks: 2 }); }
       Game.shake(0.012);
     } else {
       a.stage = 'land';
@@ -1442,7 +1500,7 @@ class Rival extends Enemy {
         FX.dust(g, 18, { smax: 13.6, rise: 0.6 });
         FX.debris(g, 12, GRIT, 16);
         FX.decal('crack', g, { len: 4.4, dur: 8 });
-        FX.ring(g, 0.4, 6.4, 0.4, { c: '#ff6a7a' });
+        FX.ring(g, 0.4, 6.4, 0.4, { c: '#4a8aff' });
         Sound.play('slam', {}, g); Sound.play('thud', {}, g);
         Game.shake(0.45);
       }
@@ -1454,21 +1512,21 @@ class Rival extends Enemy {
     const spots = [[-0.2, 2.1, 0.32], [0.2, 2.1, 0.32], [0, 2.3, 0.2]], [x, y, f] = spots[i % 3];
     const q = this.local(x, y, f);
     FX.debris(q, 6, ['#d29a3c', '#e8ecf2', '#3a3c46'], 20);
-    FX.sparks(q, 14, null, TAU, 7.3, 23.6, AEGIS_RED);
-    FX.ring(q, 0.2, 1.3, 0.2, { c: '#ff6a7a', flat: false });
+    FX.sparks(q, 14, null, TAU, 7.3, 23.6, AEGIS_SPARK);
+    FX.ring(q, 0.2, 1.3, 0.2, { c: '#4a8aff', flat: false });
     Sound.play('limiterPop', {}, q);
     Game.shake(0.15);
   }
   roar() {
     const C = Game.cine;
-    if (C && C.owner === this) { C.zoom = 2; C.caption = { text: 'LIMITERS OFF', color: '#ff6a7a', sub: 'NO SHIELD, NO GUNS. BLADE ONLY.' }; }
+    if (C && C.owner === this) C.zoom = 2;
     const c = this.chest();
     FX.flash('#ffffff', 0.6);
-    FX.ring(c, 0.4, 11, 0.6, { c: '#ff6a7a', flat: false });
-    FX.ring(c, 0.2, 6.4, 0.45, { c: '#ff3a52', flat: false });
-    FX.sparks(c, 50, null, TAU, 9, 31, AEGIS_RED);
-    FX.elec(c, 3.6, 14, { outer: '#ff3a52', core: '#ffffff' });
-    FX.light(c, '#ff3048', 9, 18, 0.9);
+    FX.ring(c, 0.4, 11, 0.6, { c: '#4a8aff', flat: false });
+    FX.ring(c, 0.2, 6.4, 0.45, { c: '#2f6bff', flat: false });
+    FX.sparks(c, 50, null, TAU, 9, 31, AEGIS_SPARK);
+    FX.elec(c, 3.6, 14, { outer: '#2f6bff', core: '#ffffff' });
+    FX.light(c, '#4a8aff', 9, 18, 0.9);
     Sound.play('enrageRoar', {}, c);
     Sound.play('bossRoar', {}, c);
     Game.shake(0.7);
@@ -1478,35 +1536,7 @@ class Rival extends Enemy {
     Game.closeCine();
     // a breather before the first combo
     this.act = null; this.transT = 0.3; this.cds.combo = 1.2; this.hoverY = null;
-    Game.announce(this.duel ? 'MELEE DUEL' : 'PHASE 2', null, '#ff6a7a', 2.2);
-    this.startStorm();
   }
-  // the blade phase opens with the street erupting: columns burst out of the ground and hold for a few seconds
-  startStorm() { this.storm = { t: 0, dur: 12, next: 0.3, n: 0 }; }
-  updateStorm(dt) {
-    const st = this.storm;
-    st.t += dt; st.next -= dt;
-    if (st.t >= st.dur) { this.storm = null; return; }
-    if (st.next > 0) return;
-    // a pair to open, then one at a time, never more than four standing
-    for (let i = st.n === 0 ? 2 : 1; i > 0; i--, st.n++) this.spawnEruption();
-    st.next = rand(2.0, 3.2);
-  }
-  spawnEruption() {
-    const p = Game.player, cols = Game.hazards.filter((h) => h.kind === 'eruption' && !h.dead);
-    if (cols.length >= 4) return;
-    const g = World.groundAt(p.pos.x, p.pos.z, p.pos.y + 0.3), base = g === -Infinity ? p.pos.y : g;
-    for (let tries = 0; tries < 12; tries++) {
-      // area denial round you, never within 5.5 m
-      const a = rand(0, TAU), r = rand(5.5, 14), x = p.pos.x + Math.cos(a) * r, z = p.pos.z + Math.sin(a) * r;
-      const y = World.groundAt(x, z, base + 0.6);
-      if (y === -Infinity || Math.abs(y - base) > 0.8 || cols.some((h) => distXZ(h.pos, { x, z }) < 4)) continue;
-      if (!World.boxFree(x, y + 0.05, z, 0.5, 1.5)) continue;
-      Game.hazards.push(new GroundEruption({ x, y, z }, 12 * this.dmgMul));
-      return;
-    }
-  }
-
   // ---------- entry ----------
   // From here it fights. quick: the short beam drop (duel retries); otherwise the cutscene showed the title.
   arrive(quick) {
@@ -1609,7 +1639,7 @@ class Rival extends Enemy {
     if (this.dying) return;
     this.dying = true; this.hp = 0; this.koT = 0;
     this.act = null; this.attack = null; this.windArc = null; this.beam = null; this.hoverY = null; this.dash = null; this.lunge = null; this.leap = null;
-    this.stunT = 0; this.flinchT = 0; this.guardT = 0; this.storm = null;
+    this.stunT = 0; this.flinchT = 0; this.guardT = 0;
     this.stopLoops();
     if (Game.btOwner === this) Game.endBulletTime();
     this.ko = { stage: 'impact', done: {}, rot: 0 };
@@ -1617,7 +1647,6 @@ class Rival extends Enemy {
     this.yaw = this.faceYaw = this.yawTo(p.pos);
     this.vel.x = u.x * 12; this.vel.z = u.z * 12; this.vel.y = 10; this.onGround = false;
     for (const b of Game.projectiles) if (!b.dead && (b.hostile || b.owner === this)) b.dead = true;
-    for (const h of Game.hazards) if (h.kind === 'eruption') h.dead = true;
     const c = this.chest(), dir = o.dir || { x: u.x, y: 0.3, z: u.z };
     // keep the close-up clean: no damage numbers over the knockout
     FX.texts = FX.texts.filter((q) => Math.hypot(q.x - this.pos.x, q.z - this.pos.z) > 5);
@@ -1673,7 +1702,7 @@ class Rival extends Enemy {
         Game.shake(0.35);
       }
       if (ct >= 3.65 && once('big')) {
-        if (own) { C.big = { text: 'KNOCKOUT', color: '#ffd070', sub: this.name + ' IS DOWN' }; C.bigT = 0; }
+        if (own) { C.big = { text: 'KNOCKOUT', color: '#ffd070' }; C.bigT = 0; }
         Sound.play('ko');
         FX.flash('#fff4d0', 0.35);
         Game.shake(0.3);
@@ -1708,7 +1737,6 @@ class Rival extends Enemy {
     SaveData.unlocks.aegis = true;
     SaveData.bossKills++;
     saveProgress();
-    Game.announce('AEGIS-07 DEFEATED', 'A RIVAL FRAME FOR YOUR ROSTER, ONCE THE ROSTER IS BUILT', '#ffd070', 3);
   }
 
   // ---------- the cutscene camera ----------
@@ -1745,26 +1773,41 @@ class Rival extends Enemy {
 // the air). Jump it, slide under the high one, or dash through it; a parry breaks it (it is never sent back) and a
 // slash passes through.
 class BladeWave {
-  constructor(pos, dir, dmg, owner, air) {
+  // roll: its tilt about its line of flight (radians, positive raises its right end)
+  constructor(pos, dir, dmg, owner, air, roll = 0) {
     this.kind = 'bladewave';
-    this.pos = { x: pos.x, y: pos.y, z: pos.z }; this.dir = { x: dir.x, z: dir.z };
-    this.speed = 24 * Math.sqrt(S.enemies.speed); this.dmg = dmg; this.owner = owner; this.air = air;
+    this.pos = { x: pos.x, y: pos.y, z: pos.z }; this.dir = { x: dir.x, z: dir.z }; this.roll = roll;
+    this.speed = BLADE_WAVE.SPEED * Math.sqrt(S.enemies.speed); this.dmg = dmg; this.owner = owner; this.air = air;
     // half its width across its path (wide, so jumping, dashing through or parrying stay the answers rather than
     // a step to the side), and half its height
     this.W = 4.5; this.H = air ? 0.55 : 0.65;
     this.hostile = true; this.life = 1.4; this.dead = false; this.parryOnly = true; this.t = 0;
     this.vel = { x: this.dir.x * this.speed, y: 0, z: this.dir.z * this.speed };
   }
+  // a point on its band: u metres along it from the middle, v across it
+  pointOn(u, v) {
+    const c = Math.cos(this.roll), s = Math.sin(this.roll), side = u * c - v * s, up = u * s + v * c;
+    return { x: this.pos.x - this.dir.z * side, y: this.pos.y + up, z: this.pos.z + this.dir.x * side };
+  }
+  // whether its band, tilted by roll, crosses a body side metres to the side of its middle
+  crosses(side, P) {
+    const c = Math.cos(this.roll), s = Math.sin(this.roll);
+    for (const k of [0.05, 0.35, 0.65, 0.95]) {
+      const h = P.pos.y + P.h * k - this.pos.y, u = side * c + h * s, v = -side * s + h * c;
+      if (Math.abs(u) < this.W + P.r * 0.5 && Math.abs(v) < this.H + P.r * 0.5) return true;
+    }
+    return false;
+  }
   // a parry breaks it on the blade; it can't be sent back
   reflect() {
     const P = Game.player, c = P.chest();
-    FX.sparks(c, 16, { x: -this.dir.x, y: 0.3, z: -this.dir.z }, 1.6, 6.4, 20, this.owner && this.owner.phase === 2 ? AEGIS_RED : AEGIS_SPARK);
+    FX.sparks(c, 16, { x: -this.dir.x, y: 0.3, z: -this.dir.z }, 1.6, 6.4, 20, AEGIS_SPARK);
     this.fizzle();
   }
   fizzle() {
     this.dead = true;
     for (let i = 0; i < 8; i++) {
-      const s = rand(-this.W, this.W), q = { x: this.pos.x - this.dir.z * s, y: this.pos.y + rand(-this.H, this.H), z: this.pos.z + this.dir.x * s };
+      const q = this.pointOn(rand(-this.W, this.W), rand(-this.H, this.H));
       FX.sparks(q, 1, null, TAU, 2.7, 11, AEGIS_SPARK);
     }
   }
@@ -1779,54 +1822,12 @@ class BladeWave {
       const P = Game.player;
       if (P.dead) continue;
       const rx = P.pos.x - this.pos.x, rz = P.pos.z - this.pos.z, along = rx * d.x + rz * d.z, side = rx * px + rz * pz;
-      if (Math.abs(along) < 0.45 + P.r && Math.abs(side) < this.W + P.r * 0.5 && P.pos.y < this.pos.y + this.H && P.pos.y + P.h > this.pos.y - this.H) {
+      if (Math.abs(along) < 0.45 + P.r && this.crosses(side, P)) {
         const r = P.takeHit({ dmg: this.dmg, from: { x: this.pos.x - d.x, y: this.pos.y, z: this.pos.z - d.z }, kind: 'projectile', proj: this, knock: 18 });
         if (r === 'hit' || r === 'immune' || r === 'parried') { if (!this.dead) this.fizzle(); return; }
       }
     }
-    if (Math.random() < 0.6) {
-      const s = rand(-this.W, this.W);
-      FX.sparks({ x: this.pos.x - d.z * s, y: this.pos.y + rand(-this.H, this.H), z: this.pos.z + d.x * s }, 1, { x: -d.x, y: 0, z: -d.z }, 0.4, 1.8, 5.5, Object.assign({ g: 0 }, AEGIS_SPARK));
-    }
-  }
-}
-
-// A patch of street cracks and glows, then erupts in a column of energy that holds for a few seconds. It runs
-// from the street to the sky, so rooftops are no refuge.
-class GroundEruption {
-  constructor(pos, dmg) {
-    this.kind = 'eruption';
-    this.pos = { x: pos.x, y: pos.y, z: pos.z }; this.dmg = dmg; this.R = 1.0;
-    this.t = 0; this.warn = 0.8; this.hold = 2.6; this.fade = 0.3; this.dead = false; this.up = false;
-    FX.decal('crack', pos, { len: 2.2 });
-    if (distXZ(pos, Game.player.pos) < 29) Sound.play('eruptWarn', { dur: this.warn }, pos);
-  }
-  update(dt) {
-    this.t += dt;
-    if (this.t >= this.warn + this.hold + this.fade) { this.dead = true; return; }
-    const g = this.pos;
-    if (this.t < this.warn) {
-      if (Math.random() < 0.5) FX.sparks({ x: g.x + rand(-0.5, 0.5), y: g.y + 0.05, z: g.z + rand(-0.5, 0.5) }, 1, { x: 0, y: 1, z: 0 }, 0.4, 2.7, 8, Object.assign({ g: -5.5 }, AEGIS_RED));
-      return;
-    }
-    if (!this.up) this.erupt();
-    if (this.t >= this.warn + this.hold) return;
-    if (Math.random() < 0.4) FX.sparks({ x: g.x + rand(-0.4, 0.4), y: g.y + rand(0, 12), z: g.z + rand(-0.4, 0.4) }, 1, { x: 0, y: 1, z: 0 }, 0.6, 3.6, 12.7, Object.assign({ g: -7 }, AEGIS_RED));
-    const P = Game.player;
-    if (!P.dead && P.pos.y >= g.y - 0.5 && distXZ(P.pos, g) < this.R + P.r) {
-      const u = flat(P.pos.x - g.x, P.pos.z - g.z);
-      P.takeHit({ dmg: this.dmg, from: { x: g.x - u.x, y: P.pos.y + 1, z: g.z - u.z }, kind: 'hazard', knock: 20, unparryable: true });
-    }
-  }
-  erupt() {
-    this.up = true;
-    const g = this.pos, near = distXZ(g, Game.player.pos) < 29;
-    FX.ring({ x: g.x, y: g.y + 0.06, z: g.z }, 0.3, 2.7, 0.35, { c: '#ff6a7a' });
-    FX.sparks({ x: g.x, y: g.y + 0.2, z: g.z }, 18, { x: 0, y: 1, z: 0 }, 1.2, 7.3, 29, AEGIS_RED);
-    FX.dust(g, 8, { smax: 7.3 });
-    FX.debris(g, 6, GRIT, 18);
-    FX.light({ x: g.x, y: g.y + 2.7, z: g.z }, '#ff4a5a', 6, 8, 0.3);
-    if (near) { Sound.play('eruptBeam', {}, g); Game.shake(0.15); }
+    if (Math.random() < 0.6) FX.sparks(this.pointOn(rand(-this.W, this.W), rand(-this.H, this.H)), 1, { x: -d.x, y: 0, z: -d.z }, 0.4, 1.8, 5.5, Object.assign({ g: 0 }, AEGIS_SPARK));
   }
 }
 

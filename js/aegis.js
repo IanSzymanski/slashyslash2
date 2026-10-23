@@ -3,12 +3,12 @@
 // blue patches, dark joints and gold fittings. A T-shaped visor and a square chest core glow electric blue,
 // as do its knees, shins and boots. Big pauldrons; a beam cannon on the left shoulder; a thruster pack with
 // two round jets on its back; and on the right forearm a long housing that is its gun barrel and its blade
-// emitter at once. After the enrage its glows run red and the wiring under its popped limiters shows.
+// emitter at once. After the enrage its guns go dark and the wiring under its popped limiters glows blue.
 // AegisPose turns the rival's state (rival.js) into bone rotations, with IK for the arms and legs.
 
 const AEGIS_COL = {
   W: '#d6d9df', M: '#a3a8b2', D: '#33353e', K: '#1b1c22', G: '#c08a34',
-  glow: '#2f6bff', hi: '#9cc4ff', red: '#ff2a3a', off: '#22262f', wire: '#34262c',
+  glow: '#2f6bff', hi: '#9cc4ff', off: '#22262f', wire: '#2a2c36',
 };
 const AEGIS_SCALE = 1.3;
 // the humanoid skeleton with broader shoulders and hips, the thruster pack on its back and the cannon's mount

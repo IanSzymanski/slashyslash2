@@ -506,7 +506,7 @@ function hurtEnemy(e, dmg, o = {}) {
   // the rival's own parries and the phase change, and its evasive boosts
   if (e.intercept && e.intercept(o)) return 0;
   if (e.dodging && e.dodging()) {
-    if (!e._missT || Game.time > e._missT) { e._missT = Game.time + 0.4; FX.text('DODGE', { x: e.pos.x, y: e.pos.y + e.h + 0.6, z: e.pos.z }, { c: '#7aa8ff', always: true, dur: 0.5, vy: 1.8 }); }
+    if (!e._missT || Game.time > e._missT) { e._missT = Game.time + 0.4; FX.sparks(e.center(), 5, null, TAU, 3.6, 9, { c0: '#ffffff', c1: '#7aa8ff', c2: '#1a3a8a' }); }
     return 0;
   }
   let d = dmg * (e.damageTakenMul ? e.damageTakenMul() : 1) * (Game.has('glass') ? 1.35 : 1);
@@ -601,7 +601,7 @@ class Pickup {
   }
   collect(p) {
     this.dead = true;
-    if (this.kind === 'hp') { p.heal(15); FX.text('+15', { x: p.pos.x, y: p.pos.y + 2.5, z: p.pos.z }, { c: '#7dff8a', always: true }); }
+    if (this.kind === 'hp') { p.heal(15); FX.text('+15', { x: p.pos.x, y: p.pos.y + 2.5, z: p.pos.z }, { c: '#7dff8a' }); }
     Sound.play('pickup');
     FX.sparks(this.pos, 8, null, TAU, 3.6, 10.9, { c0: '#ffffff', c1: '#7dff8a', c2: '#1a7a3a' });
   }
