@@ -5,7 +5,7 @@
 
 const PC = Object.assign({}, MOVE, {
   HEIGHT: MOVE.H, RADIUS: MOVE.R, CHEST: 1.15,
-  TETHER_RANGE: 21, TETHER_COST: 15, TETHER_SPEED: 104.5, ZIP_SPEED: 43.6, ZIP_ACCEL: 254.5, FLING: 38.2,
+  TETHER_RANGE: 21, ANCHOR_RANGE: 42, TETHER_COST: 15, TETHER_SPEED: 104.5, ZIP_SPEED: 43.6, ZIP_ACCEL: 254.5, FLING: 38.2,
   // the tether snaps to an enemy, barrel or grenade this close to the crosshair's line
   TETHER_ASSIST: (4 * Math.PI) / 180,
   MAX_HP: 100, MAX_SHIELD: 100, SHIELD_DELAY: 3.0, SHIELD_RATE: 38,
@@ -18,8 +18,8 @@ const PC = Object.assign({}, MOVE, {
   PARRY_SPAM_DECAY: 0.6,
   // below this much shield, a hit that breaks it carries its leftover damage
   SHIELD_OVERFLOW_AT: 25,
-  // holding attack this long turns the press into a heavy; shorter presses are lights
-  HEAVY_HOLD: 0.15,
+  // holding attack this long turns the press into a heavy (a plunge in the air); shorter presses are lights
+  HEAVY_HOLD: 0.15, PLUNGE_HOLD: 0.2,
   // the body turns to the aim while attacking or parrying, and for this long after
   FACE_AIM: 0.6,
   // melee aim assist: a swing turns onto the nearest enemy within this cone of the aim, out to reach times ASSIST_REACH
@@ -44,7 +44,8 @@ const HEAVIES = {
 const IAIDO = {
   dash: { len: 7.45, path: 1.27, dmg: 26, arcR: 4.18, span: 3.0, lineW: 0.22, delayed: false, empowered: false, chain: false, post: 0.16, flash: 0.08, shake: 0.18 },
   dashHeavy: { len: 10.9, path: 1.5, dmg: 42, arcR: 5.27, span: 3.6, lineW: 0.36, delayed: true, empowered: false, chain: false, post: 0.22, flash: 0.14, shake: 0.32, heavy: true },
-  counter: { len: 15, path: 2.0, dmg: 135, arcR: 10.45, span: 4.4, lineW: 0.5, delayed: true, empowered: true, chain: true, post: 0.32, flash: 0.35, shake: 0.6 },
+  // the parry counter: you stay put and the cut explodes out from you (still)
+  counter: { len: 15, path: 2.0, dmg: 135, arcR: 10.45, span: 4.4, lineW: 0.8, delayed: true, empowered: true, chain: true, post: 0.32, flash: 0.35, shake: 0.7, still: true },
 };
 
 class Player {
@@ -66,6 +67,8 @@ class Player {
     this.loops = {};
     // animation: run cycle phase, double-jump flip, landing squash, time spent at rest
     this.runPhase = 0; this.spinT = 0; this.spinDur = 0.32; this.landSquash = 0; this.idleT = 0; this.blinkT = 0;
+    // body lean from acceleration (forward, and toward the inside of a turn), and the landing roll
+    this.accF = 0; this.accL = 0; this.bank = 0; this.tilt = 0; this.rollT = 0; this.rollDur = 0.4;
     this.charId = 'ronin'; this.utilCD = 0; this.utilT = 0; this.utilFlash = 0;
     this.plunge = null; this.kickAnim = null; this.ghostT = 0; this.bulletT = 0;
     this.onMove = (ev, d) => this.moveEvent(ev, d);
@@ -78,9 +81,10 @@ class Player {
   stopLoop(k) { if (this.loops[k]) { this.loops[k].stop(); this.loops[k] = null; } }
   stopAllLoops() { for (const k in this.loops) this.stopLoop(k); }
   // where the line leaves the right hand (the model's hand is close to this)
+  // the free (left) hand, where the tether leaves from; the sword is in the right
   hand() {
     const c = this.chest(), Y = this.yaw;
-    return { x: c.x + Math.cos(Y) * 0.3 + fwdX(Y) * 0.25, y: c.y + 0.1, z: c.z - Math.sin(Y) * 0.3 + fwdZ(Y) * 0.25 };
+    return { x: c.x - Math.cos(Y) * 0.3 + fwdX(Y) * 0.25, y: c.y + 0.1, z: c.z + Math.sin(Y) * 0.3 + fwdZ(Y) * 0.25 };
   }
 
   // Movement intent from the keys, relative to where the camera faces.
@@ -111,7 +115,7 @@ class Player {
     this.animT += dt;
     this.updateAim();
     const dec = (k) => { if (this[k] > 0) this[k] = Math.max(0, this[k] - dt); };
-    for (const k of ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT', 'utilT', 'utilFlash', 'bulletT']) dec(k);
+    for (const k of ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT', 'utilT', 'utilFlash', 'bulletT', 'rollT']) dec(k);
     Controller.timers(this, dt);
     for (const m of this.hitMarks) m.t -= dt;
     this.hitMarks = this.hitMarks.filter((m) => m.t > 0);
@@ -137,7 +141,7 @@ class Player {
     this.updateDashBuffer(dt, I);
     this.updateTetherInput();
     this.updateTether(dt);
-    if (Input.wasPressed('attack')) this.onAttackPressed(I.crouch);
+    if (Input.wasPressed('attack')) this.onAttackPressed();
     this.updateAttackInput(dt);
     if (Input.wasPressed('utility')) this.tryUtility();
     Controller.buffer(this, I);
@@ -154,29 +158,38 @@ class Player {
     this.gravK = gk;
     this.canJump = !this.sheathe;
     this.canSlide = !this.attack && !this.sheathe;
+    this.canCling = !this.attack && !this.sheathe && !this.plunge && !this.tether && !this.iaido && !this.atkPend;
+    // anything that takes over the body lets go of a wall
+    if (this.cling && (this.attack || this.sheathe || this.plunge || this.tether || this.iaido || this.dashT > 0 || this.hurtT > 0)) Controller.dropCling(this);
 
     const reeled = this.rebounding() || this.zipping();
-    if (this.dashT > 0) Controller.moveDash(this, dt);
+    this.dashRechargeExtra = Game.has('emberWake') ? 0.25 : 0;
+    if (this.dashT > 0) { Controller.moveDash(this, dt); if (Game.has('emberWake') && this.dashHits) this.emberWake(); }
     else if (this.iaido) this.moveIaido(dt);
     else if (this.rebounding()) this.moveRebound(dt);
     else if (this.zipping()) this.moveZip(dt);
     else if (this.plunge) this.movePlunge(dt, I);
-    else if (!this.mantle) Controller.moveNormal(this, dt, I);
+    else if (!this.mantle && !this.vault) Controller.moveNormal(this, dt, I);
+    // a fling at the crane tops out over it, then drops straight onto the beam
+    if (this.flingTop && this.vel.y <= 0) { this.flingTop = false; this.vel.x *= 0.1; this.vel.z *= 0.1; this.noDragT = 0; }
+    if (this.onGround) this.flingTop = false;
+    const vx0 = this.vel.x, vz0 = this.vel.z;
     const col = Controller.integrate(this, dt, reeled ? null : I, { mantle: !this.attack && !this.iaido && !this.sheathe && !this.plunge && !reeled, step: this.plunge ? 0 : undefined });
+    this.updateLean(dt, vx0, vz0);
     if (this.iaido && col.wall) this.iaido.t = this.iaido.dur;
-    // a zip to a wall or a ledge ends when the body meets the surface near the anchor
-    if (this.zipping() && this.tether.kind === 'world' && (col.wall || col.ceil || col.ground) && dist3(this.tether.pos, this.chest()) < 2.4) this.arriveZip();
-    if (this.wallSliding) {
-      this.yaw = yawOf(this.wallN.x, this.wallN.z);
-      if (Math.random() < 0.2) FX.dust({ x: this.pos.x - this.wallN.x * 0.35, y: this.pos.y + 0.9, z: this.pos.z - this.wallN.z * 0.35 }, 1, { smax: 0.9 });
-    }
+    // a zip to a wall or a ledge ends when the body meets the surface near the anchor (the ground counts only
+    // for an anchor below the chest, so a zip at a low ledge carries on to its face and climbs it)
+    if (this.zipping() && (this.tether.kind === 'world' || this.tether.kind === 'anchor') && (col.wall || col.ceil || (col.ground && this.tether.pos.y < this.chest().y - 0.3)) && dist3(this.tether.pos, this.chest()) < 2.4) this.arriveZip();
+    if (this.cling) this.updateCling();
+    if (this.skid) this.updateSkid();
 
     this.updateAttack(dt);
     this.updateKick(dt);
     this.updateGhosts(dt);
     this.updateFacing(dt);
     const hs = Controller.hspeed(this);
-    if (this.onGround && hs > 1.4) this.runPhase += hs * dt * 1.155;
+    // strides lengthen as the sprint builds, so the cadence rises less than the speed
+    if (this.onGround && hs > 1.4) this.runPhase += hs * dt * (1.155 - 0.22 * this.sprintK);
     // a slide throws sparks back off the leading boot and a little grit, as in 2D
     if (this.sliding && hs > 0.5) {
       const p = this.pos, dx = this.vel.x / hs, dz = this.vel.z / hs;
@@ -197,13 +210,37 @@ class Player {
       this.vel.x = this.vel.y = this.vel.z = 0;
     }
   }
+  // How the body leans: forward with acceleration and speed, and into turns by the sideways acceleration
+  // (as a runner banks), smoothed so it never snaps.
+  updateLean(dt, vx0, vz0) {
+    const ax = (this.vel.x - vx0) / dt, az = (this.vel.z - vz0) / dt, Y = this.yaw;
+    const ground = this.onGround && !this.sliding && !this.vault && !this.mantle && this.dashT <= 0;
+    const af = ground ? ax * fwdX(Y) + az * fwdZ(Y) : 0, al = ground ? ax * -Math.cos(Y) + az * Math.sin(Y) : 0;
+    this.accF = damp(this.accF, clamp(af / 70, -1, 1), 10, dt);
+    this.accL = damp(this.accL, clamp(al / 90, -1, 1), 8, dt);
+    const k = clamp(Controller.hspeed(this) / PC.SPRINT, 0, 1);
+    // banked into turns; rolled onto its side over a vault (about the hips); leaning hard onto the hand in a
+    // skid turn; sagging off a wall; tipped along the aim when attacking in the air (about the chest)
+    let bank = ground ? this.accL * 0.3 * k : 0, tilt = ground && !this.attack ? -0.06 * k * k : 0, piv = this.onGround ? 0 : 1, rate = 10;
+    if (this.vault) { const u = Math.sin(clamp(this.vault.t / this.vault.dur, 0, 1) * Math.PI); bank = 1.05 * u; tilt = -0.2 * u; piv = 0.9; rate = 30; }
+    else if (this.skid) { bank = 0.7; tilt = 0; piv = 0; rate = 16; }
+    else if (this.cling) { bank = -0.12; tilt = 0; }
+    else if (this.attack && !this.onGround && !this.attack.groundCut) { tilt = (this.attack.pa || 0) * 0.85; piv = 1; rate = 18; }
+    this.bank = damp(this.bank, bank, rate, dt);
+    this.tilt = damp(this.tilt, tilt, rate === 10 ? 8 : rate, dt);
+    this.pivotY = damp(this.pivotY || 0, piv, 12, dt);
+  }
   // While attacking or parrying (and for FACE_AIM after) the body faces the aim; otherwise where it's going.
   updateFacing(dt) {
     const T = this.tether;
     if (this.attack || this.sheathe || this.atkPend || this.iaido || (T && (T.phase === 'fly' || T.mode === 'tow'))) this.aimHold = PC.FACE_AIM;
     let want = null;
-    if (this.kickAnim || this.wallSliding) return;
+    if (this.kickAnim || this.cling) return;
+    // first person: the body always faces the view, and the keys strafe
+    if (Camera.fp) { this.yaw = Camera.yaw; return; }
     if (this.iaido) want = yawOf(this.iaido.dir.x, this.iaido.dir.z);
+    // a skid turn spins round to face where the push-off goes
+    else if (this.skid) { this.yaw += angDiff(this.yaw, yawOf(this.skid.ux, this.skid.uz)) * Math.min(1, dt * 22); return; }
     else if (T && T.phase === 'attached' && (T.mode === 'zip' || T.mode === 'rebound')) want = yawOf(T.pos.x - this.pos.x, T.pos.z - this.pos.z);
     else if (this.attack) want = this.attack.yaw;
     else if (this.dashT > 0) want = yawOf(this.dashVX, this.dashVZ);
@@ -219,6 +256,7 @@ class Player {
       Sound.play('djump');
       FX.ring({ x: p.x, y: p.y + 0.05, z: p.z }, 0.2, 1.1, 0.22, { c: '#ff3a52' });
       FX.sparks(p, 6, { x: 0, y: -1, z: 0 }, 2.2, 3.6, 10.9);
+      FPFX.kick('jump');
     } else if (ev === 'slide') {
       Sound.play('slide');
       const hs = Controller.hspeed(this) || 1;
@@ -240,11 +278,16 @@ class Player {
       FX.ring({ x: p.x, y: p.y + 0.55, z: p.z }, 0.25, 1.6, 0.25, { flat: false });
       FX.sparks({ x: p.x, y: p.y + 0.35, z: p.z }, 10, { x: -d.x, y: -d.y, z: -d.z }, 1.3, 5.5, 18.2);
       Game.shake(0.08);
+      FPFX.kick('dash', { scale: 0.7, dir: d });
     } else if (ev === 'land') {
       this.spinT = 0; this.bulletT = 0;
       if (this.kickAnim && this.kickAnim.t > 0.1) this.kickAnim = null;
       if (this.plunge) { this.plungeImpact(); return; }
-      if (d.vy < -18.2) { this.landSquash = 0.12; Sound.play('land', { v: clamp(-d.vy / 36.4, 0.4, 1.2) }); FX.dust(p, 4 + ((-d.vy / 9) | 0), { smax: 3.6 }); }
+      const hs = Controller.hspeed(this);
+      // a hard landing at a run rolls through it instead of absorbing it
+      if (d.vy < -22 && hs > 7 && !this.attack && !this.sheathe && !Input.isDown('crouch')) {
+        this.rollT = this.rollDur; Sound.play('land', { v: 0.5 }); FX.dust(p, 6, { smax: 4.5 });
+      } else if (d.vy < -16) { this.landSquash = 0.12; Sound.play('land', { v: clamp(-d.vy / 32, 0.4, 1.2) }); FX.dust(p, 4 + ((-d.vy / 9) | 0), { smax: 3.6 }); }
       if (Input.isDown('crouch') && Controller.hspeed(this) > PC.SLIDE_MIN && !this.attack && !this.sheathe && !this.iaido) Controller.startSlide(this);
     } else if (ev === 'dash') {
       Sound.play('dash');
@@ -253,7 +296,76 @@ class Player {
       FX.sparks(c, 8, { x: -d.x, y: 0, z: -d.z }, 1.2, 5.5, 18);
       FX.light(c, '#ff3048', 3, 4, 0.15);
       Game.shake(0.06);
+      FPFX.kick('dash', { dir: d });
     } else if (ev === 'mantle') Sound.play('step');
+    else if (ev === 'vault') {
+      // a hand on the top, legs swept over to the side
+      Sound.play('step'); Sound.play('slide');
+      FX.dust(d.plant, 5, { smax: 2.7, rise: 0.5 });
+      FX.sparks(d.plant, 3, { x: 0, y: 1, z: 0 }, 1.6, 2, 6, { life: 0.5 });
+    } else if (ev === 'skidStart') {
+      // the free hand goes down and bites into the street
+      const h = this.skidHand();
+      this.skidMark = { a: { x: h.x, y: h.y, z: h.z }, d: FX.decal('gouge', h, { w: 0.2, len: 0.3, yaw: yawOf(d.dx, d.dz), dur: 4 }) };
+      this.skidFoot = { a: { x: p.x, y: p.y, z: p.z }, d: FX.decal('gouge', p, { w: 0.35, len: 0.3, yaw: yawOf(d.dx, d.dz), dur: 3 }) };
+      Sound.play('scrape', { len: 1.4 }); Sound.play('slide');
+      FX.sparks(h, 10, { x: -d.dx, y: 0.6, z: -d.dz }, 1.2, 4.5, 14, { life: 0.6 });
+      FX.dust(h, 6, { dir: { x: d.dx, y: 0.2, z: d.dz }, spread: 0.9, smax: 4.5 });
+      FX.light(h, '#ff9a3a', 2, 3, 0.25);
+      Game.shake(0.05);
+    } else if (ev === 'skidEnd') {
+      this.skidMark = null; this.skidFoot = null;
+      if (d.push) { Sound.play('step'); FX.dust(p, 5, { dir: { x: -d.x, y: 0.2, z: -d.z }, spread: 1, smax: 3.6 }); }
+    } else if (ev === 'cling') {
+      // fingers driven into the wall: chips and sparks off the hand
+      const h = this.clingHand(d.n);
+      this.clingMark = { a: { x: h.x, y: h.y, z: h.z }, d: null };
+      Sound.play('grab');
+      FX.sparks(h, 8, { x: d.n.x, y: 0.2, z: d.n.z }, 1.4, 3.6, 11, { life: 0.5 });
+      FX.debris(h, 4, GRIT, 5);
+      FX.dust(h, 3, { dir: { x: d.n.x, y: 0, z: d.n.z }, spread: 1, smax: 1.8 });
+    } else if (ev === 'clingSlide') {
+      const h = this.clingHand(d.n);
+      this.clingMark = { a: { x: h.x, y: h.y, z: h.z }, d: FX.decal('gouge', h, { wall: d.n, w: 0.16, len: 0.3, dur: 4 }) };
+      Sound.play('scrape', { len: 1.2 });
+    } else if (ev === 'clingEnd') this.clingMark = null;
+    else if (ev === 'skid') {
+      Sound.play('slide');
+      FX.dust(p, 6, { dir: { x: d.x, y: 0.2, z: d.z }, spread: 0.9, smax: 5.5 });
+      FX.sparks({ x: p.x, y: p.y + 0.05, z: p.z }, 4, { x: d.x, y: 0.3, z: d.z }, 0.8, 3.6, 9);
+    }
+  }
+
+  // where the free hand drags along the street in a skid turn: out to the left, a little toward the slide
+  skidHand() {
+    const S = this.skid, Y = S ? yawOf(S.ux, S.uz) : this.yaw, lx = -Math.cos(Y), lz = Math.sin(Y);
+    const dx = S ? S.dx : 0, dz = S ? S.dz : 0;
+    return { x: this.pos.x + lx * 0.5 + dx * 0.15, y: this.pos.y + 0.02, z: this.pos.z + lz * 0.5 + dz * 0.15 };
+  }
+  // where the left hand is dug into the wall: on its face, above the shoulder
+  clingHand(n) {
+    return { x: this.pos.x - n.x * (this.r + 0.01), y: this.pos.y + 1.72, z: this.pos.z - n.z * (this.r + 0.01) };
+  }
+  // A skid turn: sparks stream off the dragging hand, and it and the lead boot carve marks that cool and fade.
+  updateSkid() {
+    const S = this.skid, h = this.skidHand(), hs = Controller.hspeed(this);
+    if (Math.random() < 0.85) FX.sparks(h, 2, { x: -S.dx, y: 0.55, z: -S.dz }, 0.9, 3.6, 4 + hs, { life: 0.55 });
+    if (Math.random() < 0.35) FX.dust(h, 1, { smax: 2.3 });
+    if (Math.random() < 0.3) FX.debris(h, 1, GRIT, 5);
+    if (this.skidMark && this.skidMark.d) FX.stretchDecal(this.skidMark.d, this.skidMark.a, h);
+    if (this.skidFoot && this.skidFoot.d) FX.stretchDecal(this.skidFoot.d, this.skidFoot.a, this.pos);
+    if (Math.random() < 0.15) FX.light(h, '#ff9a3a', 1.5, 2.5, 0.08);
+  }
+  // A wall cling: side on to the wall, the left hand dug in. Sliding drags it down the wall in sparks.
+  updateCling() {
+    const C = this.cling, n = C.n, h = this.clingHand(n);
+    this.yaw = Math.atan2(-n.z, n.x);
+    if (C.sliding) {
+      const v = -this.vel.y;
+      if (Math.random() < 0.3 + v * 0.1) FX.sparks(h, 1, { x: n.x * 0.5, y: 0.8, z: n.z * 0.5 }, 1.2, 2.5, 4 + v, { life: 0.5 });
+      if (Math.random() < 0.2) FX.debris(h, 1, GRIT, 3);
+      if (this.clingMark && this.clingMark.d) FX.stretchDecal(this.clingMark.d, this.clingMark.a, h);
+    } else if (Math.random() < 0.05) FX.debris(h, 1, GRIT, 2);
   }
 
   // ---------- dash ----------
@@ -280,25 +392,36 @@ class Player {
     if (!Controller.tryDash(this, dx, dz)) return;
     this.iframes = Math.max(this.iframes, PC.DASH_IFRAMES);
     this.yaw = yawOf(dx, dz);
+    this.dashHits = new Set();
+  }
+  // Ember Wake: a dash cuts what it passes through
+  emberWake() {
+    const c = this.center();
+    for (const e of Game.enemies) {
+      if (e.dead || e.spawning || this.dashHits.has(e) || !bodiesTouch(this, e, 0.35)) continue;
+      this.dashHits.add(e);
+      const dl = Math.hypot(this.dashVX, this.dashVZ) || 1, ux = this.dashVX / dl, uz = this.dashVZ / dl;
+      hurtEnemy(e, 20, { kv: { x: ux * 7.3, y: 5.5, z: uz * 7.3 }, dir: { x: ux, y: 0.2, z: uz }, cause: 'dash', stagger: 0.3, hitstop: 0.02 });
+      FX.sparks(e.center(), 8, { x: ux, y: 0.2, z: uz }, 1, 5.5, 18.2, { c0: '#ffffff', c1: '#ffb040', c2: '#ff3048' });
+    }
+    if (Math.random() < 0.7) FX.embers(c, 1);
   }
 
   // ---------- melee ----------
-  // A tap is a light, a hold (PC.HEAVY_HOLD) is a heavy. Dash attacks lock their context at the press.
-  // Attack in the air with crouch held plunges straight down.
-  onAttackPressed(down) {
-    if (this.sheathe || this.iaido || this.ultHold > 0) return;
-    const dashing = this.dashT > 0 || this.dashEndT > 0;
-    if (!dashing && !this.onGround && down && !this.plunge && !this.mantle) { this.atkPend = null; this.startPlunge(); return; }
-    if (this.plunge) return;
-    this.atkPend = { t: 0, dash: dashing };
+  // A tap is a light, a hold (PC.HEAVY_HOLD) is a heavy; in the air a hold (PC.PLUNGE_HOLD) plunges
+  // straight down instead. Dash attacks lock their context at the press.
+  onAttackPressed() {
+    if (this.sheathe || this.iaido || this.ultHold > 0 || this.plunge) return;
+    this.atkPend = { t: 0, dash: this.dashT > 0 || this.dashEndT > 0 };
   }
   updateAttackInput(dt) {
     const P = this.atkPend;
     if (!P) return;
     P.t += dt;
-    const held = Input.isDown('attack');
-    if (held && P.t < PC.HEAVY_HOLD) return;
+    const held = Input.isDown('attack'), air = !this.onGround && !P.dash && !this.mantle && !this.vault;
+    if (held && P.t < (air ? PC.PLUNGE_HOLD : PC.HEAVY_HOLD)) return;
     this.atkPend = null;
+    if (held && air && !this.plunge && !this.iaido && !this.sheathe) { this.startPlunge(); return; }
     this.resolveAttack(held ? 'H' : 'L', P.dash);
   }
   resolveAttack(kind, dash) {
@@ -334,18 +457,29 @@ class Player {
     this.strN = n; this.strLights = kind === 'L' ? lights + 1 : 0;
     if (this.attack.finisher) { this.strN = 0; this.strLights = 0; }
   }
-  // Melee aim assist: the nearest enemy within the cone of the aim and reach times ASSIST_REACH.
+  // Melee aim assist: the nearest enemy within reach times ASSIST_REACH that's either roughly level and
+  // inside the cone of the aim's heading, or inside the cone around the aim itself (above or below you).
   assistTarget(reach) {
-    const c = this.chest();
+    const c = this.chest(), A = this.aimDir, R = reach * PC.ASSIST_REACH;
     let best = null, bd = Infinity;
     for (const e of Game.enemies) {
       if (e.dead || e.spawning) continue;
-      const dx = e.pos.x - c.x, dz = e.pos.z - c.z, d = Math.hypot(dx, dz) - e.r;
-      if (d > reach * PC.ASSIST_REACH || Math.abs(e.pos.y + e.h / 2 - c.y) > 3) continue;
-      if (d > 0.4 && Math.abs(angDiff(this.aimYaw, yawOf(dx, dz))) > PC.ASSIST_CONE) continue;
-      if (d < bd) { bd = d; best = e; }
+      const ec = e.center(), dx = ec.x - c.x, dy = ec.y - c.y, dz = ec.z - c.z;
+      const dh = Math.hypot(dx, dz) - e.r, l3 = Math.hypot(dx, dy, dz) || 1, d3 = l3 - e.r;
+      const level = dh <= R && Math.abs(dy) <= 3 && (dh <= 0.4 || Math.abs(angDiff(this.aimYaw, yawOf(dx, dz))) <= PC.ASSIST_CONE);
+      const aimed = d3 <= R && Math.acos(clamp((A.x * dx + A.y * dy + A.z * dz) / l3, -1, 1)) <= PC.ASSIST_CONE;
+      if ((level || aimed) && d3 < bd) { bd = d3; best = e; }
     }
     return best;
+  }
+  // How far a swing tips up or down from level (radians): straight at an assisted target, otherwise along the
+  // aim with a little dead zone so ordinary play stays level. Downward cuts are shallower standing.
+  swingPitch(target) {
+    const c = this.chest();
+    let pa;
+    if (target) { const tc = target.center(); pa = Math.atan2(tc.y - c.y, Math.max(0.3, distXZ(tc, c))); }
+    else { const a = Math.asin(clamp(this.aimDir.y, -1, 1)); pa = sign(a) * Math.max(0, Math.abs(a) - 0.2) * 1.3; }
+    return clamp(pa, this.onGround ? -0.75 : -1.3, 1.3);
   }
   startSwing(type, cont) {
     const heavy = type !== 'L' && type !== 'L3';
@@ -359,8 +493,8 @@ class Player {
     if (type === 'L' || type === 'crescent') dir = cont ? -this.lastDir : 1;
     else if (type === 'slam') dir = -1;
     this.lastDir = dir;
-    const tilt = d.tilt === Math.PI / 2 ? d.tilt : -d.tilt * dir;
-    this.attack = Object.assign({ type, heavy, finisher: type === 'L3', stage: type === 'L3' ? 3 : 1, wind: 0, t: 0, yaw, dir, pitch: this.aimDir.y, target, hit: new Set(), swept: false }, d, { tilt });
+    const tilt = d.tilt === Math.PI / 2 ? d.tilt : -d.tilt * dir, pa = this.swingPitch(target);
+    this.attack = Object.assign({ type, heavy, finisher: type === 'L3', stage: type === 'L3' ? 3 : 1, wind: 0, t: 0, yaw, dir, pa, pitch: Math.sin(pa), target, hit: new Set(), swept: false }, d, { tilt });
     this.attackQueued = null; this.postPose = 0;
     if (!heavy) this.beginSweep(this.attack);
     else if (type === 'rise' && !this.onGround) this.vel.y = Math.max(this.vel.y, 5.5);
@@ -369,11 +503,13 @@ class Player {
   beginSweep(a) {
     a.swept = true;
     FX.swoosh({
-      follow: this, oy: this.chestH(), yaw: a.yaw, tilt: a.tilt, r: a.r, span: a.span, dir: a.dir,
+      follow: this, oy: this.chestH(), yaw: a.yaw, tilt: a.tilt, pitch: a.pa || 0, r: a.r, span: a.span, dir: a.dir,
       sweep: a.sweep, dur: a.sweep + a.fade, thick: a.heavy ? 0.5 : 0.35, pal: 'red', trail: a.heavy ? 1 : a.stage === 3 ? 0.95 : 0.85,
+      bolts: a.heavy || a.stage === 3 ? 3 : 2,
     });
     Sound.play('swing', { stage: a.stage === 3 || a.heavy ? 3 : 1 });
     if (a.heavy) Sound.play('heavySwing');
+    FPFX.kick(a.heavy ? 'heavy' : a.stage === 3 ? 'finisher' : 'attack', { side: a.dir || 1 });
     const fx = fwdX(a.yaw), fz = fwdZ(a.yaw);
     // with an assisted target, close the gap to it rather than overshoot (ground friction stops a lunge in ~v^2/300 m)
     const gap = a.target ? distXZ(a.target.pos, this.pos) - a.target.r - this.r - a.r * 0.5 : Infinity;
@@ -392,14 +528,25 @@ class Player {
     const c = this.chest();
     FX.light({ x: c.x + fx * a.r * 0.6, y: c.y, z: c.z + fz * a.r * 0.6 }, '#ff2040', 3.5, a.r * (a.heavy ? 2 : 1.6), a.sweep + a.fade);
   }
-  // A sector in front of the chest within reach, inside a vertical band around the aimed height.
+  // The swing's frame: F forward along its pitch, R level to the right, U out of the swing's plane.
+  swingFrame(a) {
+    const pa = a.pa || 0, cp = Math.cos(pa), sp = Math.sin(pa), fx = fwdX(a.yaw), fz = fwdZ(a.yaw);
+    return { F: [fx * cp, sp, fz * cp], R: [Math.cos(a.yaw), 0, -Math.sin(a.yaw)], U: [-fx * sp, cp, -fz * sp] };
+  }
+  // Whether a point offset (vx, vy, vz) from the chest lies in a swing: within reach in the swing's plane,
+  // inside its arc, and within the band either side of the plane. r: the thing's radius.
+  inArc(a, W, reach, vx, vy, vz, r) {
+    const f = vx * W.F[0] + vy * W.F[1] + vz * W.F[2], s = vx * W.R[0] + vz * W.R[2], u = vx * W.U[0] + vy * W.U[1] + vz * W.U[2];
+    const d = Math.hypot(f, s);
+    if (d - r > reach || Math.abs(u) > a.band + r * 0.5) return false;
+    return d < r + 0.4 || Math.abs(Math.atan2(s, f)) <= a.span / 2 + Math.atan2(r, d);
+  }
+  // A body is in the swing if any of three points up its middle is; a level swing works as the 2D one did,
+  // and a pitched one reaches up at drones or down at whatever is below.
   inSwing(a, c, reach, e) {
-    const dx = e.pos.x - c.x, dz = e.pos.z - c.z, d = Math.hypot(dx, dz);
-    if (d - e.r > reach) return false;
-    const mid = c.y + clamp(a.pitch, -0.8, 0.8) * reach * 0.5;
-    if (e.pos.y > mid + a.band || e.pos.y + e.h < mid - a.band) return false;
-    if (d < e.r + 0.4) return true;
-    return Math.abs(angDiff(a.yaw, yawOf(dx, dz))) <= a.span / 2 + Math.atan2(e.r, d);
+    const W = this.swingFrame(a);
+    for (const k of [0.15, 0.5, 0.85]) if (this.inArc(a, W, reach, e.pos.x - c.x, e.pos.y + e.h * k - c.y, e.pos.z - c.z, e.r)) return true;
+    return false;
   }
   updateAttack(dt) {
     if (!this.attack) {
@@ -420,10 +567,18 @@ class Player {
       return;
     }
     if (!a.swept && a.t >= a.wind) this.beginSweep(a);
+    // the blade crackles as it travels
+    if (a.swept && a.t - (a.wind || 0) < a.sweep + 0.04 && Math.random() < 0.7) {
+      const th = a.dir * (clamp((a.t - (a.wind || 0)) / a.sweep, 0, 1) - 0.5) * a.span, d = PlayerPose.arcDir(a.yaw, a.tilt, th, a.pa || 0), c0 = this.chest();
+      const tip = { x: c0.x + d.x * a.r * 0.9, y: c0.y + d.y * a.r * 0.9, z: c0.z + d.z * a.r * 0.9 };
+      FX.elec(tip, 0.5, 1, { outer: '#ff2a44', core: '#ffffff' });
+      if (Math.random() < 0.5) FX.sparks(tip, 2, d, 1.6, 2, 7, { c0: '#ffffff', c1: '#ff8a9a', c2: '#a01828', life: 0.5 });
+    }
     if (a.swept && a.t >= a.act0 && a.t <= a.act1) {
       const c = this.chest(), reach = a.r + 0.27;
       const big = a.finisher || a.heavy, brk = Game.has('breaker');
-      const fx = fwdX(a.yaw), fz = fwdZ(a.yaw);
+      // knocked along the swing: level cuts push away, pitched ones up or down as well
+      const W = this.swingFrame(a), fx = W.F[0], fz = W.F[2], fy = W.F[1];
       let any = false;
       for (const e of Game.enemies) {
         if (e.dead || e.spawning || a.hit.has(e) || !this.inSwing(a, c, reach, e)) continue;
@@ -431,10 +586,10 @@ class Player {
         any = true;
         const mul = brk ? (a.finisher || a.type === 'slam' ? 1.6 : a.heavy ? 1 : 0.8) : 1;
         let up;
-        if (a.heavy) up = a.type === 'slam' && !this.onGround ? -18.2 : a.launch + (brk && a.type === 'slam' ? 13.6 : 0);
-        else up = a.pitch * a.knock * 0.5 + (big ? (brk ? 27.3 : 12.7) : 4.5);
+        if (a.heavy) up = a.type === 'slam' && !this.onGround ? -18.2 : a.launch + (brk && a.type === 'slam' ? 13.6 : 0) + fy * a.knock * 0.5;
+        else up = fy * a.knock + (big ? (brk ? 27.3 : 12.7) : 4.5) * (fy < -0.3 ? 0.3 : 1);
         hurtEnemy(e, a.dmg * mul, {
-          kv: { x: fx * a.knock, y: up, z: fz * a.knock }, dir: { x: fx, y: 0.2, z: fz }, heavy: big, cause: a.heavy ? 'heavy' : 'slash', heavyAtk: a.heavy,
+          kv: { x: fx * a.knock, y: up, z: fz * a.knock }, dir: { x: fx, y: 0.2 + fy, z: fz }, heavy: big, cause: a.heavy ? 'heavy' : 'slash', heavyAtk: a.heavy,
           stagger: a.heavy ? 0.7 : big ? 0.55 : 0.22, hitstop: a.hitstop, shake: a.shake, guardBreak: a.heavy,
         });
       }
@@ -443,13 +598,12 @@ class Player {
         a.hit.add(pr);
         pr.hit(a.dmg, { kv: { x: fx * 18.2, y: 10.9, z: fz * 18.2 }, heavy: big });
       }
+      // street lamps in the arc are cut through where the blade crosses them, and fall away from you
+      Props.slash((q) => this.inSwing(a, c, reach, q), c.y + fy * reach * 0.5, { x: fx, z: fz });
       // bolts caught in the arc go back toward the crosshair; parry-only projectiles pass through
-      const mid = c.y + clamp(a.pitch, -0.8, 0.8) * reach * 0.5;
       for (const b of Game.projectiles) {
         if (b.dead || !b.hostile || a.hit.has(b) || b.parryOnly || !(b.reflect || b.onSlash)) continue;
-        const dx = b.pos.x - c.x, dz = b.pos.z - c.z, d = Math.hypot(dx, dz);
-        if (d > reach || Math.abs(b.pos.y - mid) > a.band + 0.5) continue;
-        if (d > 0.5 && Math.abs(angDiff(a.yaw, yawOf(dx, dz))) > a.span / 2) continue;
+        if (!this.inArc(a, W, reach, b.pos.x - c.x, b.pos.y - c.y, b.pos.z - c.z, 0.5)) continue;
         a.hit.add(b);
         if (b.onSlash) { b.onSlash(this); continue; }
         b.reflect(Camera.aim, 1.5, 22);
@@ -481,6 +635,7 @@ class Player {
     FX.flash('#ff3048', 0.14);
     Sound.play('slam');
     Game.shake(0.3);
+    FPFX.kick('slam');
   }
 
   // ---------- slide attacks ----------
@@ -508,6 +663,11 @@ class Player {
   bladeEntry(a) {
     const k = a.heavy ? 0.82 : 1.18;
     return { x: this.pos.x + fwdX(a.yaw) * k, y: this.pos.y + 0.05, z: this.pos.z + fwdZ(a.yaw) * k };
+  }
+  // whether a body is in a box ahead: along the slide from..to, half-width w, up to height h
+  inCutBox(a, e, from, to, w, h) {
+    const fx = fwdX(a.yaw), fz = fwdZ(a.yaw), dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z, along = dx * fx + dz * fz, side = Math.abs(dx * -fz + dz * fx);
+    return !(along < from - e.r || along > to + e.r || side > w + e.r || e.pos.y > this.pos.y + h || e.pos.y + e.h < this.pos.y - 0.2);
   }
   // enemies in a box ahead: along the slide from a to b, half-width w, up to height h; hit each once
   cutBox(a, from, to, w, h, fn) {
@@ -538,6 +698,7 @@ class Player {
       if (Math.random() < 0.5) FX.dust(E, 1, { smax: 2.7, c: '#6a5a5a' });
     }
     if (a.t >= a.act0 && a.t <= a.act1) {
+      Props.slash((q) => this.inCutBox(a, q, 0, 2.55, 0.9, 1.1), this.pos.y + 0.4, { x: fx, z: fz });
       this.cutBox(a, 0, 2.55, 0.9, 1.1, (e) => hurtEnemy(e, 12, { kv: { x: fx * 14.5, y: 15.5, z: fz * 14.5 }, dir: { x: fx, y: 0.4, z: fz }, cause: 'groundcut', stagger: 0.4, hitstop: 0.03 }));
     }
     if (!a.rocks && a.t >= 0.05) {
@@ -570,7 +731,7 @@ class Player {
       FX.sparks(E, 18, { x: fx * 0.4, y: 1, z: fz * 0.4 }, 1.2, 9, 29);
       FX.ring({ x: E.x, y: this.pos.y + 0.06, z: E.z }, 0.3, 3.6, 0.3);
       FX.decal('crack', E, { len: 3.2 });
-      FX.swoosh({ follow: this, oy: this.chestH(), yaw: a.yaw, tilt: Math.PI / 2, r: 2.7, span: 2.6, dir: 1, sweep: 0.08, dur: 0.3, thick: 0.5, trail: 1 });
+      FX.swoosh({ follow: this, oy: this.chestH(), yaw: a.yaw, tilt: Math.PI / 2, r: 2.7, span: 2.6, dir: 1, sweep: 0.08, dur: 0.3, thick: 0.5, trail: 1, bolts: 3 });
       FX.light({ x: E.x, y: this.pos.y + 0.9, z: E.z }, '#ff3048', 6, 8.2, 0.3);
       FX.flash('#ff3048', 0.12);
       Sound.play('slam'); Sound.play('swing', { stage: 3 }); Sound.play('heavySwing');
@@ -582,6 +743,7 @@ class Player {
       if (!this.crouching) { this.vel.y = 20.9; this.vel.x = fx * 4.5; this.vel.z = fz * 4.5; this.onGround = false; this.airJumps = 1; }
     }
     if (a.t >= a.act0 && a.t <= a.act1) {
+      Props.slash((q) => this.inCutBox(a, q, -0.36, 3.27, 1.0, 2.55), this.pos.y + 0.6, { x: fx, z: fz });
       this.cutBox(a, -0.36, 3.27, 1.0, 2.55, (e) => hurtEnemy(e, 30, { kv: { x: fx * 10.9, y: 34.5, z: fz * 10.9 }, dir: { x: fx * 0.3, y: 1, z: fz * 0.3 }, heavy: true, cause: 'groundcut', stagger: 0.8, hitstop: 0.05, guardBreak: true }));
     }
   }
@@ -593,10 +755,11 @@ class Player {
   }
 
   // ---------- plunge ----------
-  // Crouch plus attack in the air: straight down, cutting through anything on the way, and a shockwave
+  // Attack held in the air: straight down, cutting through anything on the way, and a shockwave
   // on landing that grows with the height of the fall.
   startPlunge() {
     this.attack = null; this.attackQueued = null; this.atkPend = null; this.sliding = false; this.kickAnim = null;
+    Controller.dropCling(this);
     if (this.tether) this.releaseTether();
     if (this.sheathe) this.cancelSheathe();
     this.plunge = { startY: this.pos.y, t: 0, hit: new Set() };
@@ -624,6 +787,7 @@ class Player {
     const P = this.plunge, p = this.pos;
     this.plunge = null;
     const fall = Math.max(0, P.startY - p.y), power = clamp(fall / 20, 0.15, 1);
+    FPFX.kick('slam', { scale: 0.7 + power * 0.6 });
     const R = 4.2 + power * 5.6, dmg = (22 + power * 42) * (Game.has('aftershock') ? 0.8 : 1);
     if (Game.has('aftershock')) Game.hazards.push(new SlamRing(p, { cause: 'plunge', speed: 25.5, dmg: 18 + power * 22 }));
     for (const e of Game.enemies) {
@@ -671,7 +835,8 @@ class Player {
       if (this.ghostT <= 0) { this.ghostT = this.dashT > 0 ? 0.018 : 0.035; this.makeGhost('#ff2a48', 0.24, 0.55); }
     }
   }
-  makeGhost(color, dur, alpha) { FX.ghost(color, dur, alpha); }
+  // an afterimage of the body; none in first person, where it would sit over the lens
+  makeGhost(color, dur, alpha) { if (!Camera.fp) FX.ghost(color, dur, alpha); }
 
   // ---------- parry stance / iaido ----------
   // E opens a parry stance that costs shield. It only attacks after a successful parry.
@@ -700,7 +865,6 @@ class Player {
     if (!S.gameplay.invincible && this.shield < PC.PARRY_COST) {
       Sound.play('noShield');
       this.shieldFlash = 0.5;
-      FX.text('NO SHIELD', { x: this.pos.x, y: this.pos.y + 2.6, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.6, vy: 1.8 });
       return;
     }
     this.shield = Math.max(0, this.shield - PC.PARRY_COST);
@@ -717,6 +881,8 @@ class Player {
   }
   // Parry tells are a quick glint from the eye, never a ring around the body (rings read as shields).
   eyeGlint(c, size) {
+    // in first person the glint would sit on the lens; the screen's edges flare instead (fpfx.js)
+    if (Camera.fp) return;
     FX.glint(this.head(), { c, size, dur: 0.22, follow: () => this.head() });
   }
   parryActive() { return !!this.sheathe && this.sheathe.t <= this.sheathe.parryUntil; }
@@ -755,6 +921,7 @@ class Player {
     Game.hitstop(0.07);
     Game.shake(0.28);
     FX.flash('#ffffff', 0.3);
+    FPFX.kick('parry', { from: h.from });
     const c = this.chest(), from = h.from || { x: c.x + fwdX(this.yaw), y: c.y, z: c.z + fwdZ(this.yaw) };
     const dx = from.x - c.x, dy = from.y - c.y, dz = from.z - c.z, l = Math.hypot(dx, dy, dz) || 1;
     const dir = { x: dx / l, y: dy / l, z: dz / l };
@@ -770,7 +937,8 @@ class Player {
     this.iframes = Math.max(this.iframes, 0.2);
     Game.stats.parries++;
   }
-  // A drawn slash along the aim, kept near level so it doesn't bury itself in the street.
+  // A drawn slash along the aim, kept near level so it doesn't bury itself in the street. Dash slashes carry
+  // you along it; the parry counter (cfg.still) leaves you where you stand and the cut explodes out from you.
   startIaido(cfg) {
     const s = this.chest();
     let dir = { x: this.aimDir.x, y: clamp(this.aimDir.y, -0.3, 0.55), z: this.aimDir.z };
@@ -786,26 +954,52 @@ class Player {
     const hit = World.raycast(s, dir, len + 0.7, 0.3);
     if (hit) len = Math.max(0, hit.t - 0.7);
     this.yaw = yawOf(dir.x, dir.z);
-    const D = 0.09;
-    this.iaido = { t: 0, dur: D, dir, cfg, len, s, hit: new Set(), vx: (dir.x * len) / D, vy: (dir.y * len) / D, vz: (dir.z * len) / D };
+    const D = 0.09, still = !!cfg.still;
+    const end = { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len };
+    this.iaido = { t: 0, dur: D, dir, cfg, len, s, hit: new Set(), still, end: still ? end : null, vx: still ? 0 : (dir.x * len) / D, vy: still ? 0 : (dir.y * len) / D, vz: still ? 0 : (dir.z * len) / D };
     this.iframes = Math.max(this.iframes, cfg.empowered ? 0.5 : 0.3);
     if (this.crouching && Controller.canStand(this)) { this.crouching = false; Controller.setHeight(this, PC.H); }
     if (this.sliding) { this.sliding = false; Controller.setHeight(this, PC.H); }
-    FX.slashLine(s, { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len }, { w: cfg.lineW, dur: cfg.empowered ? 0.45 : 0.3, pal: cfg.empowered ? 'gold' : 'red' });
+    FX.slashLine(s, end, { w: cfg.lineW, dur: cfg.empowered ? 0.45 : 0.3, pal: cfg.empowered ? 'gold' : 'red' });
+    if (still) this.counterBlast(s, dir, len);
+    // lightning runs the length of the draw
+    const lo = cfg.empowered ? '#ffb040' : '#ff2a44';
+    for (let i = 0; i < (cfg.empowered ? 3 : 2); i++) FX.bolt(s, end, cfg.empowered ? 0.4 : 0.26, { outer: lo, core: '#ffffff', jag: 0.25 + i * 0.12, w: 0.09, forks: 3 });
     if (cfg.empowered) Sound.play('iaido', { power: 1, empowered: true });
     else Sound.play('quickdraw');
     if (cfg.heavy) Sound.play('heavySwing');
     Game.shake(cfg.shake);
     FX.flash(cfg.empowered ? '#fff4d0' : '#ff3048', cfg.flash);
+    FPFX.kick(still ? 'counter' : 'draw', { scale: cfg.empowered || cfg.heavy ? 1.15 : 1, col: cfg.empowered ? [255, 200, 110] : null });
     Game.hitstop(cfg.empowered ? 0.045 : 0.02);
     FX.light(s, cfg.empowered ? '#ffe0a0' : '#ff3048', 4, cfg.empowered ? 9 : 5, 0.3);
     if (cfg.empowered) Game.slowmo(0.3, 0.3);
+  }
+  // The counter's explosion: a blast where you stand and bursts running out along the cut.
+  counterBlast(s, dir, len) {
+    const g = { x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, GOLD = { c0: '#ffffff', c1: '#ffd070', c2: '#ff6a2a' };
+    FX.ring(s, 0.5, 6.5, 0.4, { c: '#ffd070', flat: false });
+    FX.ring(g, 0.6, 9, 0.45, { c: '#ffe0a0' });
+    FX.sparks(s, 40, dir, 1.4, 8, 32, GOLD);
+    FX.dust(g, 16, { smax: 10, rise: 1.2 });
+    FX.decal('crack', g, { len: 3.4 });
+    FX.light(s, '#ffd070', 8, 16, 0.4);
+    Sound.play('slam');
+    for (let i = 1; i <= 5; i++) {
+      const k = i / 5, q = { x: s.x + dir.x * len * k, y: s.y + dir.y * len * k, z: s.z + dir.z * len * k };
+      Game.queueCut(0.025 * i, () => {
+        FX.ring(q, 0.2, 2.2 + k, 0.25, { c: '#ffd070', flat: false });
+        FX.sparks(q, 10, null, TAU, 5, 16, GOLD);
+        FX.light(q, '#ffb040', 4, 6, 0.2);
+      });
+    }
   }
   moveIaido(dt) {
     const I = this.iaido;
     I.t += dt;
     this.vel.x = I.vx; this.vel.y = I.vy; this.vel.z = I.vz;
-    const c = this.chest(), lo = Math.min(I.s.y, c.y) - 1.3, hi = Math.max(I.s.y, c.y) + 1.3;
+    // a still cut reaches its full length at once; a dash slash cuts the path you've travelled
+    const c = I.end || this.chest(), lo = Math.min(I.s.y, c.y) - 1.3, hi = Math.max(I.s.y, c.y) + 1.3;
     for (const e of Game.enemies) {
       if (e.dead || e.spawning || I.hit.has(e)) continue;
       if (segDistXZ(e.pos.x, e.pos.z, I.s.x, I.s.z, c.x, c.z) < e.r + I.cfg.path && e.pos.y < hi && e.pos.y + e.h > lo) {
@@ -813,6 +1007,7 @@ class Player {
         this.iaidoMark(e);
       }
     }
+    Props.slash((q) => segDistXZ(q.pos.x, q.pos.z, I.s.x, I.s.z, c.x, c.z) < q.r + I.cfg.path && q.pos.y < hi && q.pos.y + q.h > lo, c.y, I.dir);
     if (I.t >= I.dur) this.finishIaido();
   }
   finishIaido() {
@@ -820,10 +1015,11 @@ class Player {
     this.iaido = null;
     this.vel.x *= 0.15; this.vel.z *= 0.15; this.vel.y = Math.max(this.vel.y * 0.15, 0);
     const c = this.chest(), yaw = yawOf(I.dir.x, I.dir.z);
+    if (I.still) this.vel.y = Math.max(this.vel.y, 0);
     // the closing arc swings the other way from the last swing
     const dir = (this.lastDir = -this.lastDir);
-    FX.swoosh({ x: c.x, y: c.y, z: c.z, oy: 0, yaw, tilt: cfg.empowered ? 0.2 : 0, r: cfg.arcR, span: cfg.span, dir, sweep: 0.08, dur: cfg.empowered ? 0.38 : 0.26, thick: 0.45, pal: cfg.empowered ? 'gold' : 'red', trail: 1 });
-    const arc = { yaw, span: cfg.span, pitch: 0, band: 1.8 };
+    FX.swoosh({ x: c.x, y: c.y, z: c.z, oy: 0, yaw, tilt: cfg.empowered ? 0.2 : 0, r: cfg.arcR, span: cfg.span, dir, sweep: 0.08, dur: cfg.empowered ? 0.38 : 0.26, thick: 0.45, pal: cfg.empowered ? 'gold' : 'red', trail: 1, bolts: cfg.empowered ? 4 : 3 });
+    const arc = { yaw, span: cfg.span, pa: 0, band: 1.8 };
     for (const e of Game.enemies) {
       if (e.dead || e.spawning || I.hit.has(e) || !this.inSwing(arc, c, cfg.arcR, e)) continue;
       I.hit.add(e);
@@ -831,6 +1027,7 @@ class Player {
     }
     const fx = fwdX(yaw), fz = fwdZ(yaw);
     for (const pr of Game.props) if (!pr.dead && this.inSwing(arc, c, cfg.arcR, pr)) pr.hit(60, { kv: { x: fx * 23.6, y: 13.6, z: fz * 23.6 }, heavy: true });
+    Props.slash((q) => this.inSwing(arc, c, cfg.arcR, q), c.y, { x: fx, z: fz });
     for (const b of Game.projectiles) {
       if (b.dead || !b.hostile || b.parryOnly || dist3(b.pos, c) >= cfg.arcR) continue;
       if (b.onSlash) b.onSlash(this);
@@ -880,7 +1077,7 @@ class Player {
     if (this.dead) return;
     const n = Math.min(12, kills * 4);
     this.heal(n);
-    FX.text('+' + n + ' HP', { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#7dff8a', always: true, dur: 0.8, vy: 1.8 });
+    FX.text('+' + n, { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#7dff8a', dur: 0.8, vy: 1.8 });
   }
   chainLightning(c, I) {
     const arc = Game.has('arc'), range = arc ? 27.3 : 18.2, chainDmg = arc ? 40 : 55;
@@ -928,6 +1125,8 @@ class Player {
       ba = ang; best = { obj, kind };
     };
     for (const e of Game.enemies) if (!e.dead && !e.spawning) consider(e, 'enemy', e.center(), e.r, PC.TETHER_RANGE);
+    // the crane's tether points reach much further, and the line snaps to them a little more readily
+    for (const A of Arena.anchors()) consider(A, 'anchor', A, A.ar || 1.2, PC.ANCHOR_RANGE);
     for (const pr of Game.props) if (!pr.dead && pr.grabR && pr.tetherable !== false) consider(pr, 'object', pr.center(), pr.grabR, PC.TETHER_RANGE);
     for (const g of Game.projectiles) if (g.tetherable) consider(g, g.rebound ? 'grenade' : 'object', g.center(), g.grabR, this.ult ? 360 : PC.TETHER_RANGE + 2.7);
     return best;
@@ -939,18 +1138,17 @@ class Player {
     if (!free && !S.gameplay.invincible && this.shield < PC.TETHER_COST) {
       Sound.play('noShield');
       this.shieldFlash = 0.5;
-      FX.text('NO SHIELD', { x: this.pos.x, y: this.pos.y + 2.6, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.6, vy: 1.8 });
       return;
     }
     if (!free) { this.shield = Math.max(0, this.shield - PC.TETHER_COST); this.shieldDelay = Math.max(this.shieldDelay, 1.4); this.regenOn = false; }
-    const to = target ? target.obj.center() : Camera.aim;
+    const to = target ? (target.kind === 'anchor' ? target.obj : target.obj.center()) : Camera.aim;
     const dx = to.x - hand.x, dy = to.y - hand.y, dz = to.z - hand.z, l = Math.hypot(dx, dy, dz) || 1;
     const spd = free ? 218 : PC.TETHER_SPEED;
     this.tether = {
-      phase: 'fly', pos: hand, vel: { x: (dx / l) * spd, y: (dy / l) * spd, z: (dz / l) * spd }, dist: 0, max: free ? 360 : PC.TETHER_RANGE,
+      phase: 'fly', pos: hand, vel: { x: (dx / l) * spd, y: (dy / l) * spd, z: (dz / l) * spd }, dist: 0, max: free ? 360 : target && target.kind === 'anchor' ? PC.ANCHOR_RANGE + 2 : PC.TETHER_RANGE,
       target: null, kind: null, off: null, mode: null, firedAt: Game.time, t: 0, spd: 0,
       // a moving target pulls the line onto it while it travels
-      homing: target ? target.obj : null, paid: !free,
+      homing: target && target.kind !== 'anchor' ? target.obj : null, anchor: target && target.kind === 'anchor' ? target.obj : null, paid: !free,
     };
     this.yaw = yawOf(dx, dz);
     this.aimHold = PC.FACE_AIM;
@@ -988,6 +1186,7 @@ class Player {
   // the flying hook against enemies, barrels and grenades
   tetherHit(T) {
     for (const e of Game.enemies) if (!e.dead && !e.spawning && pointInBody(T.pos, e, 0.27)) { this.attachTether(e, 'enemy'); return true; }
+    if (T.anchor && dist3(T.pos, T.anchor) < (T.anchor.ar || 0.9)) { T.pos = { x: T.anchor.x, y: T.anchor.y, z: T.anchor.z }; this.attachTether(null, 'anchor'); return true; }
     const grab = (o) => !o.dead && o.tetherable !== false && o.grabR && dist3(T.pos, o.center()) < o.grabR + 0.27;
     for (const o of Game.props) if (grab(o)) { this.attachTether(o, 'object'); return true; }
     for (const o of Game.projectiles) if (o.tetherable && grab(o)) { this.attachTether(o, o.rebound ? 'grenade' : 'object'); return true; }
@@ -999,8 +1198,11 @@ class Player {
     T.t += dt;
     const hand = this.hand();
     if (T.phase === 'fly') {
-      const h = T.homing;
-      if (h && !h.dead && h.tetherable !== false) {
+      const h = T.homing, A = T.anchor;
+      if (A) {
+        const sp0 = Math.hypot(T.vel.x, T.vel.y, T.vel.z), dx = A.x - T.pos.x, dy = A.y - T.pos.y, dz = A.z - T.pos.z, l = Math.hypot(dx, dy, dz) || 1;
+        T.vel = { x: (dx / l) * sp0, y: (dy / l) * sp0, z: (dz / l) * sp0 };
+      } else if (h && !h.dead && h.tetherable !== false) {
         const c = h.center(), sp0 = Math.hypot(T.vel.x, T.vel.y, T.vel.z), dx = c.x - T.pos.x, dy = c.y - T.pos.y, dz = c.z - T.pos.z, l = Math.hypot(dx, dy, dz) || 1;
         T.vel = { x: (dx / l) * sp0, y: (dy / l) * sp0, z: (dz / l) * sp0 };
       }
@@ -1009,6 +1211,8 @@ class Player {
         T.pos.x += (T.vel.x * dt) / steps; T.pos.y += (T.vel.y * dt) / steps; T.pos.z += (T.vel.z * dt) / steps; T.dist += (sp * dt) / steps;
         if (this.tetherHit(T)) return;
         if (World.pointSolid(T.pos.x, T.pos.y, T.pos.z)) {
+          // the box it bit, for climbing onto it
+          T.box = World.near(T.pos.x, T.pos.z, T.pos.x, T.pos.z).find((b) => pointInBox(T.pos.x, T.pos.y, T.pos.z, b)) || null;
           T.pos.x -= (T.vel.x * dt) / steps; T.pos.y -= (T.vel.y * dt) / steps; T.pos.z -= (T.vel.z * dt) / steps;
           this.attachTether(null, 'world');
           return;
@@ -1058,12 +1262,23 @@ class Player {
     Game.shake(0.1);
     this.releaseTether();
   }
+  haul(c, path, dur) { Controller.haul(c, path, dur); }
   stand() {
     if (this.sliding || this.crouching) { this.sliding = false; this.crouching = false; if (!Controller.setHeight(this, PC.H)) Controller.setHeight(this, PC.SLIDE_H); }
   }
   beginTetherMode() {
     const T = this.tether;
-    if (T.mode === 'fling') {
+    if (T.mode === 'fling' && T.kind === 'anchor' && T.anchor) {
+      // up and over: an arc whose top is just above the anchor's top, arriving over it
+      const A = T.anchor, g = PC.GRAV * this.gravK, rise = Math.max(1, A.top + 0.9 - this.pos.y);
+      const vy = Math.sqrt(2 * g * rise), t = vy / g, dx = A.x + (this.pos.x <= A.x ? -1 : 1) * (A.landDx || 0) - this.pos.x, dz = A.z - this.pos.z;
+      this.vel.x = dx / t; this.vel.y = vy; this.vel.z = dz / t; this.noDragT = t + 0.2; this.flingTop = true;
+      this.onGround = false; this.airJumps = 1;
+      this.stand();
+      Sound.play('zip');
+    } else if (T.mode === 'fling' && T.kind === 'world' && this.ledgeFling(T)) {
+      Sound.play('zip');
+    } else if (T.mode === 'fling') {
       const c = this.chest(), dx = T.pos.x - c.x, dy = T.pos.y - c.y, dz = T.pos.z - c.z, d = Math.hypot(dx, dy, dz) || 1;
       const sp = this.ult ? 69 : PC.FLING;
       this.vel.x = (dx / d) * sp; this.vel.y = (dy / d) * sp + 6.4; this.vel.z = (dz / d) * sp;
@@ -1077,6 +1292,25 @@ class Player {
       this.onGround = false;
       T.spd = Math.max(13.6, Math.hypot(this.vel.x, this.vel.y, this.vel.z));
     }
+  }
+  // A tap at a ledge (the hook within 1.6 m of the top of something above you) throws you in an arc up and
+  // over its edge, landing a little way onto the top; if the arc comes up short, you climb the edge.
+  ledgeFling(T) {
+    const b = T.box, p = this.pos;
+    if (!b || b.kind === 'bound' || b.max.y < p.y + 0.5 || b.max.y - T.pos.y > 1.6) return false;
+    const top = b.max.y, n = Controller.sideOf(b, T.pos.x, T.pos.z), r = this.r;
+    let lx = n ? T.pos.x - n.x * (r + 0.6) : T.pos.x, lz = n ? T.pos.z - n.z * (r + 0.6) : T.pos.z;
+    lx = clamp(lx, Math.min(b.min.x + r, (b.min.x + b.max.x) / 2), Math.max(b.max.x - r, (b.min.x + b.max.x) / 2));
+    lz = clamp(lz, Math.min(b.min.z + r, (b.min.z + b.max.z) / 2), Math.max(b.max.z - r, (b.min.z + b.max.z) / 2));
+    const land = Controller.highestTop(lx, lz, r, top + 0.6);
+    if (land < top - 0.01 || !World.boxFree(lx, land + 0.02, lz, r, PC.CROUCH_H)) return false;
+    const g = PC.GRAV * this.gravK, peak = Math.max(land + 1, p.y + 1);
+    const vy = Math.sqrt(2 * g * (peak - p.y)), t = vy / g + Math.sqrt((2 * (peak - land)) / (g * 1.12));
+    this.vel.x = (lx - p.x) / t; this.vel.y = vy; this.vel.z = (lz - p.z) / t;
+    this.noDragT = t; this.onGround = false; this.airJumps = 1;
+    this.climbBox = b; this.climbT = t + 0.3;
+    this.stand();
+    return true;
   }
   moveZip(dt) {
     const T = this.tether, c = this.chest();
@@ -1107,18 +1341,33 @@ class Player {
         Sound.play('pulse', {}, ec);
       } else if (dealt > 0 && T.paid && this.shieldOffT <= 0) {
         this.shield = Math.min(PC.MAX_SHIELD, this.shield + PC.TETHER_COST);
-        FX.text('+' + PC.TETHER_COST + ' SHIELD', { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.7, vy: 1.6 });
+        FX.text('+' + PC.TETHER_COST, { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#5ad8ff', dur: 0.7, vy: 1.6 });
       }
       this.yaw = yawOf(ux, uz);
       FX.swoosh({ follow: this, oy: this.chestH(), yaw: this.yaw, tilt: 0.3, r: 2.7, span: 3.2, dir: 1, sweep: 0.06, dur: 0.2, thick: 0.35 });
       Sound.play('swing', { stage: 1 });
       this.vel.y = 20.9; this.vel.x *= 0.25; this.vel.z *= 0.25;
-    } else {
+    } else if (T.kind === 'anchor' && T.anchor) {
+      // a crane point: swung out past the beam's side, up, and over onto its top
+      const A = T.anchor, p = this.pos, side = p.x <= A.x ? -1 : 1, out = (A.w || 0.7) + this.r + 0.25;
+      const ox = A.x + side * out, top = A.top + 0.01;
+      this.haul(this, [{ x: p.x, y: p.y, z: p.z }, { x: ox, y: Math.min(p.y, A.y - 0.6), z: A.z }, { x: ox, y: top + 0.5, z: A.z }, { x: A.x + side * (A.landDx || 0), y: top, z: A.z }], 0.42);
+      this.vel.x = 0; this.vel.y = 0; this.vel.z = 0;
+      Sound.play('step'); FX.dust(T.pos, 4, { smax: 2 });
+    } else if (!(T.kind === 'world' && this.zipLedge(T))) {
       this.vel.x *= 0.3; this.vel.z *= 0.3;
       this.vel.y = Math.max(this.vel.y * 0.3, 13.6);
     }
     this.airJumps = 1;
     this.releaseTether();
+  }
+
+  // A zip that ends against the side of something whose top is within reach climbs straight onto it.
+  zipLedge(T) {
+    const b = T.box;
+    if (!b || b.kind === 'bound') return false;
+    const n = Controller.sideOf(b, this.pos.x, this.pos.z);
+    return !!n && Controller.ledge(this, b, n.x, n.z, PC.MANTLE_UP + 0.6);
   }
 
   // Tethering a pulse grenade in flight: time slows, you reel yourself to it and kick it toward the crosshair.
@@ -1199,9 +1448,12 @@ class Player {
     if (h.through) { this.iaido = null; this.dashT = 0; }
     let dmg = h.dmg * (Game.has('glass') ? 1.25 : 1);
     if (S.gameplay.invincible) dmg = 0;
+    // on the tether, a bullet only hurts: no knockback, and you stay on the line. Anything bigger (a blade, a
+    // blast, a sniper round, the beam) still throws you off it.
+    const steady = this.tether && this.tether.phase === 'attached' && h.kind === 'projectile' && h.proj && h.proj.kind === 'bolt' && !h.proj.big;
     if (this.sheathe) this.cancelSheathe();
-    if (this.tether && this.zipping()) this.releaseTether();
-    this.attack = null; this.attackQueued = null; this.atkPend = null; this.postPose = 0; this.plunge = null; this.kickAnim = null;
+    if (this.tether && this.zipping() && !steady) this.releaseTether();
+    if (!steady) { this.attack = null; this.attackQueued = null; this.atkPend = null; this.postPose = 0; this.plunge = null; this.kickAnim = null; }
     const c = this.center(), hadShield = this.shield > 0, shield0 = this.shield;
     // pierce: goes straight to health
     if (this.shield > 0 && !h.pierce) {
@@ -1213,7 +1465,6 @@ class Player {
         if (shield0 >= PC.SHIELD_OVERFLOW_AT) dmg = 0;
         Sound.play('shieldBreak');
         FX.sparks(c, 16, null, TAU, 5.5, 18, { c0: '#ffffff', c1: '#5ad8ff', c2: '#1a6aa0' });
-        FX.text('SHIELD BROKEN', { x: this.pos.x, y: this.pos.y + 2.6, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.8 });
         this.iframes = dmg > 0 ? 0.6 : 0.9;
       } else Sound.play('shieldHit');
       FX.ring(c, 0.5, 1.5, 0.18, { c: '#2a8ad0', flat: false });
@@ -1227,8 +1478,21 @@ class Player {
     }
     this.shieldDelay = PC.SHIELD_DELAY + (Game.has('bloodline') ? 1 : 0); this.regenOn = false;
     this.iframes = Math.max(this.iframes, hadShield && this.shield > 0 ? 0.35 : 0.6);
+    if (steady) {
+      // a flinch on the line, nothing more
+      this.blinkT = this.iframes;
+      if (h.from) this.hitMarks.push({ yaw: yawOf(h.from.x - this.pos.x, h.from.z - this.pos.z), t: 0.7 });
+      FPFX.kick(dmg > 0 ? 'hit' : 'guard', { from: h.from, scale: 0.5 });
+      Game.combo = 0; Game.comboT = 0; Game.styleHit();
+      Game.shake(0.12);
+      Game.stats.damageTaken += h.dmg;
+      if (this.hp <= 0) this.die();
+      return 'hit';
+    }
     this.hurtT = 0.22;
     this.blinkT = this.iframes;
+    // a hit through the shield darkens the screen's edges toward it; one the shield eats glints blue
+    FPFX.kick(dmg > 0 ? 'hit' : 'guard', { from: h.from, scale: dmg > 0 ? clamp(0.6 + dmg / 40, 0.6, 1.3) : 1 });
     Game.combo = 0; Game.comboT = 0; Game.styleHit();
     const from = h.from || { x: this.pos.x - fwdX(this.yaw), z: this.pos.z - fwdZ(this.yaw) };
     let dx = this.pos.x - from.x, dz = this.pos.z - from.z;
@@ -1245,6 +1509,34 @@ class Player {
     if (this.hp <= 0) this.die();
     return 'hit';
   }
+  // The rival's enrage shockwave: thrown clear of from (a point), whatever you were doing, without damage.
+  blastAway(from, power = 1) {
+    if (this.dead) return;
+    if (this.tether) this.releaseTether();
+    if (this.sheathe) this.cancelSheathe();
+    this.attack = null; this.attackQueued = null; this.atkPend = null; this.plunge = null; this.iaido = null; this.dashT = 0; this.kickAnim = null;
+    this.sliding = false; this.mantle = null; this.vault = null;
+    Controller.dropCling(this); Controller.endSkid(this, false);
+    if (this.crouching && Controller.canStand(this)) { this.crouching = false; Controller.setHeight(this, PC.H); }
+    let dx = this.pos.x - from.x, dz = this.pos.z - from.z;
+    const l = Math.hypot(dx, dz);
+    if (l < 1e-3) { dx = -fwdX(this.yaw); dz = -fwdZ(this.yaw); } else { dx /= l; dz /= l; }
+    this.vel.x = dx * 39 * power; this.vel.z = dz * 39 * power; this.vel.y = 23.6 * power; this.onGround = false;
+    this.hurtT = 0.45; this.yaw = yawOf(-dx, -dz);
+    FPFX.kick('hit', { from, scale: 0.8 });
+    FX.sparks(this.chest(), 12, { x: dx, y: 0.2, z: dz }, 1.2, 5.5, 20, { c0: '#ffffff', c1: '#ff6a7a', c2: '#145e6a' });
+  }
+  // Getting behind the rival's red flash as it swings: a moment of slow motion and a white afterimage.
+  perilDodge(src) {
+    const c = this.chest(), u = { x: c.x - src.pos.x, y: 0.3, z: c.z - src.pos.z };
+    this.makeGhost('#ffffff', 0.5, 0.8);
+    FX.sparks(c, 14, u, 1.4, 5.5, 20, { c0: '#ffffff', c1: '#ff8a9a', c2: '#781e2a' });
+    FX.light(c, '#ffffff', 4, 6, 0.3);
+    Sound.play('perilDodge');
+    Game.slowmo(0.3, 0.4, true);
+    FPFX.kick('dodge');
+    this.iframes = Math.max(this.iframes, 0.3);
+  }
   onShieldFull() {
     if (this.shieldWasFull) return;
     this.shieldWasFull = true; this.regenOn = false;
@@ -1258,7 +1550,6 @@ class Player {
     this.shield = 0; this.shieldOffT = dur;
     this.shieldDelay = Math.max(this.shieldDelay, dur); this.regenOn = false;
     Sound.play('shieldBreak');
-    FX.text('SHIELD DISABLED', { x: this.pos.x, y: this.pos.y + 2.9, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 1.2, vy: 1.4 });
     FX.elec(this.center(), 1.3, 6, { outer: '#2ab8d8', core: '#ffffff' });
   }
   die() {
@@ -1289,7 +1580,10 @@ class Player {
   // The 2D scarf in 3D: a verlet chain pinned behind the neck. It streams back and off to the left from
   // the body's motion (as in the concept art), flutters, stays out of the torso and above the street.
   // The pose pins its first point to the model.
+  // the neck wrap where the model last drew it (low in a skid, rolled in a vault), else from the hull
   scarfAnchor() {
+    const q = this.scarfPin;
+    if (q && Math.abs(q.x - this.pos.x) < 2 && Math.abs(q.z - this.pos.z) < 2 && Math.abs(q.y - this.pos.y) < 3) return { x: q.x + this.pos.x - q.px, y: q.y + this.pos.y - q.py, z: q.z + this.pos.z - q.pz };
     const bx = -fwdX(this.yaw), bz = -fwdZ(this.yaw), rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
     return { x: this.pos.x + bx * 0.16 - rx * 0.06, y: this.pos.y + this.h - 0.3, z: this.pos.z + bz * 0.16 - rz * 0.06 };
   }

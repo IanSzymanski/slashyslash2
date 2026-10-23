@@ -6,7 +6,7 @@ const Sound = (() => {
   let comp, master, lowpass, sfxBus, musicBus, reverbIn, noiseBuf, crackleBuf;
   let focusMute = 1;
   const last = {};
-  const GAP = { hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08 };
+  const GAP = { hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08, scrape: 0.12, grab: 0.1 };
 
   function makeNoise(sec) {
     const n = (ac.sampleRate * sec) | 0, b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0);
@@ -358,6 +358,31 @@ const Sound = (() => {
       crackle(0.28, 0.22, { f: 900 });
       tone({ type: 'square', f0: 140, f1: 60, dur: 0.2, vol: 0.08 });
     },
+    // a gauntlet dragged over concrete: a skid turn's hand, a cling sliding down a wall
+    scrape(p) {
+      noise({ dur: 0.3 * (p.len || 1), vol: 0.2, f0: 2200, f1: 900, q: 1.6 });
+      crackle(0.26 * (p.len || 1), 0.16, { f: 1600 });
+    },
+    // fingers driven into a wall
+    grab() {
+      noise({ dur: 0.07, vol: 0.28, type: 'lowpass', f0: 1400, f1: 300 });
+      crackle(0.1, 0.18, { f: 1100 });
+      tone({ type: 'square', f0: 220, f1: 90, dur: 0.06, vol: 0.05 });
+    },
+    // a street lamp cut: the clang of the pole, the power arcing out
+    lampCut() {
+      tone({ type: 'triangle', f0: 880, f1: 620, dur: 0.5, vol: 0.09, rev: 0.4 });
+      tone({ type: 'triangle', f0: 1320, f1: 1100, dur: 0.35, vol: 0.05, rev: 0.4 });
+      crackle(0.4, 0.22, { f: 2200 });
+      noise({ dur: 0.12, vol: 0.2, type: 'highpass', f0: 3000 });
+    },
+    // the lamp's top hitting the street: metal, then glass
+    lampCrash() {
+      tone({ type: 'sine', f0: 140, f1: 45, dur: 0.3, vol: 0.55 });
+      noise({ dur: 0.25, vol: 0.35, type: 'lowpass', f0: 1200, f1: 200 });
+      for (let i = 0; i < 6; i++) tone({ type: 'sine', f0: 3000 + Math.random() * 3000, dur: 0.08, vol: 0.04, delay: 0.03 + i * 0.025 });
+      noise({ dur: 0.2, vol: 0.18, type: 'highpass', f0: 5000, delay: 0.02 });
+    },
     rocks() {
       for (let i = 0; i < 5; i++) noise({ dur: 0.05, vol: 0.18, type: 'lowpass', f0: 900 + Math.random() * 1200, delay: i * 0.03 + Math.random() * 0.02 });
       tone({ type: 'sine', f0: 120, f1: 50, dur: 0.15, vol: 0.4 });
@@ -365,6 +390,14 @@ const Sound = (() => {
     throw() {
       noise({ dur: 0.18, vol: 0.32, f0: 500, f1: 3000, q: 0.9 });
       crackle(0.15, 0.18);
+    },
+    // the machine gun's barrels spinning up: a whir that climbs, with clicks that run together
+    gunSpin(p) {
+      const d = p.dur || 0.55;
+      tone({ type: 'sawtooth', f0: 110, f1: 620, dur: d, vol: 0.05, a: d * 0.4, slide: d });
+      tone({ type: 'square', f0: 55, f1: 310, dur: d, vol: 0.03, a: d * 0.4, slide: d });
+      noise({ dur: d, vol: 0.1, f0: 800, f1: 4200, q: 2, a: d * 0.7 });
+      for (let i = 0; i < 9; i++) tone({ type: 'square', f0: 2400, dur: 0.012, vol: 0.035, delay: d * (1 - Math.pow(1 - i / 9, 1.8)) });
     },
     bossGun() {
       tone({ type: 'square', f0: 900, f1: 220, dur: 0.05, vol: 0.06 });
@@ -394,6 +427,18 @@ const Sound = (() => {
       noise({ dur: 0.5, vol: 0.5, type: 'lowpass', f0: 2600, f1: 120, rev: 0.4 });
       for (const f of [1800, 1200]) tone({ type: 'square', f0: f, f1: f * 0.25, dur: 0.35, vol: 0.05, rev: 0.4 });
       crackle(0.5, 0.4, { f: 600 });
+    },
+    // the shoulder cannon charging: a growl and a whine rising together, a swell of hiss, ticks that come faster,
+    // and a bright lock tone as it fires
+    laserCharge(p) {
+      const d = p.dur || 0.85;
+      tone({ type: 'sawtooth', f0: 90, f1: 1400, dur: d, vol: 0.07, a: d * 0.3, slide: d });
+      tone({ type: 'sawtooth', f0: 91, f1: 1410, dur: d, vol: 0.05, a: d * 0.3, slide: d, detune: 14 });
+      tone({ type: 'sine', f0: 42, f1: 95, dur: d, vol: 0.22, a: d * 0.5, slide: d });
+      noise({ dur: d, vol: 0.14, f0: 400, f1: 3200, q: 1.4, a: d * 0.8 });
+      crackle(d, 0.2, { f: 900 });
+      for (let i = 0; i < 8; i++) tone({ type: 'square', f0: 1800 + i * 120, dur: 0.025, vol: 0.03, delay: d * (1 - Math.pow(1 - i / 8, 2)) });
+      for (const f of [2637, 3520]) tone({ type: 'sine', f0: f, dur: 0.18, vol: 0.06, delay: d, rev: 0.4 });
     },
     beamCharge() {
       tone({ type: 'sawtooth', f0: 120, f1: 900, dur: 0.85, vol: 0.06, a: 0.05 });
@@ -500,25 +545,22 @@ const Sound = (() => {
       tone({ type: 'sine', f0: 260, f1: 90, dur: 0.3, vol: 0.35 });
     },
     // red flash: a low hit and a sour stab, then a rising tone that peaks where the dash belongs
+    // the red flash: nothing like the riposte's bright rise. A sub drop and a tritone alarm that pulses faster,
+    // a dark growl climbing under it, then a dissonant metal shriek and a bass hit as its eye flashes
     peril(p) {
       const d = p.dur || 0.6;
-      tone({ type: 'sawtooth', f0: 130, f1: 48, dur: 0.4, vol: 0.2 });
-      for (const f of [1480, 2093]) tone({ type: 'square', f0: f, f1: f * 0.97, dur: 0.16, vol: 0.035, rev: 0.4 });
-      noise({ dur: 0.2, vol: 0.25, f0: 2500, f1: 600, q: 1.5 });
-      tone({ type: 'sawtooth', f0: 180, f1: 720, dur: d, vol: 0.04, a: 0.02, slide: d });
-      tone({ type: 'sine', f0: 1975, dur: 0.12, vol: 0.06, delay: d, rev: 0.4 });
-    },
-    // phase-2 eruptions: crackle building under the street, then the column bursts out
-    eruptWarn(p) {
-      const d = p.dur || 0.8;
-      crackle(d, 0.12, { f: 600 });
-      tone({ type: 'sawtooth', f0: 50, f1: 110, dur: d, vol: 0.05, a: d * 0.6 });
-    },
-    eruptBeam() {
-      tone({ type: 'sine', f0: 140, f1: 40, dur: 0.5, vol: 0.45 });
-      noise({ dur: 0.6, vol: 0.4, type: 'lowpass', f0: 3600, f1: 200, rev: 0.4 });
-      tone({ type: 'sawtooth', f0: 220, f1: 660, dur: 0.5, vol: 0.03, rev: 0.4 });
-      crackle(0.5, 0.25, { f: 700 });
+      tone({ type: 'sine', f0: 95, f1: 32, dur: 0.6, vol: 0.55 });
+      noise({ dur: 0.35, vol: 0.4, type: 'lowpass', f0: 900, f1: 120 });
+      for (let i = 0; i < 4; i++) {
+        const at = d * (1 - Math.pow(1 - i / 4, 1.6));
+        for (const f of [233, 330]) tone({ type: 'square', f0: f, f1: f * 0.94, dur: 0.07, vol: 0.05, delay: at });
+      }
+      tone({ type: 'sawtooth', f0: 46, f1: 190, dur: d, vol: 0.16, a: d * 0.5, slide: d });
+      tone({ type: 'sawtooth', f0: 47, f1: 196, dur: d, vol: 0.12, a: d * 0.5, slide: d, detune: 25 });
+      noise({ dur: d, vol: 0.18, f0: 300, f1: 2400, q: 2, a: d * 0.8 });
+      tone({ type: 'sine', f0: 60, f1: 28, dur: 0.6, vol: 0.6, delay: d });
+      for (const f of [1661, 2349, 3322]) tone({ type: 'square', f0: f, f1: f * 0.9, dur: 0.22, vol: 0.03, delay: d, rev: 0.5 });
+      noise({ dur: 0.3, vol: 0.4, type: 'highpass', f0: 2500, delay: d, rev: 0.4 });
     },
     perilDodge() {
       noise({ dur: 0.22, vol: 0.3, f0: 3200, f1: 700, q: 1.2 });

@@ -192,6 +192,7 @@ class PulseGrenade {
     if (this.dead) return;
     this.dead = true;
     const R = this.R, P = Game.player, owner = this.owner, c = { x: this.pos.x, y: this.pos.y, z: this.pos.z };
+    if (!o.blocked) Props.blast(c, R * 0.8);
     if (o.blocked) {
       FX.ring(c, 0.3, 2.7, 0.3, { c: '#ffd070', flat: false });
       FX.sparks(c, 20, null, TAU, 5.5, 20, { c0: '#ffffff', c1: '#ffe080', c2: '#145e6a' });
@@ -244,6 +245,14 @@ class Barrel {
     this.r = 0.45; this.h = 1.27; this.grabR = 0.82;
     this.fuse = -1; this.dead = false; this.thrown = 0; this.tethered = false; this.isEnemy = false; this.heavy = false;
     this.onGround = false; this.towed = false; this.col = null; this.yaw = rand(0, TAU); this.spin = 0;
+    // its round collider: bodies slide round it, can stand on it, and shove it when they run into it
+    this.q = { x: pos.x, z: pos.z, r: 0.42, y0: pos.y, y1: pos.y + this.h, on: true, top: true, owner: this };
+  }
+  bump(b, vn, ux, uz) {
+    if (vn < 2 || this.towed) return;
+    const k = Math.min(vn, 12) * 0.55;
+    this.vel.x -= ux * k; this.vel.z -= uz * k; this.vel.y = Math.max(this.vel.y, 1.5); this.spin = 6;
+    if (vn > 5) Sound.play('barrelHit', {}, this.center());
   }
   center() { return { x: this.pos.x, y: this.pos.y + this.h / 2, z: this.pos.z }; }
   hit(dmg, o = {}) {
@@ -280,6 +289,8 @@ class Barrel {
     const B = Arena.bounds();
     this.pos.x = clamp(this.pos.x, B.minX + 1, B.maxX - 1); this.pos.z = clamp(this.pos.z, B.minZ + 1, B.maxZ - 1);
     if (this.pos.y < -20) { this.dead = true; return; }
+    const Q = this.q;
+    Q.x = this.pos.x; Q.z = this.pos.z; Q.y0 = this.pos.y; Q.y1 = this.pos.y + this.h; Q.on = !this.towed && this.thrown <= 0;
     if (this.thrown > 0) {
       this.thrown -= dt;
       if (Math.hypot(this.vel.x, this.vel.y, this.vel.z) > 10.9) {
@@ -296,6 +307,7 @@ class Barrel {
     if (this.dead) return;
     this.dead = true;
     const c = this.center(), R = 5.3;
+    Props.blast(c, R * 0.8);
     for (const e of Game.enemies) {
       if (e.dead || e.spawning) continue;
       const ec = e.center(), d = dist3(c, ec);
@@ -356,5 +368,39 @@ class SlamRing {
       this.hit.add(e);
       hurtEnemy(e, this.dmg, { kv: { x: u.x * 12.7, y: 20, z: u.z * 12.7 }, dir: { x: u.x, y: 1, z: u.z }, cause: this.cause, heavyAtk: this.cause === 'heavy', stagger: 0.5, hitstop: 0.01 });
     }
+  }
+}
+
+// ---------- the brute's ground wave ----------
+// The 2D slam sends a shockwave each way along the street. In 3D it's a ring running out over the ground
+// that hits you once if your feet are down as it passes: jump it, dash through it or parry it. Walls stop it.
+class GroundWave {
+  constructor(pos, speed, dmg, owner) {
+    this.kind = 'wave';
+    this.pos = { x: pos.x, y: pos.y, z: pos.z };
+    this.speed = speed; this.dmg = dmg; this.owner = owner;
+    this.t = 0; this.dur = 0.8; this.dead = false; this.hit = false;
+  }
+  radius() { return 0.6 + this.speed * this.t; }
+  update(dt) {
+    this.t += dt;
+    if (this.t > this.dur) { this.dead = true; return; }
+    const c = this.pos, r = this.radius();
+    for (let i = 0; i < 3; i++) {
+      const a = rand(0, TAU), x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
+      if (Math.abs(World.groundAt(x, z, c.y + 0.5) - c.y) < 0.1) {
+        FX.dust({ x, y: c.y, z }, 1, { smax: 2.7, rise: 2.7, c: '#6a5a5a' });
+        if (Math.random() < 0.4) FX.debris({ x, y: c.y + 0.1, z }, 1, ['#4a4252', '#5c5464'], 10.9);
+      }
+    }
+    const P = Game.player;
+    if (this.hit || P.dead) return;
+    const dx = P.pos.x - c.x, dz = P.pos.z - c.z, d = Math.hypot(dx, dz);
+    if (Math.abs(d - r) > 0.73 + P.r || P.pos.y > c.y + 0.64 || P.pos.y < c.y - 0.4) return;
+    const ux = d > 1e-3 ? dx / d : 1, uz = d > 1e-3 ? dz / d : 0;
+    if (d > 0.6 && World.raycast({ x: c.x, y: c.y + 0.4, z: c.z }, { x: ux, y: 0, z: uz }, d)) return;
+    const from = { x: c.x + ux * (r - 1), y: c.y + 0.4, z: c.z + uz * (r - 1) };
+    const res = P.takeHit({ dmg: this.dmg, from, kind: 'shockwave', source: this.owner && !this.owner.dead ? this.owner : null, knock: 18.2 });
+    if (res !== 'ignored') this.hit = true;
   }
 }

@@ -18,6 +18,7 @@ const damp = (a, b, k, dt) => lerp(a, b, 1 - Math.exp(-k * dt));
 const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 const easeOutQuad = (t) => 1 - (1 - t) * (1 - t);
 const easeInQuad = (t) => t * t;
+const easeInOutQuad = (t) => (t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t));
 const easeOutBack = (t) => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
 const dist = (ax, ay, bx, by) => Math.hypot(bx - ax, by - ay);
 

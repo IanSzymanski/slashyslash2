@@ -23,7 +23,8 @@ const Rig = {
   _m: null, _q: null, _q2: null, _v: null,
 
   // def: { bones, scale, parts: [{ bone, shape: 'box' | 'hex', size: [w, h, d], at: [x, y, z], rot: [rx, ry, rz],
-  //   taper, color, glow (fullbright), plain (no texture), tag }], attach(r) for non-skinned extras }.
+  //   taper, color, glow (fullbright), plain (no texture; a number fades it), tag }], tex (a texture in place of the
+  //   grey noise), attach(r) for non-skinned extras }.
   // Bones whose parent is null are roots (the scarf chain hangs free of the body).
   build(def, feetUniform) {
     const S = def.scale || 1;
@@ -61,7 +62,7 @@ const Rig = {
         uv.push(a / this.TEX_M + ou, b / this.TEX_M + ov);
         v.applyMatrix4(m); n.applyQuaternion(q);
         pos.push(v.x, v.y, v.z); nrm.push(n.x, n.y, n.z); col.push(c.r, c.g, c.b);
-        glow.push(p.glow ? 1 : 0); plain.push(p.plain ? 1 : 0); si.push(bi, 0, 0, 0); sw.push(1, 0, 0, 0);
+        glow.push(p.glow ? 1 : 0); plain.push(p.plain === true ? 1 : p.plain || 0); si.push(bi, 0, 0, 0); sw.push(1, 0, 0, 0);
       }
       const gi = geo.index.array;
       for (let i = 0; i < gi.length; i++) idx.push(i0 + gi[i]);
@@ -79,7 +80,7 @@ const Rig = {
     g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
     g.setIndex(idx);
     const feet = feetUniform || { value: new THREE.Color(0.25, 0.22, 0.3) };
-    const mat = Gfx.litMaterial({ vertexColors: true, map: Gfx.charTexture(), transparent: true }, 'feet', feet);
+    const mat = Gfx.litMaterial({ vertexColors: true, map: def.tex ? def.tex() : Gfx.charTexture(), transparent: true }, 'feet', feet);
     const mesh = new THREE.SkinnedMesh(g, mat);
     for (const b of roots) mesh.add(b);
     mesh.updateMatrixWorld(true);

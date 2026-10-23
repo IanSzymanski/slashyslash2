@@ -109,11 +109,12 @@ const UI = {
     document.getElementById('over-title').textContent = victory ? (duel ? 'Duel won' : boss ? 'Rival defeated' : 'Demo complete') : 'Signal lost';
     let sub;
     if (victory && duel) sub = 'You beat AEGIS-07 blade to blade. Practice only: win the full Rival Fight to unlock it.';
+    else if (victory && !boss && !Director.rivalBuilt()) sub = 'All six demo waves cleared. AEGIS-07 joins the demo as its last wave in a later build.';
     else if (victory) sub = boss ? 'AEGIS-07 is down and unlocked for a future character roster.' : 'All demo waves cleared, rival included. AEGIS-07 is unlocked for a future character roster.';
     else if (duel) sub = 'AEGIS-07 won the duel. Parry a swing, let it parry your counter, then parry its gold riposte.';
     else if (boss) sub = 'AEGIS-07 holds the street. Tether its pulse grenade and kick it back to break the shield.';
-    else if (Game.mode === 'endless' || Game.mode === 'street') sub = `You held the street until wave ${Director.wave}.`;
-    else sub = Director.wave === 0 ? 'Down before the first wave.' : `Down on wave ${Director.wave} of ${DEMO_WAVES.length}.`;
+    else if (Game.mode === 'endless') sub = `You held the street until wave ${Director.wave}.`;
+    else sub = Director.wave === 0 ? 'Down before the first wave.' : `Down on wave ${Director.wave} of ${Director.demoWaves()}.`;
     document.getElementById('over-sub').textContent = sub;
     const mm = Math.floor(st.time / 60), ss = Math.floor(st.time % 60).toString().padStart(2, '0');
     const rows = [
@@ -130,23 +131,32 @@ const UI = {
   renderHowTo() {
     const rows = [
       ['Look (click the game to lock the mouse)', 'Mouse'],
-      ['Move (relative to the camera)', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
-      ['Jump / double jump / wall kick', actionLabel('jump')],
+      ['Zoom the camera; all the way in is first person', 'Mouse wheel'],
+      ['Move (relative to the camera); keep running and it builds to a sprint', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
+      ['Skid turn: reverse at speed to plant a hand and push off', `${actionLabel('back')} while sprinting`],
+      ['Vault over cars and anything chest-high', 'Run into it'],
+      ['Climb a ledge you can reach (a container from the street)', 'Walk or jump into it'],
+      ['Jump / double jump', actionLabel('jump')],
+      ['Wall cling: holds while a move key is held, then slides; let go to drop; jump to kick off', `Jump into a wall, ${actionLabel('jump')}`],
       ['Crouch · slide while running', actionLabel('crouch')],
       ['Bullet jump (toward the crosshair)', `${actionLabel('crouch')} + ${actionLabel('jump')}`],
       ['Dash (2 charges, invulnerable)', `${actionLabel('dash')} + direction`],
       ['Dash slash (hold for a heavy one)', `${actionLabel('attack')} during a dash`],
-      ['Slash string (toward the crosshair)', `Tap ${actionLabel('attack')}`],
-      ['Heavy attack (mix into strings: L H L, L L H)', `Hold ${actionLabel('attack')}`],
+      ['Slash string (toward the crosshair, up or down too)', `Tap ${actionLabel('attack')}`],
+      ['Heavy attack, on the ground (mix into strings: L H L, L L H)', `Hold ${actionLabel('attack')}`],
       ['Ground cut (hold: rock eruption launcher)', `${actionLabel('attack')} while sliding`],
-      ['Plunge + shockwave (in the air)', `Hold ${actionLabel('crouch')} + ${actionLabel('attack')}`],
+      ['Plunge + shockwave (in the air)', `Hold ${actionLabel('attack')}`],
+      ['Cut down street lamps; slashes and blasts drop them', actionLabel('attack')],
       ['Parry stance (15 shield, refunded on parry)', actionLabel('sheathe')],
       ['Counter after a parry', `Release ${actionLabel('sheathe')}`],
       ['Overload: shock ring that interrupts (10s cooldown)', actionLabel('utility')],
-      ['Tether: tap fling, hold zip', actionLabel('tether')],
+      ['Tether: tap fling, hold zip (at a ledge\'s edge or the crane: up onto it)', actionLabel('tether')],
       ['Grab, swing and throw barrels', `Hold ${actionLabel('tether')}, release`],
       ['Rebound a pulse grenade: reel in, kick it back', `${actionLabel('tether')} on it, aim`],
       ['Sawblade ultimate (when charged)', `Hold ${actionLabel('ultimate')} 1s`],
+      ['AEGIS-07 shielded: slash its bolts back (8 cracks) or kick its grenade back', `${actionLabel('attack')} · ${actionLabel('tether')}`],
+      ['AEGIS-07 gold flash: parry its riposte to stun it', actionLabel('sheathe')],
+      ['AEGIS-07 red flash: no parry stops it; dash through to its back', actionLabel('dash')],
       ['Pause (training: spawn panel)', actionLabel('pause')],
       ['Skip a cutscene you have seen', `Hold ${actionLabel('sheathe')}`],
       ['Pick an endless upgrade', 'Click, or 1 / 2 / 3'],
@@ -199,6 +209,7 @@ const UI = {
       input.addEventListener('change', () => {
         setPath(S, item.key, input.checked);
         if (item.key === 'visuals.scanlines') this.applyVisualToggles();
+        if (item.key === 'visuals.retro') Render.resize();
         if (item.key === 'audio.muteOnBlur') Sound.setFocus(document.hasFocus());
         saveSettings();
       });

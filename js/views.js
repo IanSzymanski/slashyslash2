@@ -1,16 +1,17 @@
 'use strict';
 // Meshes for the simulation's non-character objects, synced each rendered frame: bolts, rubble, pulse
 // grenades and their blast zones, barrels, the tether line, gunner lasers, grenadier arcs, and the
-// player's afterimages. Every material is made once here and compiled in Render.prewarm.
+// player's afterimages. The rival's own effects are in rivalviews.js. Every material is made once here and
+// compiled in Render.prewarm.
 
 const Views = {
-  map: new Map(), mats: null, geos: null, ghosts: [], lasers: [], arcs: [], zones: [], tetherMesh: null,
-  GHOSTS: 10, LASERS: 6, ARCS: 4, ZONES: 8, LASER_N: 40, ARC_N: 28,
+  map: new Map(), mats: null, geos: null, ghosts: [], lasers: [], arcs: [], zones: [], zips: [], beams: [], tetherMesh: null, rain: null, ash: null,
+  GHOSTS: 10, LASERS: 6, ARCS: 4, ZONES: 8, ZIPS: 3, BEAMS: 8, LASER_N: 40, ARC_N: 28,
 
   init() {
     const add = (color, o = {}) => new THREE.MeshBasicMaterial(Object.assign({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }, o));
     this.mats = {
-      boltH: add('#ff7a2a'), boltF: add('#ff2a48'), boltCore: add('#fff4d0'),
+      boltH: add('#ff7a2a'), boltF: add('#ff2a48'), boltS: add('#ff3a52'), boltB: add('#2f6bff'), boltCore: add('#fff4d0'),
       shell: Gfx.litMaterial({ color: '#1c2a30' }, 'feet', FX.gibFeet),
       gFly: new THREE.MeshBasicMaterial({ color: '#4af0ff' }), gCaught: new THREE.MeshBasicMaterial({ color: '#ffd070' }),
       gKick: new THREE.MeshBasicMaterial({ color: '#ff5a6a' }), white: new THREE.MeshBasicMaterial({ color: '#ffffff' }),
@@ -19,6 +20,9 @@ const Views = {
     this.geos = {
       bolt: new THREE.BoxGeometry(0.08, 0.08, 0.8), boltCore: new THREE.BoxGeometry(0.035, 0.035, 0.55), rock: new THREE.BoxGeometry(1, 1, 1),
       sphere: new THREE.SphereGeometry(1, 8, 6), ring: new THREE.RingGeometry(0.8, 1, 32), flatRing: new THREE.RingGeometry(0.9, 1, 48).rotateX(-Math.PI / 2),
+      // the brute's ground wave: an open band 1 m tall standing on the ground
+      band: new THREE.CylinderGeometry(1, 1, 1, 48, 1, true).translate(0, 0.5, 0),
+      beam: new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
     };
     // afterimages share the player's geometry; each has its own skeleton of loose bones posed by copying
     const src = Render.playerRig.mesh;
@@ -31,6 +35,14 @@ const Views = {
       this.ghosts.push({ mesh: m, fx: null });
     }
     this.tetherMesh = FX.stripMesh(24);
+    for (let i = 0; i < this.ZIPS; i++) this.zips.push(FX.stripMesh(24));
+    // spawn beams: a column of light where an enemy is arriving
+    for (let i = 0; i < this.BEAMS; i++) {
+      const b = new THREE.Mesh(this.geos.beam, add('#ff6a3a'));
+      b.visible = false; b.renderOrder = 2;
+      Gfx.scene.add(b);
+      this.beams.push(b);
+    }
     for (let i = 0; i < this.LASERS; i++) this.lasers.push(FX.stripMesh(this.LASER_N));
     for (let i = 0; i < this.ARCS; i++) this.arcs.push(FX.stripMesh(this.ARC_N));
     for (let i = 0; i < this.ZONES; i++) {
@@ -39,27 +51,36 @@ const Views = {
       Gfx.scene.add(z);
       this.zones.push(z);
     }
-    for (const m of [this.tetherMesh, ...this.lasers, ...this.arcs]) m.visible = false;
+    for (const m of [this.tetherMesh, ...this.zips, ...this.lasers, ...this.arcs]) m.visible = false;
+    this.initWeather();
+    BossViews.init();
   },
   // everything once, visible, for the shader compile
   prewarmShow(group) {
     const add = (m) => { group.add(m); return m; };
+    const add_wave = () => this.waveMat();
     add(new THREE.Mesh(this.geos.bolt, this.mats.boltH));
     add(new THREE.Mesh(this.geos.sphere, this.mats.shell));
     add(new THREE.Mesh(this.geos.sphere, this.mats.gFly));
     add(new THREE.Mesh(this.geos.ring, this.mats.halo));
+    add(new THREE.Mesh(this.geos.band, add_wave()));
+    this.beams[0].visible = true;
+    this.rain.visible = this.ash.visible = true;
     add(new THREE.Mesh(this.geos.rock, FX.gibMaterial('#5c5464', false)));
     this.ghosts[0].mesh.visible = true;
     this.zones[0].visible = true;
     this.tetherMesh.visible = true;
+    BossViews.prewarmShow(group);
   },
   prewarmHide() {
-    this.ghosts[0].mesh.visible = false; this.zones[0].visible = false; this.tetherMesh.visible = false;
+    this.ghosts[0].mesh.visible = false; this.zones[0].visible = false; this.tetherMesh.visible = false; this.beams[0].visible = false;
+    BossViews.prewarmHide();
   },
+  waveMat() { return new THREE.MeshBasicMaterial({ color: '#ff7a2a', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }); },
 
   sync() {
     const t = Game.realTime, live = new Set();
-    for (const list of [Game.projectiles, Game.props]) {
+    for (const list of [Game.projectiles, Game.props, Game.hazards]) {
       for (const o of list) {
         if (o.dead) continue;
         live.add(o);
@@ -71,12 +92,22 @@ const Views = {
     for (const [o, v] of this.map) if (!live.has(o)) { this.dispose(v); this.map.delete(o); }
     this.syncGhosts();
     this.syncTether();
+    this.syncZips();
+    this.syncBeams(t);
+    this.syncWeather();
     this.syncTells(t);
+    BossViews.sync();
   },
   make(o) {
+    if (BossViews.kinds.has(o.kind)) return BossViews.make(o);
     const M = this.mats, G = this.geos, g = new THREE.Group();
     if (o.kind === 'bolt') {
-      g.add(new THREE.Mesh(G.bolt, o.hostile ? M.boltH : M.boltF), new THREE.Mesh(G.boltCore, M.boltCore));
+      g.add(new THREE.Mesh(G.bolt, this.boltMat(o)), new THREE.Mesh(G.boltCore, M.boltCore));
+    } else if (o.kind === 'wave') {
+      const band = new THREE.Mesh(G.band, this.waveMat());
+      band.renderOrder = 2;
+      g.add(band);
+      g.userData = { band };
     } else if (o.kind === 'rock') {
       g.add(new THREE.Mesh(G.rock, FX.gibMaterial(o.color, false)));
       g.scale.setScalar(o.size);
@@ -96,6 +127,7 @@ const Views = {
     return { group: g };
   },
   update(o, v, t) {
+    if (v.boss) { BossViews.update(o, v, t); return; }
     if (v.rig) {
       const R = v.rig, m = R.mesh;
       m.position.set(o.pos.x, o.pos.y, o.pos.z);
@@ -113,7 +145,13 @@ const Views = {
       if (!this._z) { this._z = new THREE.Vector3(0, 0, 1); this._d = new THREE.Vector3(); }
       this._d.set(o.vel.x / s, o.vel.y / s, o.vel.z / s);
       g.quaternion.setFromUnitVectors(this._z, this._d);
-      g.children[0].material = o.hostile ? this.mats.boltH : this.mats.boltF;
+      g.children[0].material = this.boltMat(o);
+    } else if (o.kind === 'wave') {
+      // a band of light that shrinks as it runs out: clear its top to get over it
+      const k = o.t / o.dur, r = o.radius(), band = g.userData.band;
+      band.scale.set(r, 0.65 * (1 - k * 0.6), r);
+      band.material.opacity = 0.9 * (1 - k * k);
+      band.material.color.set(((o.t * 24) | 0) % 2 ? '#ffd080' : '#ff7a2a');
     } else if (o.kind === 'rock') {
       const k = 1.2 - o.life;
       g.rotation.set(o.spin.x * k, o.spin.y * k, o.spin.z * k);
@@ -128,10 +166,13 @@ const Views = {
     }
   },
   dispose(v) {
+    if (v.boss) { BossViews.dispose(v); return; }
     if (v.rig) { Gfx.scene.remove(v.rig.mesh); v.rig.geo.dispose(); v.rig.mat.dispose(); v.rig.outline.material.dispose(); return; }
     Gfx.scene.remove(v.group);
     if (v.group.userData.halo) v.group.userData.halo.material.dispose();
+    if (v.group.userData.band) v.group.userData.band.material.dispose();
   },
+  boltMat(o) { return !o.hostile ? this.mats.boltF : o.col && o.col.outer === '#ff3a52' ? this.mats.boltS : o.col && o.col.outer === '#2f6bff' ? this.mats.boltB : this.mats.boltH; },
 
   // Afterimages: each new request copies the player's current bone matrices into a free pool mesh.
   syncGhosts() {
@@ -153,12 +194,12 @@ const Views = {
     for (const s of this.ghosts) if (!used.has(s)) { s.mesh.visible = false; s.fx = null; }
   },
 
-  // The tether: a crackling line from the right hand to the hook.
+  // The tether: a crackling line from the left hand (the one reaching along it) to the hook.
   syncTether() {
     const P = Game.player, T = P && P.tether, m = this.tetherMesh;
     m.visible = !!T && !P.dead;
     if (!m.visible) return;
-    const h = Rig.boneWorld(Render.playerRig, 'handR', this._h || (this._h = new THREE.Vector3()));
+    const h = Rig.boneWorld(Render.playerRig, 'handL', this._h || (this._h = new THREE.Vector3()));
     const n = 12, pts = [], a = h, b = T.pos, jag = T.phase === 'retract' ? 0.02 : 0.07;
     for (let i = 0; i < n; i++) {
       const k = i / (n - 1), j = i && i < n - 1 ? jag * Math.sin(k * Math.PI) : 0;
@@ -171,6 +212,76 @@ const Views = {
     }, n);
   },
 
+  // Weather, as in 2D: rain streaks and drifting ash in a box around the camera, recycled as they leave it.
+  // A drop stops at the first surface below where it started, so none fall under the overpass.
+  RAIN: 700, ASH: 260, WB: 18,
+  initWeather() {
+    const mk = (n, per) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * per * 3), 3)); return g; };
+    this.rain = new THREE.LineSegments(mk(this.RAIN, 2), new THREE.LineBasicMaterial({ color: '#7a7cb4', transparent: true, opacity: 0.4, depthWrite: false }));
+    this.ash = new THREE.Points(mk(this.ASH, 1), new THREE.PointsMaterial({ color: '#9a8a9a', size: 0.05, transparent: true, opacity: 0.8, depthWrite: false }));
+    for (const m of [this.rain, this.ash]) { m.frustumCulled = false; Gfx.scene.add(m); }
+    this.drops = []; this.flakes = [];
+    for (let i = 0; i < this.RAIN; i++) this.drops.push({ x: 0, y: -1e9, z: 0, v: rand(17, 23), floor: 0 });
+    for (let i = 0; i < this.ASH; i++) this.flakes.push({ x: 0, y: -1e9, z: 0, v: rand(0.5, 1.3), ph: rand(0, TAU) });
+    this.wLast = 0;
+  },
+  syncWeather() {
+    const on = S.visuals.weather;
+    this.rain.visible = this.ash.visible = on;
+    if (!on) return;
+    const now = Game.realTime, dt = clamp(now - this.wLast, 0, 0.1) * (Game.state === 'playing' || Game.state === 'menu' ? Game.slowScale : 0);
+    this.wLast = now;
+    const c = Gfx.camera.position, W = this.WB;
+    const respawn = (d, top) => {
+      d.x = c.x + rand(-W, W); d.z = c.z + rand(-W, W); d.y = top ? c.y + rand(8, 16) : c.y + rand(-8, 16);
+      d.floor = World.groundAt(d.x, d.z, d.y);
+    };
+    const rp = this.rain.geometry.attributes.position, ra = rp.array;
+    for (let i = 0; i < this.drops.length; i++) {
+      const d = this.drops[i];
+      d.y -= d.v * dt; d.x -= 3 * dt;
+      if (d.y < d.floor || d.y < c.y - 10 || Math.abs(d.x - c.x) > W || Math.abs(d.z - c.z) > W) respawn(d, d.y > -1e8 && d.y < d.floor);
+      const o = i * 6;
+      ra[o] = d.x; ra[o + 1] = d.y; ra[o + 2] = d.z; ra[o + 3] = d.x + 0.09; ra[o + 4] = d.y + 0.6; ra[o + 5] = d.z;
+    }
+    rp.needsUpdate = true;
+    const ap = this.ash.geometry.attributes.position, aa = ap.array;
+    for (let i = 0; i < this.flakes.length; i++) {
+      const f = this.flakes[i];
+      f.ph += dt; f.y -= f.v * dt; f.x += (Math.sin(f.ph * 1.3) * 0.5 - 0.35) * dt; f.z += Math.cos(f.ph * 0.9) * 0.3 * dt;
+      if (f.y < c.y - 10 || Math.abs(f.x - c.x) > W || Math.abs(f.z - c.z) > W || f.y < World.groundAt(f.x, f.z, f.y + 0.05)) respawn(f, false);
+      aa[i * 3] = f.x; aa[i * 3 + 1] = f.y; aa[i * 3 + 2] = f.z;
+    }
+    ap.needsUpdate = true;
+  },
+  // A sniper reeling itself to another perch: its grapple line from the left hand to where it's going.
+  syncZips() {
+    let zi = 0;
+    for (const e of Game.enemies) {
+      if (e.dead || e.state !== 'zip' || !e.zipTo || !e.model || zi >= this.zips.length) continue;
+      const m = this.zips[zi++], h = Rig.boneWorld(e.model, 'handL', this._zh || (this._zh = new THREE.Vector3()));
+      const b = { x: e.zipTo.x, y: e.zipTo.y + 0.3, z: e.zipTo.z }, n = 12, pts = [];
+      for (let i = 0; i < n; i++) { const k = i / (n - 1), j = i && i < n - 1 ? 0.06 * Math.sin(k * Math.PI) : 0; pts.push({ x: lerp(h.x, b.x, k) + rand(-j, j), y: lerp(h.y, b.y, k) + rand(-j, j), z: lerp(h.z, b.z, k) + rand(-j, j) }); }
+      const outer = hexLinear('#a01828'), core = hexLinear('#ffd0d8');
+      m.visible = true;
+      FX.writeStrip(m, pts.concat(pts.slice().reverse()), 0.05, Gfx.camera.position, (i, out) => { const c = i < n ? outer : core; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; }, n);
+    }
+    for (; zi < this.zips.length; zi++) this.zips[zi].visible = false;
+  },
+  // Where an enemy is arriving: a column of light that narrows until it steps out.
+  syncBeams(t) {
+    let bi = 0;
+    for (const e of Game.enemies) {
+      if (!e.spawning || e.dead || bi >= this.beams.length) continue;
+      const b = this.beams[bi++], k = 1 - e.spawnT / 0.75, w = Math.max(0.06, (1 - k) * 0.5);
+      const base = e.pos.y, top = e.flying ? e.pos.y + 7 : World.groundAt(e.pos.x, e.pos.z, 200) > base + 1 ? base + 9 : base + 30;
+      b.visible = ((t * 30) | 0) % 3 !== 0;
+      b.position.set(e.pos.x, base, e.pos.z);
+      b.scale.set(w, top - base, w);
+      b.material.opacity = 0.35 + 0.4 * k;
+    }
+    for (; bi < this.beams.length; bi++) this.beams[bi].visible = false;
+  },
   // Enemy tells in the world: the gunner's laser (dashed while it tracks, solid white once locked), the
   // grenadier's arc with its landing zone, and the blast zone under every hostile grenade in flight.
   syncTells(t) {
@@ -191,8 +302,8 @@ const Views = {
       const L = e.laser ? e.laser() : 0;
       if (L && li < this.lasers.length) {
         const m = this.lasers[li++], o = e.muzzle(), d = e.aimDir, P = Game.player;
-        const hit = World.raycast(o, d, 36);
-        let len = hit ? hit.t : 36;
+        const far = e.type === 'sniper' ? 48 : 36, hit = World.raycast(o, d, far);
+        let len = hit ? hit.t : far;
         // it ends on you when it reaches you
         if (P && !P.dead) {
           const c = P.chest(), tp = (c.x - o.x) * d.x + (c.y - o.y) * d.y + (c.z - o.z) * d.z;
@@ -200,9 +311,10 @@ const Views = {
         }
         const N = this.LASER_N, pts = [];
         for (let i = 0; i < N; i++) { const k = (i / (N - 1)) * len; pts.push({ x: o.x + d.x * k, y: o.y + d.y * k, z: o.z + d.z * k }); }
-        const on = hexLinear(L === 2 ? (((t * 30) | 0) % 2 ? '#ffffff' : '#ffd0a0') : '#ff7a3a'), off = [0, 0, 0];
+        const sn = e.type === 'sniper';
+        const on = hexLinear(L === 2 ? (((t * 30) | 0) % 2 ? '#ffffff' : sn ? '#ff3a52' : '#ffd0a0') : sn ? '#ff3a52' : '#ff7a3a'), off = [0, 0, 0];
         m.visible = true;
-        FX.writeStrip(m, pts, L === 2 ? 0.05 : 0.035, cp, (i, out) => { const c = L === 2 || ((i >> 1) % 2 === 0) ? on : off; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; });
+        FX.writeStrip(m, pts, L === 2 ? 0.05 : 0.035, cp, (i, out) => { const c = L === 2 || (sn ? (i >> 1) % 3 !== 2 : (i >> 1) % 2 === 0) ? on : off; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; });
       }
       if (e.type === 'grenadier' && e.state === 'throwWind' && e.plan && ai < this.arcs.length) {
         const m = this.arcs[ai++], P = e.plan, N = this.ARC_N, pts = [];
@@ -224,6 +336,10 @@ const Views = {
   },
   // lights from the brightest objects: bolts, grenades and lit barrels, up to three
   pushLights() {
+    // the two drones nearest the camera light themselves and what's below them
+    const cp = Gfx.camera.position;
+    const drones = Game.enemies.filter((e) => e.type === 'drone' && !e.dead && !e.spawning).sort((a, b) => dist3(a.pos, cp) - dist3(b.pos, cp));
+    for (const d of drones.slice(0, 2)) Gfx.light(d.pos.x, d.pos.y + 0.2, d.pos.z, d.state === 'tele' || d.state === 'dive' ? '#ff6040' : '#ffc070', 1.6, 5);
     let n = 0;
     for (const o of Game.projectiles) {
       if (n >= 3) return;

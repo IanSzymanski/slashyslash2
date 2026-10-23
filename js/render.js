@@ -9,13 +9,15 @@ const Render = {
   init(glCanvas, hudCanvas) {
     Gfx.init(glCanvas);
     FX.init(Gfx.scene);
-    this._v = new THREE.Vector3();
+    this._v = new THREE.Vector3(); this._pv = new THREE.Vector3();
     this.hud = hudCanvas;
     hudCanvas.width = VIEW_W; hudCanvas.height = VIEW_H;
     this.ctx = hudCanvas.getContext('2d');
     this.ctx.imageSmoothingEnabled = false;
     this.playerRig = Rig.build(MODELS.player);
     this.playerRig.mesh.visible = false;
+    // yaw last, so the body's forward tilt and bank are about its own axes
+    this.playerRig.mesh.rotation.order = 'YXZ';
     Gfx.scene.add(this.playerRig.mesh);
     this.pickupGeo = Gfx.boxGeometry([{ min: { x: -0.08, y: -0.22, z: -0.08 }, max: { x: 0.08, y: 0.22, z: 0.08 } }, { min: { x: -0.22, y: -0.08, z: -0.08 }, max: { x: 0.22, y: 0.08, z: 0.08 } }]);
     this.pickupMat = new THREE.MeshBasicMaterial({ color: '#5aff7a' });
@@ -27,9 +29,10 @@ const Render = {
   // Three deletes a compiled program once no material uses it, so one material of each kind is kept for good.
   keep: [],
   prewarm() {
-    const g = new THREE.Group(), r = Rig.build(MODELS.scrapper);
+    const g = new THREE.Group(), r = Rig.build(MODELS.scrapper), ra = Rig.build(MODELS.aegis);
     r.outline.visible = true;
-    g.add(r.mesh);
+    ra.blade.visible = true;
+    g.add(r.mesh, ra.mesh);
     for (const glow of [false, true]) g.add(new THREE.Mesh(r.parts[0].geo, FX.gibMaterial('#ffffff', glow)));
     g.add(new THREE.Mesh(this.pickupGeo, this.pickupMat));
     const o = { x: 0, y: 1, z: 0 };
@@ -48,7 +51,7 @@ const Render = {
     this.playerRig.mesh.visible = false;
     Views.prewarmHide();
     Gfx.scene.remove(g);
-    this.keep.push(r.mat, r.outline.material, decal, ...FX.detachAll());
+    this.keep.push(r.mat, r.outline.material, ra.mat, ra.blade.children[0].material, decal, ...FX.detachAll());
   },
   // The 2D game's 16:9 frame; the 3D view renders at the frame's native size times the resolution scale.
   resize() {
@@ -60,6 +63,8 @@ const Render = {
     app.style.height = h + 'px';
     app.style.setProperty('--ui-scale', (h / 720).toFixed(3));
     document.getElementById('scanlines').style.backgroundSize = '100% ' + Math.max(2, Math.round(scale)) + 'px';
+    // Retro renders at the 2D game's 480x270; the canvas is already scaled up without smoothing
+    if (S.visuals.retro) { Gfx.resize(VIEW_W, VIEW_H); return; }
     const k = Math.min(2, window.devicePixelRatio || 1) * S.visuals.resScale;
     Gfx.resize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
   },
@@ -105,30 +110,39 @@ const Render = {
   syncModels(realDt) {
     const seen = new Set();
     for (const e of Game.enemies) {
-      if (e.dead || !MODELS[e.def.model]) continue;
+      if (e.dead || !MODELS[e.type]) continue;
       seen.add(e);
       let R = this.models.get(e);
       if (!R) {
-        R = Rig.build(MODELS[e.def.model]);
+        R = Rig.build(MODELS[e.type]);
+        R.mesh.rotation.order = 'YXZ';
         Gfx.scene.add(R.mesh);
         this.models.set(e, R);
         e.model = R;
       }
       const p = e.rp || e.pos;
-      R.mesh.visible = !e.spawning;
-      R.mesh.position.set(p.x, p.y, p.z);
-      R.mesh.rotation.y = e.yaw;
+      R.mesh.visible = e.showModel ? e.showModel() : !e.spawning;
+      // a body that pitches over (the rival's knockout) lies on the street, not half in it
+      R.mesh.position.set(p.x, p.y + Math.abs(Math.sin(e.tilt || 0)) * 0.35, p.z);
+      R.mesh.rotation.set(e.tilt || 0, e.yaw, 0);
       Poses[e.type](R, e);
-      R.mat.emissive.setRGB(e.hitFlash > 0 ? 0.8 : e.cutMark && ((Game.realTime * 30) | 0) % 2 ? 0.6 : 0, e.hitFlash > 0 ? 0.8 : 0, e.hitFlash > 0 ? 0.8 : 0);
-      R.outline.visible = !!e.elite;
+      if (e.emissive) R.mat.emissive.setScalar(e.emissive());
+      else R.mat.emissive.setRGB(e.hitFlash > 0 ? 0.8 : e.cutMark && ((Game.realTime * 30) | 0) % 2 ? 0.6 : 0, e.hitFlash > 0 ? 0.8 : 0, e.hitFlash > 0 ? 0.8 : 0);
+      const oc = e.outline ? e.outline() : e.elite ? '#ffd070' : null;
+      R.outline.visible = !!oc;
+      if (oc) R.outline.material.color.set(oc);
       const want = this.inCameraLine(e) ? 0.25 : 1;
       e.fade = approach(e.fade, want, realDt * 6);
       R.mat.opacity = e.fade;
       R.mat.depthWrite = e.fade > 0.99;
       this.feet(R.feet, p);
+      // drones fly in the dark over the lamps: a floor under their shading keeps them readable against the sky
+      if (e.type === 'drone') { const f = R.feet.value; f.setRGB(Math.max(f.r, 0.32), Math.max(f.g, 0.32), Math.max(f.b, 0.38)); }
     }
     for (const [e, R] of this.models) {
       if (seen.has(e)) continue;
+      // the rival's body stays where it fell, as its husk
+      if (e.husk && !e.husk.rig && !e.husk.dead) { e.husk.rig = R; R.outline.visible = false; this.models.delete(e); continue; }
       Gfx.scene.remove(R.mesh);
       R.geo.dispose(); R.mat.dispose(); R.outline.material.dispose();
       this.models.delete(e);
@@ -146,16 +160,23 @@ const Render = {
     const P = Game.player, R = this.playerRig;
     R.mesh.visible = !!P;
     if (P) {
-      const p = P.rp || P.pos;
-      R.mesh.position.set(p.x, p.y, p.z);
-      R.mesh.rotation.y = P.yaw;
+      const p = P.rp || P.pos, py = P.pivotY || 0;
+      R.mesh.rotation.set(P.tilt || 0, P.yaw, P.bank || 0);
+      // the body tips and rolls about a point pivotY up (the feet on the ground, its middle in the air)
+      const v = this._pv.set(0, py, 0).applyEuler(R.mesh.rotation);
+      R.mesh.position.set(p.x - v.x, p.y + py - v.y, p.z - v.z);
       PlayerPose.apply(R, P);
-      const want = Camera.curDist < 1 ? clamp(Camera.curDist - 0.4, 0, 1) / 0.6 : 1;
+      // first person looks out from the model's eyes, wherever the pose has put the head (crouched, sliding,
+      // leaning into a sprint), kept as an offset from the body so the camera never lags it
+      const hv = Rig.boneWorld(R, 'head', this._hv || (this._hv = new THREE.Vector3()));
+      P.eyeOff = { x: hv.x - p.x + fwdX(P.yaw) * 0.06, y: hv.y - p.y + 0.13, z: hv.z - p.z + fwdZ(P.yaw) * 0.06 };
+      const want = Camera.fp || Camera.curDist >= 1 ? 1 : clamp(Camera.curDist - 0.4, 0, 1) / 0.6;
       const blink = P.blinkT > 0 && P.hurtT <= 0 && ((Game.realTime * 30) | 0) % 2 ? 0.55 : 1;
       R.mat.opacity = want * blink;
       R.mat.depthWrite = R.mat.opacity > 0.99;
       R.extras[0].material.opacity = 0.2 * want;
-      R.mat.emissive.setScalar(P.hurtT > 0.12 ? 0.8 : 0);
+      // in first person the screen's own hit effects stand in for the body's white flash
+      R.mat.emissive.setScalar(P.hurtT > 0.12 && !Camera.fp ? 0.8 : 0);
       this.feet(R.feet, p);
     }
   },
@@ -166,19 +187,24 @@ const Render = {
     const v = this._v.set(0, 0.55, 0.03);
     R.bones.weapon.localToWorld(v);
     Gfx.light(v.x, v.y, v.z, '#ff2030', P.sheathe || P.idleT > 2.5 ? 0.5 : 1.4, 3.5);
+    // in a Blackout you carry a little light of your own, as in 2D
+    if (World.blackout) { const c = P.rp || P.pos; Gfx.light(c.x, c.y + 2.2, c.z, '#c8a0b8', 2.2, 11); }
   },
 
   draw(realDt) {
     this.fps = lerp(this.fps, 1 / Math.max(realDt, 0.001), 0.05);
     const G = Game, t = G.realTime;
-    for (const m of Gfx.fireMats) m.color.setRGB(1, 0.55 + 0.25 * Math.sin(t * 17) * Math.sin(t * 5.3), 0.2);
+    Gfx.flicker(t, realDt);
+    Gfx.processRebake();
     this.syncModels(realDt);
     Views.sync();
     FX.sync(Gfx.camera);
     // bullet time drains the colour from the lit world; glowing parts and effects stay bright
     Gfx.desat.value = G.bulletK() * 0.85;
+    Gfx.nearCut.value = Camera.fp && G.state === 'playing' ? 0.28 : 0;
     Gfx.beginFrame();
     this.bladeLight();
+    BossViews.pushLights();
     Views.pushLights();
     FX.pushLights();
     Gfx.endFrame();
@@ -186,6 +212,7 @@ const Render = {
 
     const ctx = this.ctx;
     ctx.clearRect(0, 0, VIEW_W, VIEW_H);
+    FPFX.render(ctx, realDt);
     this.drawTexts(ctx);
     if (FX.flashA > 0) {
       ctx.globalAlpha = Math.min(0.7, FX.flashA);
@@ -196,6 +223,7 @@ const Render = {
     }
     const inGame = G.player && (G.state === 'playing' || G.state === 'paused' || G.state === 'over' || G.state === 'pick');
     if (inGame && !G.cineActive()) this.drawHUD(ctx, realDt);
+    if (inGame && G.cine) this.drawCine(ctx, G.cine, t);
     if (S.visuals.showFps) drawText(ctx, Math.round(this.fps) + ' FPS', VIEW_W - 4, VIEW_H - 9, { align: 'right', color: '#7a849c' });
   },
   drawTexts(ctx) {
@@ -284,7 +312,7 @@ const Render = {
     // wave info
     const D = Director;
     if (D.wave > 0) {
-      const label = G.mode === 'street' ? 'STREET WAVE ' + D.wave : G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
+      const label = G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
       drawText(ctx, label, VIEW_W / 2, 6, { align: 'center', color: '#ffd0d8' });
       let sub;
       if (D.state === 'fight') sub = D.remaining() + ' HOSTILES' + (D.modifier ? ' - ' + WAVE_MODIFIERS[D.modifier].name : '');
@@ -331,12 +359,98 @@ const Render = {
       ctx.fillRect(0, 0, VIEW_W, 3); ctx.fillRect(0, VIEW_H - 3, VIEW_W, 3); ctx.fillRect(0, 0, 3, VIEW_H); ctx.fillRect(VIEW_W - 3, 0, 3, VIEW_H);
       ctx.globalAlpha = 1;
     }
+    const boss = G.enemies.find((e) => e.isBoss && !e.dead && !e.spawning);
+    if (boss) this.drawBossBar(ctx, boss, t);
     if (G.state === 'playing') {
       if (S.visuals.indicators) this.drawThreatRing(ctx, p, t);
       const bt = G.bulletK();
-      if (bt > 0) this.drawReboundCue(ctx, p, bt, t);
+      if (bt > 0 && (G.btKind === 'riposte' || G.btKind === 'peril')) this.drawParryCue(ctx, bt, t);
+      else if (bt > 0) this.drawReboundCue(ctx, p, bt, t);
       this.drawCrosshair(ctx, p);
     }
+  },
+  // ---------- the rival ----------
+  // Its health along the bottom of the screen with the half-health mark of phase 1 and its shield.
+  drawBossBar(ctx, b, t) {
+    const w = 220, x = Math.round(VIEW_W / 2 - w / 2), y = VIEW_H - 18;
+    drawText(ctx, b.name, x, y - 9, { color: '#bfd4ff' });
+    ctx.fillStyle = '#0b0910'; ctx.fillRect(x - 1, y - 1, w + 2, 6);
+    ctx.fillStyle = '#300a12'; ctx.fillRect(x, y, w, 4);
+    const k = Math.max(0, b.hp) / b.maxHp;
+    ctx.fillStyle = b.stunT > 0 && ((t * 10) | 0) % 2 ? '#ffffff' : '#4a7aff'; ctx.fillRect(x, y, Math.round(w * k), 4);
+    ctx.fillStyle = '#a8c4ff'; ctx.fillRect(x, y, Math.round(w * k), 1);
+    if (!b.duel && b.phase === 1) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + w / 2, y - 2, 1, 8); }
+    if (b.shield) {
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = '#9cc4ff';
+      for (let i = 0; i < w; i += 2) if (((i + ((t * 20) | 0)) >> 1) % 3) ctx.fillRect(x + i, y, 1, 4);
+      ctx.globalAlpha = 1;
+    }
+  },
+  // Its riposte (gold) or red flash (red) in bullet time: a reticle on its eye closes as the flash nears.
+  drawParryCue(ctx, k, t) {
+    const r = Game.btOwner, p = Game.player, peril = Game.btKind === 'peril';
+    if (!r || r.dead || !p || p.dead || !r.visorPos) return;
+    const s = this.project(r.visorPos());
+    if (!s) return;
+    const col = peril ? '#ff2a3a' : '#ffd070', q = r.cueProgress ? r.cueProgress() : 1;
+    // speed lines converging on the middle of the view, where you are
+    ctx.globalAlpha = 0.3 * k;
+    ctx.fillStyle = peril ? '#ffd0d4' : '#fff4d0';
+    const cx = VIEW_W / 2, cy = VIEW_H / 2;
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * TAU + Math.sin(i * 5.1) * 0.2, r0 = 50 + ((i * 29 + ((t * 260) | 0)) % 80), r1 = r0 + 22 + (i % 3) * 8;
+      pline(ctx, cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, cx + Math.cos(a) * r1, cy + Math.sin(a) * r1, 1);
+    }
+    ctx.globalAlpha = 1;
+    const rr = Math.round(4 + (1 - q) * 16);
+    ctx.fillStyle = q >= 1 && ((t * 20) | 0) % 2 ? '#ffffff' : col;
+    for (let i = 0; i < 4; i++) {
+      const a = i * (Math.PI / 2) + Math.PI / 4;
+      pline(ctx, s.x + Math.cos(a) * rr, s.y + Math.sin(a) * rr, s.x + Math.cos(a) * (rr + 4), s.y + Math.sin(a) * (rr + 4), 1);
+    }
+  },
+  // Cutscene letterbox bars, the skip prompt, captions, and the title and knockout cards.
+  drawCine(ctx, C, t) {
+    const k = easeOutCubic(clamp(C.bars, 0, 1)), bh = Math.round(30 * k);
+    if (bh <= 0) return;
+    ctx.fillStyle = '#050308';
+    ctx.fillRect(0, 0, VIEW_W, bh); ctx.fillRect(0, VIEW_H - bh, VIEW_W, bh);
+    if (C.skippable && !C.closing && k > 0.9) {
+      const hold = clamp(C.skipHold / 0.5, 0, 1);
+      drawText(ctx, 'HOLD ' + hudKey('sheathe') + ' TO SKIP', VIEW_W - 8, VIEW_H - 12, { align: 'right', color: hold > 0 ? '#ffffff' : '#7a6a7a' });
+      ctx.fillStyle = '#3a3040'; ctx.fillRect(VIEW_W - 58, VIEW_H - 5, 50, 1);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(VIEW_W - 58, VIEW_H - 5, Math.round(50 * hold), 1);
+    }
+    if (C.caption && k > 0.9) {
+      const cap = C.caption;
+      drawText(ctx, cap.text, VIEW_W / 2, VIEW_H - bh + 7, { align: 'center', color: cap.color || '#ffffff', scale: 2 });
+      if (cap.sub) drawText(ctx, cap.sub, VIEW_W / 2, VIEW_H - bh + 20, { align: 'center', color: '#9a8aa8' });
+    }
+    if (C.big && C.big.style === 'title') this.drawTitleCard(ctx, C.big, C.bigT);
+    else if (C.big) {
+      const bt = C.bigT, sc = bt < 0.08 ? 9 : bt < 0.16 ? 7 : 6;
+      const shake = bt < 0.3 ? Math.round((Math.random() - 0.5) * 4 * (1 - bt / 0.3)) : 0;
+      drawText(ctx, C.big.text, VIEW_W / 2 + shake, VIEW_H / 2 - sc * 3 + shake, { align: 'center', color: C.big.color || '#ffd070', scale: sc, outline: '#0b0910' });
+      if (C.big.sub && bt > 0.5) drawText(ctx, C.big.sub, VIEW_W / 2, VIEW_H / 2 + sc * 3 + 6, { align: 'center', color: '#e8d8e0', outline: '#0b0910' });
+    }
+  },
+  // A boss title: rules wipe out from the centre, the name slams in, then the subtitle.
+  drawTitleCard(ctx, B, bt) {
+    const y = 52, col = B.color || '#7aa8ff', cxm = VIEW_W / 2;
+    const w = Math.round(easeOutCubic(clamp(bt / 0.22, 0, 1)) * 150);
+    ctx.fillStyle = col;
+    ctx.fillRect(cxm - w, y - 9, w * 2, 1); ctx.fillRect(cxm - w, y + 40, w * 2, 1);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(cxm - w - 1, y - 11, 1, 5); ctx.fillRect(cxm + w, y - 11, 1, 5);
+    ctx.fillRect(cxm - w - 1, y + 38, 1, 5); ctx.fillRect(cxm + w, y + 38, 1, 5);
+    if (B.tag && bt > 0.1) drawText(ctx, B.tag, cxm, y - 19, { align: 'center', color: '#7a9aa6' });
+    if (bt > 0.12) {
+      const t2 = bt - 0.12, sc = t2 < 0.05 ? 8 : 6;
+      const shake = t2 < 0.25 ? Math.round((Math.random() - 0.5) * 4 * (1 - t2 / 0.25)) : 0;
+      drawText(ctx, B.text, cxm + shake, y + (6 - sc) * 2.5 + 3 + shake, { align: 'center', color: t2 < 0.08 ? '#ffffff' : col, scale: sc, outline: '#0b0910' });
+    }
+    if (B.sub && bt > 0.55) drawText(ctx, B.sub, cxm, y + 45, { align: 'center', color: '#e8d8e0', outline: '#0b0910' });
   },
   // Bullet time on a tethered grenade: speed lines converging on it, a closing reticle, and the line
   // the kick will send it along (toward the crosshair).
@@ -389,8 +503,10 @@ const Render = {
         ctx.fillRect(Math.round(px), Math.round(py), 1, 1);
       }
     };
+    // the Glints Only modifier leaves just the glints and where hits came from
+    const glintsOnly = Game.mod('glints');
     for (const e of Game.enemies) {
-      if (e.dead) continue;
+      if (e.dead || glintsOnly) continue;
       const s = this.project(e.center());
       if (s && !s.off) continue;
       const yaw = yawOf(e.pos.x - Camera.pos.x, e.pos.z - Camera.pos.z);

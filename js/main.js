@@ -3,7 +3,7 @@
 // runs in core.js at a fixed 120 Hz.
 
 (function boot() {
-  let last = performance.now();
+  let last = performance.now(), unlockedT = 0;
   function frame(now) {
     const realDt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
@@ -16,19 +16,31 @@
       else if (Game.state === 'paused' && !Input.pressed.has('Escape')) UI.resumeGame();
       Input.consume();
     }
+    // the lock as the browser has it; playing without it for more than a moment (a hotkey took it, say) pauses,
+    // so the resume panel is there to take it back
+    Input.syncLock();
+    unlockedT = Game.state === 'playing' && Input.lockRequired && !Input.pointerLocked && !Input.lockPending ? unlockedT + realDt : 0;
+    if (unlockedT > 0.35) { unlockedT = 0; Game.pause(); }
     const look = Input.takeLook();
     // a bug in one frame is logged, not allowed to stop the loop
     try {
+      const wheel = Input.takeWheel();
       if (Game.state === 'playing') {
-        if (!Game.cineActive()) Camera.look(look.x, look.y);
+        if (!Game.cineActive()) { Camera.look(look.x, look.y); Camera.zoom(wheel); }
         Game.step(realDt);
         Render.interp();
-        const p = Game.player;
-        Camera.follow(p, realDt);
-        Camera.update(realDt, S.camera.distance, p.dashT > 0 || !!p.iaido);
+        const p = Game.player, C = Game.cine;
+        if (C && C.shot && !C.closing) Camera.update(realDt, Camera.cine(C, realDt), 0);
+        else {
+          if (Camera.cineView) Camera.endCine(p, C && C.focus);
+          Camera.follow(p, realDt);
+          Camera.update(realDt, S.camera.distance, p.dashT > 0 || p.iaido ? 8 : 5 * clamp((Controller.hspeed(p) - PC.RUN) / (PC.SPRINT - PC.RUN), 0, 1));
+        }
       } else if (Game.state === 'menu') {
-        Camera.orbit(Arena.center(), Game.realTime);
-        Camera.update(realDt, 9);
+        // the title screen: a slow orbit framed for the arena
+        const O = World.def.orbit;
+        Camera.orbit(Arena.center(), Game.realTime, O.pitch, O.lift);
+        Camera.update(realDt, O.dist);
         Input.consume();
       } else {
         if (Game.player) { Render.interp(); Camera.update(realDt); }
@@ -45,13 +57,16 @@
       document.getElementById('nogl').hidden = false;
       return;
     }
-    World.build(STREET);
-    Gfx.buildLevel(STREET);
+    Arena.load('crossroads');
     Render.prewarm();
     Input.init(gl);
     Input.gameKeysActive = () => Game.state === 'playing';
-    // Esc never reaches the page while the pointer is locked, so losing the lock is what pauses
-    Input.onLockChange = (locked) => { if (!locked && Game.state === 'playing') Game.pause(); };
+    // Esc never reaches the page while the pointer is locked, so losing the lock is what pauses; a lock that turns
+    // up while a panel is open (and nothing asked for it) is handed back, so the panel keeps its cursor
+    Input.onLockChange = (locked) => {
+      if (!locked && Game.state === 'playing') Game.pause();
+      else if (locked && Game.state !== 'playing' && !Input.lockPending) Input.releaseLock();
+    };
     UI.init();
     UI.applyVisualToggles();
     Game.toMenu();
