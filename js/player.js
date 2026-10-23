@@ -862,7 +862,6 @@ class Player {
     if (!S.gameplay.invincible && this.shield < PC.PARRY_COST) {
       Sound.play('noShield');
       this.shieldFlash = 0.5;
-      FX.text('NO SHIELD', { x: this.pos.x, y: this.pos.y + 2.6, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.6, vy: 1.8 });
       return;
     }
     this.shield = Math.max(0, this.shield - PC.PARRY_COST);
@@ -1052,7 +1051,7 @@ class Player {
     if (this.dead) return;
     const n = Math.min(12, kills * 4);
     this.heal(n);
-    FX.text('+' + n + ' HP', { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#7dff8a', always: true, dur: 0.8, vy: 1.8 });
+    FX.text('+' + n, { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#7dff8a', dur: 0.8, vy: 1.8 });
   }
   chainLightning(c, I) {
     const arc = Game.has('arc'), range = arc ? 27.3 : 18.2, chainDmg = arc ? 40 : 55;
@@ -1113,7 +1112,6 @@ class Player {
     if (!free && !S.gameplay.invincible && this.shield < PC.TETHER_COST) {
       Sound.play('noShield');
       this.shieldFlash = 0.5;
-      FX.text('NO SHIELD', { x: this.pos.x, y: this.pos.y + 2.6, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.6, vy: 1.8 });
       return;
     }
     if (!free) { this.shield = Math.max(0, this.shield - PC.TETHER_COST); this.shieldDelay = Math.max(this.shieldDelay, 1.4); this.regenOn = false; }
@@ -1317,7 +1315,7 @@ class Player {
         Sound.play('pulse', {}, ec);
       } else if (dealt > 0 && T.paid && this.shieldOffT <= 0) {
         this.shield = Math.min(PC.MAX_SHIELD, this.shield + PC.TETHER_COST);
-        FX.text('+' + PC.TETHER_COST + ' SHIELD', { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.7, vy: 1.6 });
+        FX.text('+' + PC.TETHER_COST, { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#5ad8ff', dur: 0.7, vy: 1.6 });
       }
       this.yaw = yawOf(ux, uz);
       FX.swoosh({ follow: this, oy: this.chestH(), yaw: this.yaw, tilt: 0.3, r: 2.7, span: 3.2, dir: 1, sweep: 0.06, dur: 0.2, thick: 0.35 });
@@ -1438,7 +1436,6 @@ class Player {
         if (shield0 >= PC.SHIELD_OVERFLOW_AT) dmg = 0;
         Sound.play('shieldBreak');
         FX.sparks(c, 16, null, TAU, 5.5, 18, { c0: '#ffffff', c1: '#5ad8ff', c2: '#1a6aa0' });
-        FX.text('SHIELD BROKEN', { x: this.pos.x, y: this.pos.y + 2.6, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 0.8 });
         this.iframes = dmg > 0 ? 0.6 : 0.9;
       } else Sound.play('shieldHit');
       FX.ring(c, 0.5, 1.5, 0.18, { c: '#2a8ad0', flat: false });
@@ -1495,7 +1492,6 @@ class Player {
     FX.ghost('#ffffff', 0.5, 0.8);
     FX.sparks(c, 14, u, 1.4, 5.5, 20, { c0: '#ffffff', c1: '#ff8a9a', c2: '#781e2a' });
     FX.light(c, '#ffffff', 4, 6, 0.3);
-    FX.text('DODGED', { x: this.pos.x, y: this.pos.y + 2.4, z: this.pos.z }, { c: '#ffffff', always: true, dur: 0.8, vy: 1.4 });
     Sound.play('perilDodge');
     Game.slowmo(0.3, 0.4, true);
     FPFX.kick('dodge');
@@ -1514,7 +1510,6 @@ class Player {
     this.shield = 0; this.shieldOffT = dur;
     this.shieldDelay = Math.max(this.shieldDelay, dur); this.regenOn = false;
     Sound.play('shieldBreak');
-    FX.text('SHIELD DISABLED', { x: this.pos.x, y: this.pos.y + 2.9, z: this.pos.z }, { c: '#5ad8ff', always: true, dur: 1.2, vy: 1.4 });
     FX.elec(this.center(), 1.3, 6, { outer: '#2ab8d8', core: '#ffffff' });
   }
   die() {

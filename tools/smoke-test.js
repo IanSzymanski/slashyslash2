@@ -622,12 +622,16 @@ async function run(browser, file, errors) {
     ok(!R.shield, 'a pulse grenade kicked back into it breaks the shield at once');
     // phase 1 can't be skipped: hits stop at half health, and there it enrages into phase 2
     R = rival(0, -10); R.shield = false; R.hp = Math.floor(R.maxHp / 2) + 10;
+    Game.announcements = [];
     hurtEnemy(R, 60, { cause: 'slash' });
     const gated = R.hp === Math.floor(R.maxHp / 2);
     T.frame(2);
     const enr = !!(Game.cine && Game.cine.kind === 'enrage') && R.phase === 2;
     for (let i = 0; i < 60 * 6 && Game.cineActive(); i++) T.frame(1);
-    ok(gated && enr && !Game.cineActive() && R.phase === 2 && !R.shield && !!R.storm, 'damage stops at half health, where it enrages in a cutscene and fights on in phase 2 as the street erupts');
+    ok(gated && enr && !Game.cineActive() && R.phase === 2 && !R.shield && !Game.hazards.some((h) => h.kind === 'eruption'), 'damage stops at half health, where it enrages in a cutscene and fights on in phase 2 (no eruptions)');
+    // phase 2 keeps its blue, and the change puts no words on screen
+    const tints = Object.values(R.tints()), notBlue = tints.filter((c) => /^#ff/i.test(c) && c.toLowerCase() !== '#ffffff');
+    ok(!notBlue.length && !Game.announcements.length, `phase 2 keeps its blue lights (${notBlue.length ? 'red: ' + notBlue.join(' ') : 'no red'}) and no banner or caption (${Game.announcements.map((a) => a.text).join(', ') || 'none'})`);
     // phase 2: parrying its swing locks blades and it raises a guard; swinging into the guard gets you parried and a
     // riposte in bullet time; parrying the riposte stuns it
     R = rival(0, -3, { phase2: true });
@@ -668,8 +672,10 @@ async function run(browser, file, errors) {
     }
     const legAng = (L) => Math.abs(angDiff(yawOf(L.px - L.x, L.pz - L.z), yawOf(L.vx, L.vz))) * 180 / Math.PI;
     const legSide = (L) => sign((L.px - L.x) * L.vz - (L.pz - L.z) * L.vx);
-    ok(legs.length === 3 && legAng(legs[0]) > 40 && legAng(legs[1]) > 40 && legSide(legs[0]) !== legSide(legs[1]) && legs[2].cut && closest < 1.8,
-      `a sword dash chain goes side (${legs[0] ? legAng(legs[0]).toFixed(0) : '-'} deg), other side (${legs[1] ? legAng(legs[1]).toFixed(0) : '-'} deg), then cuts through you (closest ${closest.toFixed(1)} m)`);
+    // (still too far off for the cut after the side legs, it boosts straight in first)
+    const lastLeg = legs[legs.length - 1], boostIn = legs.length === 4 && !legs[2].cut && legAng(legs[2]) < 25;
+    ok((legs.length === 3 || boostIn) && legAng(legs[0]) > 40 && legAng(legs[1]) > 40 && legSide(legs[0]) !== legSide(legs[1]) && lastLeg && lastLeg.cut && closest < 1.8,
+      `a sword dash chain goes side (${legs[0] ? legAng(legs[0]).toFixed(0) : '-'} deg), other side (${legs[1] ? legAng(legs[1]).toFixed(0) : '-'} deg),${boostIn ? ' boosts in,' : ''} then cuts through you (closest ${closest.toFixed(1)} m)`);
     // zoning backs off to its range; charging (phase 2) closes in
     R = rival(0, -6, { move: true }); R.mode = 'zone'; R.modeT = 99;
     for (let i = 0; i < 60 * 3; i++) T.frame(1);
@@ -685,6 +691,11 @@ async function run(browser, file, errors) {
     let roofT = -1;
     for (let i = 0; i < 60 * 8 && roofT < 0; i++) { T.frame(1); if (R.onGround && Math.abs(R.pos.y - 6) < 0.3) roofT = i / 60; }
     ok(roofT >= 0, `on a 6 m rooftop it boosts up after you (${roofT >= 0 ? 'there in ' + roofT.toFixed(1) + ' s' : 'never got there'})`);
+    // charging from far off in phase 2, it takes a long dash chain in rather than leaping
+    R = rival(0, -24, { phase2: true, think: true, move: true }); R.mode = 'charge'; R.modeT = 99; R.cds.chain = 0; R.cds.closer = 0; R.cds.combo = 99; R.cds.wave = 99;
+    let longChain = '', leapt = false;
+    for (let i = 0; i < 60 * 2 && !longChain; i++) { T.frame(1); if (R.act && R.act.kind === 'chain') longChain = R.act.name; leapt = leapt || !!R.leap || (R.act && R.act.kind === 'dive'); }
+    ok(['blitz', 'longZigzag', 'sweep', 'zigzag3'].includes(longChain) && !leapt, `charging from 24 m it takes a long dash chain in (${longChain || 'none'}${leapt ? ', leapt first' : ''})`);
     // phase 1 always zones: it never picks charging, tether-zips to a vantage at range, and cuts and boosts away
     // when you crowd it
     R = rival(0, -6, { move: true, think: true });
@@ -702,7 +713,7 @@ async function run(browser, file, errors) {
     ok(!charged && zipped && zipD > 8 && zipShot && shoved.startsWith('shove') && shoveD > 4,
       `phase 1 only zones: it zips to a vantage ${zipD.toFixed(1)} m from you ${zipped && zipped.land.y > 1 ? zipped.land.y.toFixed(1) + ' m up' : 'on the street'} with a clear shot, and crowded it cuts and boosts away (${shoved || 'nothing'}, to ${shoveD.toFixed(1)} m)`);
     // the dive bomb: a charge, a leap high over you, a flash as the mark locks, then a fast dive onto it
-    R = rival(0, -9, { phase2: true }); R.storm = null; Game.hazards = [];
+    R = rival(0, -9, { phase2: true });
     S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
     R.startDive(p);
     let diveTop = 0, flashAt = -1, diveAt = -1, impactAt = -1;
@@ -716,7 +727,7 @@ async function run(browser, file, errors) {
     ok(diveTop > 12 && flashAt > 0 && diveAt > flashAt && impactAt - diveAt < 20 && p.hp + p.shield < PC.MAX_HP + PC.MAX_SHIELD,
       `its dive bomb leaps ${diveTop.toFixed(1)} m, flashes ${((diveAt - flashAt) / 60).toFixed(2)} s before diving, comes down in ${((impactAt - diveAt) / 60).toFixed(2)} s and hits you on the mark`);
     // its blade waves can't be sent back: a parry breaks one on the blade
-    R = rival(0, -12, { phase2: true }); R.storm = null; Game.hazards = [];
+    R = rival(0, -12, { phase2: true });
     p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0; p.parryCD = 0;
     const rhp = R.hp, w = new BladeWave({ x: R.pos.x, y: p.pos.y + 0.7, z: R.pos.z + 1.2 }, { x: 0, y: 0, z: 1 }, 12, R, false);
     Game.projectiles.push(w);

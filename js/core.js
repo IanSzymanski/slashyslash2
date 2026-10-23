@@ -194,7 +194,7 @@ const Game = {
     Sound.play('ultReady');
     Input.clear(); Input.consume();
     UI.hideAll();
-    this.announce(UPGRADES[id].name.toUpperCase(), UPGRADES[id].desc.toUpperCase(), '#ffd070', 2.6, true);
+    this.announce(UPGRADES[id].name.toUpperCase(), null, '#ffd070', 2.2, true);
   },
   rankMul() { const r = this.rank(); return r ? r.mul : 1; },
   // getting hit costs most of your style

@@ -368,31 +368,24 @@ const Render = {
     }
   },
   // ---------- the rival ----------
-  // Its health along the bottom of the screen with the half-health mark of phase 1, its shield and stance.
+  // Its health along the bottom of the screen with the half-health mark of phase 1 and its shield.
   drawBossBar(ctx, b, t) {
     const w = 220, x = Math.round(VIEW_W / 2 - w / 2), y = VIEW_H - 18;
-    drawText(ctx, b.name, x, y - 9, { color: b.phase === 2 ? '#ff8a9a' : '#bfd4ff' });
-    const stance = b.dying ? '' : b.mode === 'charge' ? 'CHARGING' : 'ZONING';
-    if (stance) drawText(ctx, stance, x + w, y - 9, { align: 'right', color: b.mode === 'charge' ? '#ffd0d8' : '#7a9ab8' });
+    drawText(ctx, b.name, x, y - 9, { color: '#bfd4ff' });
     ctx.fillStyle = '#0b0910'; ctx.fillRect(x - 1, y - 1, w + 2, 6);
     ctx.fillStyle = '#300a12'; ctx.fillRect(x, y, w, 4);
     const k = Math.max(0, b.hp) / b.maxHp;
-    ctx.fillStyle = b.stunT > 0 && ((t * 10) | 0) % 2 ? '#ffffff' : b.phase === 2 ? '#ff3048' : '#4a7aff'; ctx.fillRect(x, y, Math.round(w * k), 4);
-    ctx.fillStyle = b.phase === 2 ? '#ff9aa8' : '#a8c4ff'; ctx.fillRect(x, y, Math.round(w * k), 1);
+    ctx.fillStyle = b.stunT > 0 && ((t * 10) | 0) % 2 ? '#ffffff' : '#4a7aff'; ctx.fillRect(x, y, Math.round(w * k), 4);
+    ctx.fillStyle = '#a8c4ff'; ctx.fillRect(x, y, Math.round(w * k), 1);
     if (!b.duel && b.phase === 1) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + w / 2, y - 2, 1, 8); }
-    let sub = null, col = '#7a9ab8';
     if (b.shield) {
       ctx.globalAlpha = 0.6;
       ctx.fillStyle = '#9cc4ff';
       for (let i = 0; i < w; i += 2) if (((i + ((t * 20) | 0)) >> 1) % 3) ctx.fillRect(x + i, y, 1, 4);
       ctx.globalAlpha = 1;
-      sub = b.cracks ? `SHIELD CRACKED ${b.cracks}/${SHIELD_CRACKS}` : 'SHIELDED: RETURN ITS BOLTS OR ITS GRENADE'; col = '#9cc4ff';
-    } else if (b.stunT > 0) { sub = 'STUNNED'; col = '#ffffff'; }
-    else if (b.phase === 1 && !b.dying) sub = 'SHIELD BACK IN ' + Math.ceil(b.shieldDownT);
-    if (sub) drawText(ctx, sub, VIEW_W / 2, y + 7, { align: 'center', color: col });
+    }
   },
-  // Its riposte (gold: parry) or red flash (red: dash to its back) in bullet time: a reticle on its eye closes
-  // as the flash nears, with what to do under it.
+  // Its riposte (gold) or red flash (red) in bullet time: a reticle on its eye closes as the flash nears.
   drawParryCue(ctx, k, t) {
     const r = Game.btOwner, p = Game.player, peril = Game.btKind === 'peril';
     if (!r || r.dead || !p || p.dead || !r.visorPos) return;
@@ -414,7 +407,6 @@ const Render = {
       const a = i * (Math.PI / 2) + Math.PI / 4;
       pline(ctx, s.x + Math.cos(a) * rr, s.y + Math.sin(a) * rr, s.x + Math.cos(a) * (rr + 4), s.y + Math.sin(a) * (rr + 4), 1);
     }
-    if (q >= 1) drawText(ctx, peril ? 'DASH BEHIND IT' : 'PARRY', s.x, s.y + rr + 6, { align: 'center', color: col });
   },
   // Cutscene letterbox bars, the skip prompt, captions, and the title and knockout cards.
   drawCine(ctx, C, t) {
