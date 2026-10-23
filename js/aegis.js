@@ -272,8 +272,7 @@ const AegisPose = {
           o.armR = { D: this.swingDir(A, 0, k), reach: 0.9 }; o.twist = -0.8 * k * A.dir;
         } else o.armR = { D: this.swingDir(A, 0, k), reach: m.zone || m.close ? 0.8 : 0.9 };
         o.blade = 1;
-        if (m.air && !e.onGround) { o.legs = 'air'; }
-        else { o.legs = 'plant'; o.fF = [0.22, 0, -0.42]; o.fB = [-0.24, 0, 0.45]; o.drop = (m.quake ? 0.3 : 0.18) * k; }
+        o.legs = 'plant'; o.fF = [0.22, 0, -0.42]; o.fB = [-0.24, 0, 0.45]; o.drop = (m.quake ? 0.3 : 0.18) * k;
         o.lean = m.thrust ? o.lean : m.down ? -0.15 * k : 0.15 * k;
         o.armL = { rot: [0.5 * k, -0.6, 0.5] };
         o.tremble = m.close ? 0.6 : 0;
@@ -299,6 +298,14 @@ const AegisPose = {
         o.cannon = a.dir || e.aimDir; o.twist = 0.45; o.lean = 0.05;
         o.armR = { rot: [0.25, 0.55, 0.4] }; o.armL = { rot: [0.6, -0.25, 0.7] };
         if (a.phase !== 'rise') o.legs = 'hover';
+        return true;
+      }
+      case 'strike': {
+        // the shoulder cannon brought round onto where the next probe goes, the free arm braced
+        const q = a.plan[Math.min(a.shots, a.plan.length - 1)], c = e.lensPos();
+        if (q) { const dx = q.x - c.x, dz = q.z - c.z, dh = Math.hypot(dx, dz) || 1; o.cannon = { x: dx / dh, y: 0.55, z: dz / dh }; }
+        o.twist = 0.45; o.armL = { rot: [0.6, -0.25, 0.7] };
+        if (o.legs === 'stand' || o.legs === 'plant' || o.legs === 'walk') { o.legs = 'plant'; o.fF = [0.24, 0, -0.32]; o.fB = [-0.24, 0, 0.38]; o.drop = 0.14; }
         return true;
       }
       case 'grenade': {
@@ -427,11 +434,213 @@ const AegisPose = {
     return o;
   },
 
+  // ---------- AEGIS as the player (aegisplayer.js) ----------
+  // The same pose description, read from the player's state: its moves on the shared controller, the gun
+  // arm along the aim, the cannon along the beam or the strike's arc, the block and the burst.
+  pickPlayer(p) {
+    const S = AEGIS_SCALE, f = p.fwd(), v = p.vel, hs = Math.hypot(v.x, v.z);
+    const o = {
+      lean: 0, twist: 0, drop: 0, roll: 0, legs: 'stand', walk: 0, amt: 0, fF: null, fB: null, kneel: 0,
+      armR: { rot: [0.15, 0.12, 0.35] }, armL: { rot: [0.1, -0.12, 0.3] }, head: 0, headYaw: 0, cannon: null, blade: p.bladeOut, tremble: 0,
+    };
+    // crouched or sliding, the body sinks into the shorter hull
+    const sink = Math.max(0, p.M.H - p.h);
+    const plant = (fF, fB, drop) => { o.legs = 'plant'; o.fF = fF; o.fB = fB; o.drop = Math.max(drop, sink * 0.9); };
+    const stance = (k = 1) => { if (p.onGround) plant([0.22, 0, -0.42], [-0.24, 0, 0.42], 0.16 * k); else o.legs = p.hovering() ? 'hover' : 'air'; };
+    o.headYaw = clamp(angDiff(p.yaw, p.aimYaw), -0.8, 0.8);
+    o.head = clamp(-p.aimDir.y * 0.6, -0.5, 0.5);
+    if (p.dead) {
+      // down on one knee, slumped over it
+      const k = clamp(p.deadT / 0.4, 0, 1);
+      o.legs = 'kneel'; o.kneel = k; o.drop = lerp(0.1, 0.75 * S, k); o.lean = 0.7 * k; o.head = 0.6;
+      o.armR = { rot: [0.5, 0.25, 0.4] }; o.armL = { rot: [0.45, -0.25, 0.5] }; o.blade = 0; o.headYaw = 0;
+      return o;
+    }
+    this.playerMove(p, o, f, hs, sink, plant);
+    // what its arms are doing over the top of the movement
+    const B = p.beamAct, A = p.attack, s = p.sheathe, T = p.tether;
+    if (p.kickAnim) {
+      // the kick off the grenade: a boot along the kick, then the jets carry it back
+      const k = p.kickAnim.t / p.kickAnim.dur, d = p.kickAnim.dir;
+      o.legs = 'plant'; o.fF = [0.15, clamp(1.0 + d.y, 0.3, 1.6), -0.8]; o.fB = [-0.2, 0.2, 0.3]; o.lean = -0.3 + 0.4 * k;
+      o.armR = { rot: [-0.8, 0.9, 0.3] }; o.armL = { rot: [-0.8, -0.9, 0.3] };
+      return o;
+    }
+    if (p.hurtT > 0 && !p.ultAim) {
+      o.lean = -0.35; o.head = -0.3; o.armR = { rot: [-0.6, 0.6, 0.3] }; o.armL = { rot: [-0.5, -0.6, 0.3] };
+      if (p.onGround) plant([0.18, 0, -0.45], [-0.18, 0, 0.4], 0.12);
+      return o;
+    }
+    if (B) {
+      // the cannon along the beam, the left shoulder turned in, braced or hanging on the jets
+      o.cannon = B.dir; o.twist = 0.45; o.lean = 0.05; o.head = clamp(-B.dir.y * 0.5, -0.4, 0.4); o.headYaw = 0.3;
+      o.armR = { rot: [0.25, 0.55, 0.4] }; o.armL = { rot: [0.6, -0.25, 0.7] };
+      if (p.onGround) plant([0.24, 0, -0.34], [-0.26, 0, 0.4], 0.14); else o.legs = 'hover';
+      o.tremble = B.phase === 'fire' ? 0.35 : 0;
+      return o;
+    }
+    if (p.ultAim || p.ultCharging > 0 || p.probeT > 0) {
+      // the cannon raised along the arc (or recoiling off the shot), the free arm braced
+      const P = p.ultAim && p.ultAim.plan;
+      if (P) { const vl = Math.hypot(P.v.x, P.v.y, P.v.z) || 1; o.cannon = { x: P.v.x / vl, y: P.v.y / vl, z: P.v.z / vl }; }
+      else o.cannon = { x: f.x, y: p.probeT > 0 ? 0.9 : 0.6, z: f.z };
+      o.twist = 0.4; o.lean = p.probeT > 0 ? -0.2 : 0.05; o.headYaw = 0.25;
+      o.armL = { rot: [0.9, -0.3, 1.2] }; o.armR = { rot: [0.35, 0.45, 0.6] };
+      if (p.onGround) plant([0.26, 0, -0.32], [-0.28, 0, 0.42], 0.22); else o.legs = 'hover';
+      o.tremble = p.ultCharging > 0 ? 0.6 : 0;
+      return o;
+    }
+    if (p.burstT > 0) {
+      // the blade driven forward to the full reach of the arm, the body lunging behind it
+      const d = p.burstDir || { x: f.x, y: 0, z: f.z };
+      o.armR = { D: d, reach: 1 }; o.blade = 1; o.lean = 0.45; o.twist = -0.4;
+      o.armL = { rot: [0.6, -0.8, 0.5] };
+      if (p.onGround) plant([0.24, 0, -0.62], [-0.26, 0, 0.5], 0.3);
+      return o;
+    }
+    if (s) {
+      if (s.empowered) {
+        // a block taken: the arm drawn right back, blade levelled forward, shaking as the burst builds
+        const k = p.burstCharge(s), r = p.right();
+        o.armR = { D: { x: -f.x * 0.75 + r.x * 0.35, y: -0.1, z: -f.z * 0.75 + r.z * 0.35 }, reach: lerp(0.75, 0.55, k) };
+        o.twist = 0.5 + 0.2 * k; o.lean = 0.15; o.tremble = 0.4 + 0.8 * k;
+        o.armL = { rot: [-0.6, -0.4, 0.5] };
+      } else {
+        // the right arm raised across the body, the blade up to take the blow
+        const r = p.right();
+        o.armR = { D: { x: f.x * 0.45 - r.x * 0.55, y: 0.7, z: f.z * 0.45 - r.z * 0.55 }, reach: 0.55 };
+        o.armL = { rot: [1.1, -0.2, 1.2] }; o.lean = 0.12; o.twist = -0.15;
+      }
+      o.blade = 1;
+      stance();
+      return o;
+    }
+    if (A && A.groundCut) {
+      // the scythe: low across the slide, the blade swept along the street
+      const u = easeOutCubic(clamp(A.t / A.sweep, 0, 1));
+      o.armR = { D: this.swingDir(A, u), E: this.swingEdge(A, u), reach: 0.95 }; o.blade = 1; o.lean = 0.2;
+      plant([0.22, 0, -0.7], [-0.2, 0, 0.1], 0.5);
+      return o;
+    }
+    if (A) {
+      o.blade = 1;
+      if (A.wind && A.t < A.wind) {
+        // drawn back past the start of the arc, shaking with the effort
+        const k = easeOutCubic(A.t / A.wind);
+        o.armR = { D: this.swingDir(A, 0, k), reach: A.thrust ? 0.5 : 0.9 }; o.lean = A.heavy ? -0.15 * k : 0.1; o.tremble = A.heavy ? 0.8 : 0.3;
+        if (A.thrust) o.twist = 0.5 * k;
+      } else {
+        const u = easeOutCubic(clamp((A.t - (A.wind || 0)) / A.sweep, 0, 1));
+        o.armR = { D: this.swingDir(A, u), E: this.swingEdge(A, u), reach: A.thrust ? 1 : 0.95 };
+        o.lean = A.thrust ? 0.45 : 0.25 + (A.tilt > 1 ? 0.3 * u : 0);
+        o.twist = A.thrust ? -0.4 : Math.abs(A.tilt) < 1 ? clamp(-A.dir * (u - 0.5) * A.span * 0.3, -0.6, 0.6) : 0;
+      }
+      o.armL = { rot: [0.3, -0.7, 0.6] };
+      if (p.onGround) plant([0.22, 0, A.thrust || A.boost ? -0.6 : -0.5], [-0.24, 0, 0.42], A.heavy ? 0.3 : 0.22);
+      return o;
+    }
+    if (p.plunge) {
+      // driving down on the jets, the blade under it
+      o.legs = 'air'; o.lean = 0.35; o.armR = { D: { x: f.x * 0.2, y: -1, z: f.z * 0.2 }, reach: 0.95 }; o.blade = 1; o.armL = { rot: [-0.4, -0.8, 0.4] };
+      return o;
+    }
+    const pend = p.atkPend;
+    if (pend && !pend.dash && pend.t > 0.05 && Input.isDown('attack')) {
+      // holding for the cleave (or the plunge in the air): the blade hauled up over the shoulder
+      const k = clamp((pend.t - 0.05) / 0.12, 0, 1);
+      o.armR = { D: { x: -f.x * 0.4 * k, y: lerp(-0.3, 1, k), z: -f.z * 0.4 * k }, reach: 0.85 }; o.blade = 1; o.lean = -0.1 * k; o.tremble = k >= 1 ? 0.7 : 0;
+      return o;
+    }
+    if (T && (T.phase === 'fly' || (T.phase === 'attached' && (T.mode === 'zip' || T.mode === 'tow')))) {
+      // the left arm out along the line
+      const h = p.hand(), dx = T.pos.x - h.x, dy = T.pos.y - h.y, dz = T.pos.z - h.z, l = Math.hypot(dx, dy, dz) || 1;
+      o.armL = { D: { x: dx / l, y: dy / l, z: dz / l }, reach: 0.98 };
+      if (T.mode === 'zip') { o.legs = 'air'; o.lean = 0.3; }
+      o.twist = 0.3;
+    }
+    if (p.swap) {
+      // the forearm brought up in front of the visor while the housing reconfigures
+      const k = clamp(p.swap.t / AP.SWITCH, 0, 1), r = p.right();
+      o.armR = { D: { x: f.x * 0.8 - r.x * 0.4, y: 0.25, z: f.z * 0.8 - r.z * 0.4 }, reach: 0.55 }; o.tremble = 0.2 + 0.4 * k;
+      o.blade = ((p.t * (8 + 24 * k)) | 0) % 2 ? Math.max(o.blade, 0.4 * k) : o.blade * 0.5;
+    } else if (p.utilT > 0) {
+      // the mode set: the arm thrown out to the side
+      const r = p.right();
+      o.armR = { D: { x: r.x * 0.8 + f.x * 0.4, y: -0.2, z: r.z * 0.8 + f.z * 0.4 }, reach: 0.98 };
+    } else if (p.mode === 'gun' && (p.gun.firing || p.aimHold > 0)) {
+      // the forearm housing along the aim, the right shoulder turned in
+      o.armR = { D: p.aimDir, reach: 0.98 }; o.twist = -0.3; o.blade = 0;
+      o.armL = { rot: [0.35, -0.3, 0.5] };
+      o.tremble = p.gun.firing ? 0.25 : 0;
+    }
+    return o;
+  },
+  // the legs and body for how the player is moving
+  playerMove(p, o, f, hs, sink, plant) {
+    const S = AEGIS_SCALE, v = p.vel;
+    if (p.dashT > 0) {
+      const l = Math.hypot(p.dashVX, p.dashVZ) || 1, fv = (p.dashVX * f.x + p.dashVZ * f.z) / l, sv = (p.dashVX * -f.z + p.dashVZ * f.x) / l;
+      o.legs = 'dash'; o.lean = 0.25 + 0.35 * Math.max(0, fv) - 0.3 * Math.max(0, -fv); o.roll = clamp(sv, -1, 1) * 0.45; o.drop = 0.1 * S;
+      o.armR = { rot: [-0.5 * fv + 0.3, 0.35, 0.4] }; o.armL = { rot: [-0.4 * fv + 0.3, -0.45, 0.5] };
+      return;
+    }
+    if (p.cling) {
+      // side on to the wall, the left hand driven into it, legs hanging
+      o.legs = 'hover'; o.armL = { reach: p.clingHand(p.cling.n) }; o.lean = 0.05;
+      return;
+    }
+    if (p.vault) {
+      o.legs = 'air'; o.lean = 0.35;
+      if (p.vault.t / p.vault.dur < 0.8) o.armL = { reach: p.vault.plant };
+      return;
+    }
+    if (p.mantle) {
+      o.legs = 'air'; o.lean = 0.5; o.armR = { rot: [-2.4, 0.3, 0.4] }; o.armL = { rot: [-2.4, -0.3, 0.4] };
+      return;
+    }
+    if (p.skid) {
+      // dropped low, the left hand dug into the street
+      plant([0.24, 0, -0.35], [-0.2, 0, 0.55], 0.45); o.lean = 0.5; o.armL = { reach: p.skidHand() };
+      return;
+    }
+    if (p.sliding) {
+      // leaning back on the slide, the leading leg out in front
+      plant([0.22, 0, -0.75], [-0.2, 0, 0.05], 0.5); o.lean = -0.5;
+      o.armR = { rot: [0.6, 0.4, 0.4] }; o.armL = { rot: [0.9, -0.5, 0.5] };
+      return;
+    }
+    if (p.hovering()) {
+      o.legs = 'hover'; o.lean = clamp((v.x * f.x + v.z * f.z) * 0.04, -0.3, 0.3);
+      o.armR = { rot: [0.2, 0.35, 0.3] }; o.armL = { rot: [0.2, -0.35, 0.3] };
+      return;
+    }
+    if (!p.onGround) {
+      o.legs = 'air'; o.lean = 0.1 + clamp(hs / 30, 0, 0.3);
+      o.armR = { rot: [-0.2, 0.45, 0.4] }; o.armL = { rot: [-0.2, -0.45, 0.4] };
+      return;
+    }
+    if (p.crouching) {
+      plant([0.24, 0, -0.3], [-0.24, 0, 0.32], 0.3); o.lean = 0.35;
+      return;
+    }
+    if (hs > 0.6) {
+      // a heavy run: the faster, the deeper the lean and the longer the stride
+      const k = clamp(hs / 9, 0, 1), fv = (v.x * f.x + v.z * f.z) / hs;
+      o.legs = 'walk'; o.walk = p.runPhase; o.amt = clamp(hs / 4, 0.3, 1.1); o.lean = 0.08 + 0.35 * k * Math.max(0, fv) - 0.1 * Math.max(0, -fv) + p.accF * 0.15;
+      const sw = Math.sin(p.runPhase) * 0.5 * k;
+      o.armR = { rot: [0.25 - sw, 0.15, 0.45] }; o.armL = { rot: [0.25 + sw, -0.15, 0.45] };
+      return;
+    }
+    // planted, feet apart, a slow breath through the shoulders
+    const br = Math.sin(p.t * 2.2) * 0.02;
+    plant([0.2, 0, -0.18], [-0.22, 0, 0.18], 0.06 + br); o.lean = 0.06;
+  },
+
   apply(r, e) {
     const [T, P, D, E, U, F, A, X, Y] = this.temps();
-    const o = this.pick(e), B = r.bones, M = r.mesh, S = AEGIS_SCALE;
+    const o = e.isPlayer ? this.pickPlayer(e) : this.pick(e), B = r.bones, M = r.mesh, S = AEGIS_SCALE;
     Rig.reset(r);
-    e.tilt = o.tilt || 0;
+    if (!e.isPlayer) e.tilt = o.tilt || 0;
     const tr = () => (o.tremble ? rand(-0.012, 0.012) * o.tremble : 0);
     // body: drop and bank at the hips, lean shared by spine and chest, twist in the chest
     B.hips.position.y -= o.drop;
@@ -441,6 +650,10 @@ const AegisPose = {
     B.chest.rotation.x = -o.lean * 0.5;
     B.chest.rotation.y = o.twist;
     B.head.rotation.x = clamp(o.head + o.lean * 0.6, -0.6, 0.9);
+    // in first person the head and the shoulder cannon would sit on the lens: folded away
+    const fp = Camera.fp && e === Game.player;
+    B.head.scale.setScalar(fp ? 0.001 : 1);
+    B.cannon.scale.setScalar(fp ? 0.001 : 1);
     M.updateMatrixWorld(true);
     // legs
     const legIK = (side, tgt) => {

@@ -31,8 +31,10 @@ const Camera = {
     this.yaw -= dx * k;
     this.pitch = clamp(this.pitch - dy * k * (S.camera.invertY ? -1 : 1), -this.PITCH_MAX, this.PITCH_MAX);
   },
+  // the pivot rides this far over the feet: the character's standing height (AEGIS stands taller)
+  standH(p) { return p && p.M ? p.M.H : PC.HEIGHT; },
   snap(p) {
-    this.pivot.x = p.pos.x; this.pivot.y = p.pos.y + PC.HEIGHT + this.PIVOT_UP; this.pivot.z = p.pos.z;
+    this.pivot.x = p.pos.x; this.pivot.y = p.pos.y + this.standH(p) + this.PIVOT_UP; this.pivot.z = p.pos.z;
     this.yaw = p.yaw; this.pitch = -0.2; this.curDist = S.camera.distance;
   },
   // Smoothing on the vertical axis, so jumps don't jerk the view, and a slight trail on the horizontal, so
@@ -52,7 +54,7 @@ const Camera = {
     }
     this.pivot.x = damp(this.pivot.x, r.x, this.TRAIL, realDt); this.pivot.z = damp(this.pivot.z, r.z, this.TRAIL, realDt);
     if (Math.hypot(this.pivot.x - r.x, this.pivot.z - r.z) > 3) { this.pivot.x = r.x; this.pivot.z = r.z; }
-    this.pivot.y = damp(this.pivot.y, r.y + PC.HEIGHT + this.PIVOT_UP, 12, realDt);
+    this.pivot.y = damp(this.pivot.y, r.y + this.standH(p) + this.PIVOT_UP, 12, realDt);
     this.base = { x: r.x, y: r.y + Math.max(0.5, p.h - 0.3), z: r.z };
   },
   // A cutscene's shot: its owner sets Game.cine.shot = { look, yaw, pitch, dist, ease } and the view eases
@@ -76,7 +78,7 @@ const Camera = {
   endCine(p, focus) {
     this.cineView = null;
     if (p && focus && focus.pos && !focus.dead) { this.yaw = yawOf(focus.pos.x - p.pos.x, focus.pos.z - p.pos.z); this.pitch = -0.12; }
-    if (p) { this.pivot.x = p.pos.x; this.pivot.y = p.pos.y + PC.HEIGHT + this.PIVOT_UP; this.pivot.z = p.pos.z; }
+    if (p) { this.pivot.x = p.pos.x; this.pivot.y = p.pos.y + this.standH(p) + this.PIVOT_UP; this.pivot.z = p.pos.z; }
   },
   // the title screen's slow orbit around a point, looking down at pitch, the pivot lifted by lift
   orbit(c, realTime, pitch = -0.3, lift = 0) {

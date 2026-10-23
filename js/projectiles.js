@@ -349,7 +349,7 @@ class SlamRing {
     this.pos = { x: pos.x, y: pos.y, z: pos.z };
     this.speed = o.speed || 27.3; this.dur = o.dur || 0.6; this.dmg = o.dmg || 16; this.cause = o.cause || 'heavy';
     this.t = 0; this.dead = false; this.hit = new Set();
-    FX.ring({ x: pos.x, y: pos.y + 0.06, z: pos.z }, 0.3, this.speed * this.dur, this.dur, { c: '#ff3048', ease: false });
+    FX.ring({ x: pos.x, y: pos.y + 0.06, z: pos.z }, 0.3, this.speed * this.dur, this.dur, { c: o.c || '#ff3048', ease: false });
   }
   update(dt) {
     this.t += dt;

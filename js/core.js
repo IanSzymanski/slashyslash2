@@ -4,7 +4,7 @@
 
 // Style: hits build a meter that ranks you C to SSS. Repeating the same move earns less,
 // and the rank multiplies score and ultimate charge.
-const STYLE_GAIN = { lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, overload: 5 };
+const STYLE_GAIN = { lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, overload: 5, round: 1.2, beam: 1.5, burst: 14, strike: 3 };
 const STYLE_RANKS = [
   { th: 380, r: 'SSS', c: '#ffffff', mul: 2.5 }, { th: 260, r: 'SS', c: '#ffd070', mul: 2 }, { th: 170, r: 'S', c: '#ffb040', mul: 1.75 },
   { th: 100, r: 'A', c: '#ff5a6a', mul: 1.5 }, { th: 50, r: 'B', c: '#d0a0ff', mul: 1.25 }, { th: 20, r: 'C', c: '#9ab0d0', mul: 1.1 },
@@ -53,7 +53,7 @@ const Game = {
     this.state = 'playing';
     FX.clear();
     this.enemies = []; this.projectiles = []; this.hazards = []; this.pickups = []; this.cuts = []; this.props = [];
-    this.player = new Player(Arena.playerStart());
+    this.player = makePlayer(SaveData.character, Arena.playerStart());
     this.time = 0; this.acc = 0; this.slowScale = 1; this.slowT = 0; this.freezeT = 0; this.overT = 0; this.btT = 0; this.btKind = null; this.btOwner = null;
     this.cine = null; Input.locked = false;
     this.stats = { kills: 0, score: 0, maxCombo: 0, parries: 0, wave: 0, time: 0, damageTaken: 0, ults: 0 };
@@ -73,7 +73,7 @@ const Game = {
   pause() {
     if (this.state !== 'playing') return;
     this.state = 'paused';
-    if (this.player) { this.player.stopLoop('charge'); this.player.stopLoop('reel'); this.player.stopLoop('ult'); }
+    if (this.player) this.player.onPause();
     for (const e of this.enemies) if (e.stopLoops) e.stopLoops();
     Sound.setSlow(true);
     Input.releaseLock();
@@ -83,8 +83,7 @@ const Game = {
     if (this.state !== 'paused') return;
     this.state = 'playing';
     Sound.setSlow(this.slowT > 0);
-    if (this.player && this.player.sheathe) this.player.loops.charge = Sound.loop('charge');
-    if (this.player && this.player.zipping()) this.player.loops.reel = Sound.loop('reel');
+    if (this.player) this.player.onResume();
     Input.clear(); Input.consume();
     UI.hideAll();
   },
@@ -141,6 +140,7 @@ const Game = {
     if (p.sheathe) p.cancelSheathe();
     if (p.tether) p.releaseTether();
     p.attackQueued = null; p.atkPend = null; p.ultHold = 0; p.stopLoop('ult');
+    p.cancelActions();
     this.endBulletTime();
   },
   // Hands control back while the bars slide out.
@@ -182,7 +182,7 @@ const Game = {
     const opts = upgradeOffer();
     if (!opts.length) return;
     this.state = 'pick';
-    this.player.stopLoop('charge'); this.player.stopLoop('reel'); this.player.stopLoop('ult');
+    this.player.onPause();
     Sound.setSlow(true);
     UI.showPick(opts);
   },

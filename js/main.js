@@ -34,7 +34,8 @@
         else {
           if (Camera.cineView) Camera.endCine(p, C && C.focus);
           Camera.follow(p, realDt);
-          Camera.update(realDt, S.camera.distance, p.dashT > 0 || p.iaido ? 8 : 5 * clamp((Controller.hspeed(p) - PC.RUN) / (PC.SPRINT - PC.RUN), 0, 1));
+          // a bigger character is framed from further back (AEGIS-07 stands 2.4 m)
+          Camera.update(realDt, S.camera.distance * (p.camScale || 1), p.dashT > 0 || p.iaido ? 8 : 5 * clamp((Controller.hspeed(p) - p.M.RUN) / (p.M.SPRINT - p.M.RUN), 0, 1));
         }
       } else if (Game.state === 'menu') {
         // the title screen: a slow orbit framed for the arena

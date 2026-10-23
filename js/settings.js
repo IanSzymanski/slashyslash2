@@ -14,10 +14,11 @@ const ACTIONS = [
   { id: 'crouch', label: 'Crouch / Slide / Plunge' },
   { id: 'dash', label: 'Dash' },
   { id: 'attack', label: 'Slash (tap) / Heavy (hold)' },
-  { id: 'sheathe', label: 'Parry stance (costs shield)' },
-  { id: 'utility', label: 'Utility (cooldown)' },
+  { id: 'sheathe', label: 'Parry stance (costs shield) / AEGIS: beam or block' },
+  { id: 'utility', label: 'Utility (cooldown) / AEGIS: hold to switch mode' },
   { id: 'tether', label: 'Tether (tap fling / hold zip / grab)' },
   { id: 'ultimate', label: 'Ultimate (hold)' },
+  { id: 'reload', label: 'Reload (AEGIS gun)' },
   { id: 'pause', label: 'Pause' },
 ];
 
@@ -35,7 +36,8 @@ const DEFAULT_BINDINGS = {
   sheathe: ['KeyE', ''],
   utility: ['KeyF', ''],
   tether: ['Mouse2', ''],
-  ultimate: ['KeyR', ''],
+  ultimate: ['KeyQ', ''],
+  reload: ['KeyR', ''],
   pause: ['Escape', 'KeyP'],
 };
 
@@ -54,7 +56,8 @@ const DEFAULT_SETTINGS = {
     scrapper: true, gunner: true, drone: true, brute: true, shielder: true, crawler: true, grenadier: true, sniper: true, bossEndless: true,
   },
   gameplay: { parryWindow: 0.2, ultKills: 12, invincible: false, ultimate: 'sawblade' },
-  controls: { bindings: deepClone(DEFAULT_BINDINGS) },
+  // v: the binding layout's version (2: the ultimate on Q, reload on R)
+  controls: { v: 2, bindings: deepClone(DEFAULT_BINDINGS) },
   // distance in metres behind the pivot; fovKick widens the view on dashes and zips
   camera: { distance: 5, sensitivity: 1, invertY: false, fovKick: true },
   audio: { master: 0.8, sfx: 0.9, music: 0.45, muteOnBlur: true },
@@ -65,9 +68,15 @@ const DEFAULT_SETTINGS = {
   },
 };
 
-const S = deepMerge(deepClone(DEFAULT_SETTINGS), (() => {
-  try { return JSON.parse(safeStorageGet(SETTINGS_KEY) || 'null'); } catch (e) { return null; }
-})());
+const S = (() => {
+  let saved = null;
+  try { saved = JSON.parse(safeStorageGet(SETTINGS_KEY) || 'null'); } catch (e) { saved = null; }
+  const s = deepMerge(deepClone(DEFAULT_SETTINGS), saved);
+  // settings saved before the ultimate moved to Q (with R free for AEGIS's reload) keep a rebound ultimate
+  const b = saved && saved.controls && saved.controls.bindings;
+  if (b && !saved.controls.v && Array.isArray(b.ultimate) && b.ultimate[0] === 'KeyR' && !b.ultimate[1]) s.controls.bindings.ultimate = ['KeyQ', ''];
+  return s;
+})();
 // Old saves may have the wrong binding slot count.
 for (const a of ACTIONS) {
   const b = S.controls.bindings[a.id];
@@ -93,8 +102,9 @@ function applyPreset(name) {
   saveSettings();
 }
 
-// unlocks.aegis records the rival's defeat so it can become a playable character later.
-const SaveData = deepMerge({ bestWave: 0, bestScore: 0, demoCleared: false, bossKills: 0, unlocks: { aegis: false } }, (() => {
+// unlocks.aegis records the rival's defeat (AEGIS-07 is playable either way).
+// character: who the next run plays as ('ronin' or 'aegis')
+const SaveData = deepMerge({ bestWave: 0, bestScore: 0, demoCleared: false, bossKills: 0, unlocks: { aegis: false }, character: 'ronin' }, (() => {
   try { return JSON.parse(safeStorageGet(SAVE_KEY) || 'null'); } catch (e) { return null; }
 })());
 function saveProgress() { safeStorageSet(SAVE_KEY, JSON.stringify(SaveData)); }

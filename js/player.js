@@ -48,9 +48,16 @@ const IAIDO = {
   counter: { len: 15, path: 2.0, dmg: 135, arcR: 10.45, span: 4.4, lineW: 0.8, delayed: true, empowered: true, chain: true, post: 0.32, flash: 0.35, shake: 0.7, still: true },
 };
 
+// RONIN's effect colours and stance sounds; another character brings its own (Player.prototype.fxCol)
+const RONIN_COL = {
+  main: '#ff3048', ring: '#ff3a52', hot: '#ff7a3a', ghost: '#ff2a48', elec: { outer: '#ff2a44', core: '#ffffff' },
+  spark: { c0: '#ffffff', c1: '#ff8a9a', c2: '#a01828' }, stance: 'sheathe', lower: 'unsheathe',
+};
+
 class Player {
-  constructor(pos) {
-    Controller.init(this, pos);
+  // M: the movement table (sizes, speeds); another character can bring its own
+  constructor(pos, M = MOVE) {
+    Controller.init(this, pos, M);
     this.isPlayer = true;
     this.rp = { x: pos.x, y: pos.y, z: pos.z };
     this.yaw = pos.yaw || 0;
@@ -75,7 +82,7 @@ class Player {
     this.initScarf();
   }
   center() { return { x: this.pos.x, y: this.pos.y + this.h * 0.55, z: this.pos.z }; }
-  chestH() { return this.h >= PC.H ? PC.CHEST : this.h * 0.62; }
+  chestH() { return this.h >= this.M.H ? this.M.CHEST || PC.CHEST : this.h * 0.62; }
   chest() { return { x: this.pos.x, y: this.pos.y + this.chestH(), z: this.pos.z }; }
   head() { return { x: this.pos.x + fwdX(this.yaw) * 0.15, y: this.pos.y + this.h - 0.15, z: this.pos.z + fwdZ(this.yaw) * 0.15 }; }
   stopLoop(k) { if (this.loops[k]) { this.loops[k].stop(); this.loops[k] = null; } }
@@ -115,7 +122,7 @@ class Player {
     this.animT += dt;
     this.updateAim();
     const dec = (k) => { if (this[k] > 0) this[k] = Math.max(0, this[k] - dt); };
-    for (const k of ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT', 'utilT', 'utilFlash', 'bulletT', 'rollT']) dec(k);
+    for (const k of this.timerKeys()) dec(k);
     Controller.timers(this, dt);
     for (const m of this.hitMarks) m.t -= dt;
     this.hitMarks = this.hitMarks.filter((m) => m.t > 0);
@@ -136,29 +143,9 @@ class Player {
     if (this.dead) { this.updateDead(dt); return; }
 
     const I = this.intent();
-    this.updateSheathe(dt);
-    if (Input.wasPressed('dash')) { this.dashBuf = PC.INPUT_BUF; if (this.attack && !this.dashHold) this.dashHold = PC.CANCEL_RECOVERY; }
-    this.updateDashBuffer(dt, I);
-    this.updateTetherInput();
-    this.updateTether(dt);
-    if (Input.wasPressed('attack')) this.onAttackPressed();
-    this.updateAttackInput(dt);
-    if (Input.wasPressed('utility')) this.tryUtility();
+    this.updateCombat(dt, I);
     Controller.buffer(this, I);
-
-    // what the stance and swings do to movement (the 2D moveNormal modifiers)
-    let sp = 1;
-    if (this.sheathe) sp = this.onGround ? 38 / 152 : 70 / 152;
-    if (this.attack && this.onGround) sp *= this.attack.heavy && this.attack.t <= this.attack.act1 ? 0.25 : 0.45;
-    if (this.landLag > 0 || this.postPose > 0.12) sp *= 0.2;
-    this.speedMul = sp;
-    let gk = Game.gravMul();
-    if (this.attack && !this.onGround && this.vel.y < 0) gk *= 0.45;
-    if (this.sheathe && !this.onGround && this.sheathe.hover > 0) { gk *= 0.12; this.vel.y = Math.max(this.vel.y, -2.3); this.sheathe.hover -= dt; }
-    this.gravK = gk;
-    this.canJump = !this.sheathe;
-    this.canSlide = !this.attack && !this.sheathe;
-    this.canCling = !this.attack && !this.sheathe && !this.plunge && !this.tether && !this.iaido && !this.atkPend;
+    this.moveMods(dt, I);
     // anything that takes over the body lets go of a wall
     if (this.cling && (this.attack || this.sheathe || this.plunge || this.tether || this.iaido || this.dashT > 0 || this.hurtT > 0)) Controller.dropCling(this);
 
@@ -169,12 +156,13 @@ class Player {
     else if (this.rebounding()) this.moveRebound(dt);
     else if (this.zipping()) this.moveZip(dt);
     else if (this.plunge) this.movePlunge(dt, I);
+    else if (this.moveSpecial(dt, I)) { /* the character's own move took the body */ }
     else if (!this.mantle && !this.vault) Controller.moveNormal(this, dt, I);
     // a fling at the crane tops out over it, then drops straight onto the beam
     if (this.flingTop && this.vel.y <= 0) { this.flingTop = false; this.vel.x *= 0.1; this.vel.z *= 0.1; this.noDragT = 0; }
     if (this.onGround) this.flingTop = false;
     const vx0 = this.vel.x, vz0 = this.vel.z;
-    const col = Controller.integrate(this, dt, reeled ? null : I, { mantle: !this.attack && !this.iaido && !this.sheathe && !this.plunge && !reeled, step: this.plunge ? 0 : undefined });
+    const col = Controller.integrate(this, dt, reeled ? null : I, { mantle: this.canMantle(reeled), step: this.plunge ? 0 : undefined });
     this.updateLean(dt, vx0, vz0);
     if (this.iaido && col.wall) this.iaido.t = this.iaido.dur;
     // a zip to a wall or a ledge ends when the body meets the surface near the anchor (the ground counts only
@@ -209,6 +197,45 @@ class Player {
       this.pos.x = this.prev.x = s.x; this.pos.y = this.prev.y = s.y; this.pos.z = this.prev.z = s.z;
       this.vel.x = this.vel.y = this.vel.z = 0;
     }
+  }
+  // timers that count down to zero every tick
+  timerKeys() { return Player.TIMERS; }
+  // E, dash, the tether, attacks and the utility, read this tick
+  updateCombat(dt, I) {
+    this.updateSheathe(dt);
+    if (Input.wasPressed('dash')) { this.dashBuf = PC.INPUT_BUF; if (this.attack && !this.dashHold) this.dashHold = PC.CANCEL_RECOVERY; }
+    this.updateDashBuffer(dt, I);
+    this.updateTetherInput();
+    this.updateTether(dt);
+    if (Input.wasPressed('attack')) this.onAttackPressed();
+    this.updateAttackInput(dt);
+    if (Input.wasPressed('utility')) this.tryUtility();
+  }
+  // what the stance and swings do to movement (the 2D moveNormal modifiers)
+  moveMods(dt) {
+    let sp = 1;
+    if (this.sheathe) sp = this.onGround ? 38 / 152 : 70 / 152;
+    if (this.attack && this.onGround) sp *= this.attack.heavy && this.attack.t <= this.attack.act1 ? 0.25 : 0.45;
+    if (this.landLag > 0 || this.postPose > 0.12) sp *= 0.2;
+    this.speedMul = sp;
+    let gk = Game.gravMul();
+    if (this.attack && !this.onGround && this.vel.y < 0) gk *= 0.45;
+    if (this.sheathe && !this.onGround && this.sheathe.hover > 0) { gk *= 0.12; this.vel.y = Math.max(this.vel.y, -2.3); this.sheathe.hover -= dt; }
+    this.gravK = gk;
+    this.canJump = !this.sheathe;
+    this.canSlide = !this.attack && !this.sheathe;
+    this.canCling = !this.attack && !this.sheathe && !this.plunge && !this.tether && !this.iaido && !this.atkPend;
+  }
+  // a character's own way of moving (true when it moved the body this tick)
+  moveSpecial() { return false; }
+  // whether walking or jumping into a ledge climbs it this tick
+  canMantle(reeled) { return !this.attack && !this.iaido && !this.sheathe && !this.plunge && !reeled; }
+  // cutscenes, pauses and blasts take the body: whatever the character was holding stops
+  cancelActions() {}
+  onPause() { this.stopLoop('charge'); this.stopLoop('reel'); this.stopLoop('ult'); }
+  onResume() {
+    if (this.sheathe) this.loops.charge = Sound.loop('charge');
+    if (this.zipping()) this.loops.reel = Sound.loop('reel');
   }
   // How the body leans: forward with acceleration and speed, and into turns by the sideways acceleration
   // (as a runner banks), smoothed so it never snaps.
@@ -487,7 +514,7 @@ class Player {
     const target = this.assistTarget(d.r);
     const yaw = target ? yawOf(target.pos.x - this.pos.x, target.pos.z - this.pos.z) : this.aimYaw;
     this.yaw = yaw;
-    if (this.sliding) { this.sliding = false; if (!Controller.setHeight(this, PC.H)) { this.crouching = true; Controller.setHeight(this, PC.CROUCH_H); } }
+    if (this.sliding) { this.sliding = false; if (!Controller.setHeight(this, this.M.H)) { this.crouching = true; Controller.setHeight(this, this.M.CROUCH_H); } }
     // lights alternate direction; a rising heavy sweeps upward, a slam comes down over the top
     let dir = 1;
     if (type === 'L' || type === 'crescent') dir = cont ? -this.lastDir : 1;
@@ -571,8 +598,8 @@ class Player {
     if (a.swept && a.t - (a.wind || 0) < a.sweep + 0.04 && Math.random() < 0.7) {
       const th = a.dir * (clamp((a.t - (a.wind || 0)) / a.sweep, 0, 1) - 0.5) * a.span, d = PlayerPose.arcDir(a.yaw, a.tilt, th, a.pa || 0), c0 = this.chest();
       const tip = { x: c0.x + d.x * a.r * 0.9, y: c0.y + d.y * a.r * 0.9, z: c0.z + d.z * a.r * 0.9 };
-      FX.elec(tip, 0.5, 1, { outer: '#ff2a44', core: '#ffffff' });
-      if (Math.random() < 0.5) FX.sparks(tip, 2, d, 1.6, 2, 7, { c0: '#ffffff', c1: '#ff8a9a', c2: '#a01828', life: 0.5 });
+      FX.elec(tip, 0.5, 1, this.fxCol.elec);
+      if (Math.random() < 0.5) FX.sparks(tip, 2, d, 1.6, 2, 7, Object.assign({ life: 0.5 }, this.fxCol.spark));
     }
     if (a.swept && a.t >= a.act0 && a.t <= a.act1) {
       const c = this.chest(), reach = a.r + 0.27;
@@ -592,6 +619,7 @@ class Player {
           kv: { x: fx * a.knock, y: up, z: fz * a.knock }, dir: { x: fx, y: 0.2 + fy, z: fz }, heavy: big, cause: a.heavy ? 'heavy' : 'slash', heavyAtk: a.heavy,
           stagger: a.heavy ? 0.7 : big ? 0.55 : 0.22, hitstop: a.hitstop, shake: a.shake, guardBreak: a.heavy,
         });
+        this.swingHit(a, e);
       }
       for (const pr of Game.props) {
         if (pr.dead || a.hit.has(pr) || !this.inSwing(a, c, reach, pr)) continue;
@@ -615,7 +643,7 @@ class Player {
       a.quaked = true;
       if (this.onGround) this.slamQuake();
     }
-    const cancelT = a.heavy ? a.act1 + 0.05 : 0.13;
+    const cancelT = a.cancelT || (a.heavy ? a.act1 + 0.05 : 0.13);
     if (this.attackQueued && a.t >= cancelT && !a.finisher) { const k = this.attackQueued; this.attackQueued = null; this.startString(k, true); return; }
     if (a.t >= a.dur) {
       this.attack = null;
@@ -623,16 +651,18 @@ class Player {
       if (a.finisher) { this.strN = 0; this.strLights = 0; this.attackCD = a.heavy ? 0.16 : 0.1; }
     }
   }
+  // something a swing just hit (a character can add its own impact)
+  swingHit() {}
   // The heavy finisher hits the street hard enough to send a ring running out over the ground.
   slamQuake() {
-    const f = { x: this.pos.x + fwdX(this.yaw) * 1.3, y: this.pos.y + 0.05, z: this.pos.z + fwdZ(this.yaw) * 1.3 };
-    Game.hazards.push(new SlamRing({ x: f.x, y: this.pos.y, z: f.z }, { cause: 'heavy' }));
-    FX.ring(f, 0.4, 5.3, 0.35, { c: '#ff3048' });
+    const f = { x: this.pos.x + fwdX(this.yaw) * 1.3, y: this.pos.y + 0.05, z: this.pos.z + fwdZ(this.yaw) * 1.3 }, C = this.fxCol;
+    Game.hazards.push(new SlamRing({ x: f.x, y: this.pos.y, z: f.z }, { cause: 'heavy', c: C.main }));
+    FX.ring(f, 0.4, 5.3, 0.35, { c: C.main });
     FX.dust(f, 12, { smax: 9, rise: 0.8 });
     FX.debris(f, 14, GRIT, 20);
     FX.decal('crack', f, { len: 3.2 });
-    FX.light(f, '#ff3048', 5, 9, 0.3);
-    FX.flash('#ff3048', 0.14);
+    FX.light(f, C.main, 5, 9, 0.3);
+    FX.flash(C.main, 0.14);
     Sound.play('slam');
     Game.shake(0.3);
     FPFX.kick('slam');
@@ -739,7 +769,7 @@ class Player {
       Game.hitstop(0.05);
       // the rip throws you up out of the slide, ready for an air string
       this.sliding = false; this.crouching = false;
-      if (!Controller.setHeight(this, PC.H)) { this.crouching = true; Controller.setHeight(this, PC.CROUCH_H); }
+      if (!Controller.setHeight(this, this.M.H)) { this.crouching = true; Controller.setHeight(this, this.M.CROUCH_H); }
       if (!this.crouching) { this.vel.y = 20.9; this.vel.x = fx * 4.5; this.vel.z = fz * 4.5; this.onGround = false; this.airJumps = 1; }
     }
     if (a.t >= a.act0 && a.t <= a.act1) {
@@ -766,7 +796,7 @@ class Player {
     this.vel.x *= 0.2; this.vel.z *= 0.2; this.vel.y = -25.5;
     this.iframes = Math.max(this.iframes, 0.12);
     Sound.play('plungeStart');
-    FX.ring(this.center(), 0.2, 1.3, 0.2, { flat: false });
+    FX.ring(this.center(), 0.2, 1.3, 0.2, { flat: false, c: this.fxCol.ring });
   }
   movePlunge(dt, I) {
     const P = this.plunge;
@@ -802,17 +832,17 @@ class Player {
       const dx = pr.pos.x - p.x, dz = pr.pos.z - p.z, d = Math.hypot(dx, dz) || 1;
       pr.hit(30, { kv: { x: (dx / d) * 18.2, y: 23.6, z: (dz / d) * 18.2 }, heavy: true });
     }
-    const g = { x: p.x, y: p.y + 0.06, z: p.z }, c = this.center();
-    FX.ring(g, 0.4, R, 0.35);
-    FX.ring(g, 0.2, R * 0.7, 0.28, { c: '#ff7a3a' });
-    FX.ring({ x: p.x, y: p.y + 0.9, z: p.z }, 0.2, 2 + power * 1.3, 0.22, { flat: false });
+    const g = { x: p.x, y: p.y + 0.06, z: p.z }, c = this.center(), C = this.fxCol;
+    FX.ring(g, 0.4, R, 0.35, { c: C.ring });
+    FX.ring(g, 0.2, R * 0.7, 0.28, { c: C.hot });
+    FX.ring({ x: p.x, y: p.y + 0.9, z: p.z }, 0.2, 2 + power * 1.3, 0.22, { flat: false, c: C.ring });
     FX.dust(p, 28 + power * 20, { dir: { x: 0, y: 0.15, z: 0 }, spread: TAU, smax: 14.5, rise: 0.5 });
     FX.debris(p, 16 + power * 12, GRIT, 16.4 + power * 7.3);
     FX.sparks({ x: p.x, y: p.y + 0.2, z: p.z }, 20, { x: 0, y: 1, z: 0 }, 2.4, 7.3, 23.6);
-    FX.elec(c, 2.4, 6);
+    FX.elec(c, 2.4, 6, C.elec);
     FX.decal('crack', p, { len: 2.6 + power * 3.3 });
-    FX.light(c, '#ff3048', 6, R * 1.6, 0.35);
-    FX.flash('#ff3048', 0.18 + power * 0.12);
+    FX.light(c, C.main, 6, R * 1.6, 0.35);
+    FX.flash(C.main, 0.18 + power * 0.12);
     Sound.play('shockwave', { power });
     Game.shake(0.32 + power * 0.32);
     Game.hitstop(0.06);
@@ -832,7 +862,7 @@ class Player {
   updateGhosts(dt) {
     if (this.dashT > 0 || this.bulletT > 0 || (this.plunge && this.plunge.t > 0.05)) {
       this.ghostT -= dt;
-      if (this.ghostT <= 0) { this.ghostT = this.dashT > 0 ? 0.018 : 0.035; this.makeGhost('#ff2a48', 0.24, 0.55); }
+      if (this.ghostT <= 0) { this.ghostT = this.dashT > 0 ? 0.018 : 0.035; this.makeGhost(this.fxCol.ghost, 0.24, 0.55); }
     }
   }
   // an afterimage of the body; none in first person, where it would sit over the lens
@@ -852,13 +882,17 @@ class Player {
     const s = this.sheathe;
     if (!s) return;
     s.t += dt;
+    this.stanceFX(s);
+    const maxT = s.empowered ? s.parriedAt + 1.0 : PC.STANCE_MAX;
+    if (!Input.isDown('sheathe') || s.releaseQueued || s.t >= maxT) this.releaseSheathe();
+  }
+  // the stance crackles at the sheath; gold once a parry has charged the counter
+  stanceFX(s) {
     const sp = { x: this.pos.x - fwdX(this.yaw) * 0.45, y: this.pos.y + 0.65, z: this.pos.z - fwdZ(this.yaw) * 0.45 };
     if (s.empowered) {
       if (Math.random() < 0.8) FX.elec(sp, 0.9, 1, { outer: '#ffb040', core: '#ffffff' });
       if (Math.random() < 0.4) FX.sparks(sp, 1, { x: 0, y: 1, z: 0 }, 1.5, 1.8, 5.5, { g: -5, c1: '#ffd070' });
     } else if (s.t <= s.parryUntil && Math.random() < 0.5) FX.elec(sp, 0.5, 1);
-    const maxT = s.empowered ? s.parriedAt + 1.0 : PC.STANCE_MAX;
-    if (!Input.isDown('sheathe') || s.releaseQueued || s.t >= maxT) this.releaseSheathe();
   }
   tryStance() {
     if (this.parryCD > 0) { Sound.play('denied'); this.parryFlash = 0.35; return; }
@@ -870,13 +904,13 @@ class Player {
     this.shield = Math.max(0, this.shield - PC.PARRY_COST);
     this.shieldDelay = Math.max(this.shieldDelay, 1.4); this.regenOn = false;
     this.attack = null; this.attackQueued = null; this.atkPend = null;
-    if (this.sliding) { this.sliding = false; if (!Controller.setHeight(this, PC.H)) { this.crouching = true; Controller.setHeight(this, PC.CROUCH_H); } }
+    if (this.sliding) { this.sliding = false; if (!Controller.setHeight(this, this.M.H)) { this.crouching = true; Controller.setHeight(this, this.M.CROUCH_H); } }
     // pressing again right after a stance shrinks the window, so mashing is worse than timing
     const win = S.gameplay.parryWindow * (Game.has('openGuard') ? 1.6 : 1) * (1 - 0.25 * Math.min(2, Math.ceil(this.parrySpam - 0.01)));
     this.parrySpam = Math.min(3, this.parrySpam + 1);
     this.sheathe = { t: 0, charge: 0, empowered: false, parryUntil: win, hover: this.hoverAvail ? 1.0 : 0, parried: 0, parriedAt: 0, refunded: false, releaseQueued: false };
     if (!this.onGround) this.hoverAvail = false;
-    Sound.play('sheathe');
+    Sound.play(this.fxCol.stance);
     this.eyeGlint('#ffe0a0', 0.6);
   }
   // Parry tells are a quick glint from the eye, never a ring around the body (rings read as shields).
@@ -897,9 +931,11 @@ class Player {
     if (s.t < s.parryUntil && !s.parried) { s.releaseQueued = true; return; }
     this.stopLoop('charge');
     this.sheathe = null;
-    if (s.empowered) { this.parryCD = PC.PARRY_CD_HIT; this.startIaido(IAIDO.counter); }
-    else { this.parryCD = s.parried ? PC.PARRY_CD_HIT : PC.PARRY_CD; Sound.play('unsheathe'); }
+    if (s.empowered) { this.parryCD = PC.PARRY_CD_HIT; this.releaseCounter(s); }
+    else { this.parryCD = s.parried ? PC.PARRY_CD_HIT : PC.PARRY_CD; Sound.play(this.fxCol.lower); }
   }
+  // the answer to a parry, released from E: RONIN's explosive drawn slash
+  releaseCounter() { this.startIaido(IAIDO.counter); }
   doParry(h) {
     const s = this.sheathe;
     s.parried++;
@@ -958,8 +994,8 @@ class Player {
     const end = { x: s.x + dir.x * len, y: s.y + dir.y * len, z: s.z + dir.z * len };
     this.iaido = { t: 0, dur: D, dir, cfg, len, s, hit: new Set(), still, end: still ? end : null, vx: still ? 0 : (dir.x * len) / D, vy: still ? 0 : (dir.y * len) / D, vz: still ? 0 : (dir.z * len) / D };
     this.iframes = Math.max(this.iframes, cfg.empowered ? 0.5 : 0.3);
-    if (this.crouching && Controller.canStand(this)) { this.crouching = false; Controller.setHeight(this, PC.H); }
-    if (this.sliding) { this.sliding = false; Controller.setHeight(this, PC.H); }
+    if (this.crouching && Controller.canStand(this)) { this.crouching = false; Controller.setHeight(this, this.M.H); }
+    if (this.sliding) { this.sliding = false; Controller.setHeight(this, this.M.H); }
     FX.slashLine(s, end, { w: cfg.lineW, dur: cfg.empowered ? 0.45 : 0.3, pal: cfg.empowered ? 'gold' : 'red' });
     if (still) this.counterBlast(s, dir, len);
     // lightning runs the length of the draw
@@ -1264,7 +1300,7 @@ class Player {
   }
   haul(c, path, dur) { Controller.haul(c, path, dur); }
   stand() {
-    if (this.sliding || this.crouching) { this.sliding = false; this.crouching = false; if (!Controller.setHeight(this, PC.H)) Controller.setHeight(this, PC.SLIDE_H); }
+    if (this.sliding || this.crouching) { this.sliding = false; this.crouching = false; if (!Controller.setHeight(this, this.M.H)) Controller.setHeight(this, this.M.SLIDE_H); }
   }
   beginTetherMode() {
     const T = this.tether;
@@ -1303,7 +1339,7 @@ class Player {
     lx = clamp(lx, Math.min(b.min.x + r, (b.min.x + b.max.x) / 2), Math.max(b.max.x - r, (b.min.x + b.max.x) / 2));
     lz = clamp(lz, Math.min(b.min.z + r, (b.min.z + b.max.z) / 2), Math.max(b.max.z - r, (b.min.z + b.max.z) / 2));
     const land = Controller.highestTop(lx, lz, r, top + 0.6);
-    if (land < top - 0.01 || !World.boxFree(lx, land + 0.02, lz, r, PC.CROUCH_H)) return false;
+    if (land < top - 0.01 || !World.boxFree(lx, land + 0.02, lz, r, this.M.CROUCH_H)) return false;
     const g = PC.GRAV * this.gravK, peak = Math.max(land + 1, p.y + 1);
     const vy = Math.sqrt(2 * g * (peak - p.y)), t = vy / g + Math.sqrt((2 * (peak - land)) / (g * 1.12));
     this.vel.x = (lx - p.x) / t; this.vel.y = vy; this.vel.z = (lz - p.z) / t;
@@ -1450,7 +1486,7 @@ class Player {
     if (S.gameplay.invincible) dmg = 0;
     // on the tether, a bullet only hurts: no knockback, and you stay on the line. Anything bigger (a blade, a
     // blast, a sniper round, the beam) still throws you off it.
-    const steady = this.tether && this.tether.phase === 'attached' && h.kind === 'projectile' && h.proj && h.proj.kind === 'bolt' && !h.proj.big;
+    const steady = this.steadyAgainst(h);
     if (this.sheathe) this.cancelSheathe();
     if (this.tether && this.zipping() && !steady) this.releaseTether();
     if (!steady) { this.attack = null; this.attackQueued = null; this.atkPend = null; this.postPose = 0; this.plunge = null; this.kickAnim = null; }
@@ -1509,15 +1545,19 @@ class Player {
     if (this.hp <= 0) this.die();
     return 'hit';
   }
+  // a hit that only hurts: on the tether, a bullet leaves you on the line
+  steadyAgainst(h) { return !!this.tether && this.tether.phase === 'attached' && this.smallBolt(h); }
+  smallBolt(h) { return h.kind === 'projectile' && !!h.proj && h.proj.kind === 'bolt' && !h.proj.big; }
   // The rival's enrage shockwave: thrown clear of from (a point), whatever you were doing, without damage.
   blastAway(from, power = 1) {
     if (this.dead) return;
     if (this.tether) this.releaseTether();
     if (this.sheathe) this.cancelSheathe();
+    this.cancelActions();
     this.attack = null; this.attackQueued = null; this.atkPend = null; this.plunge = null; this.iaido = null; this.dashT = 0; this.kickAnim = null;
     this.sliding = false; this.mantle = null; this.vault = null;
     Controller.dropCling(this); Controller.endSkid(this, false);
-    if (this.crouching && Controller.canStand(this)) { this.crouching = false; Controller.setHeight(this, PC.H); }
+    if (this.crouching && Controller.canStand(this)) { this.crouching = false; Controller.setHeight(this, this.M.H); }
     let dx = this.pos.x - from.x, dz = this.pos.z - from.z;
     const l = Math.hypot(dx, dz);
     if (l < 1e-3) { dx = -fwdX(this.yaw); dz = -fwdZ(this.yaw); } else { dx /= l; dz /= l; }
@@ -1554,6 +1594,7 @@ class Player {
   }
   die() {
     this.hp = 0; this.dead = true; this.deadT = 0;
+    this.cancelActions();
     this.stopAllLoops();
     if (this.tether && this.rebounding()) Game.endBulletTime();
     this.attack = null; this.sheathe = null; this.tether = null; this.iaido = null; this.atkPend = null; this.plunge = null; this.kickAnim = null;
@@ -1634,3 +1675,5 @@ class Player {
     }
   }
 }
+Player.TIMERS = ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT', 'utilT', 'utilFlash', 'bulletT', 'rollT'];
+Player.prototype.fxCol = RONIN_COL;

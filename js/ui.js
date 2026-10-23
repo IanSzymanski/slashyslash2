@@ -25,6 +25,7 @@ const UI = {
     }
     try { const t = safeStorageGet('slashyslash3d.tab'); if (t && SETTINGS_SCHEMA[t]) this.tab = t; } catch (e) { /* ignore */ }
     this.refreshBest();
+    this.refreshChar();
     window.addEventListener('keydown', (e) => {
       if (Game.state !== 'pick' || !this.pickIds) return;
       const i = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].indexOf(e.code) % 3;
@@ -58,6 +59,7 @@ const UI = {
   lockHint(on) { const el = document.getElementById('lock-hint'); if (el) el.hidden = !on; },
   act(a, el) {
     switch (a) {
+      case 'char': SaveData.character = SaveData.character === 'aegis' ? 'ronin' : 'aegis'; saveProgress(); this.refreshChar(); break;
       case 'demo': this.startRun('demo'); break;
       case 'endless': this.startRun('endless'); break;
       case 'boss': this.startRun('boss'); break;
@@ -84,9 +86,17 @@ const UI = {
         break;
     }
   },
+  // the character picker on the title screen
+  refreshChar() {
+    const a = SaveData.character === 'aegis', b = document.getElementById('btn-char');
+    if (!b) return;
+    b.classList.toggle('aegis', a);
+    document.getElementById('char-name').textContent = a ? 'AEGIS-07' : 'RONIN';
+    document.getElementById('char-sub').textContent = a ? 'gun and beam, or blade and block' : 'katana, parry and counter';
+  },
   refreshBest() {
     const el = document.getElementById('best');
-    if (el) el.textContent = `Best endless: wave ${SaveData.bestWave} · ${SaveData.bestScore.toLocaleString()} pts${SaveData.demoCleared ? ' · Demo cleared' : ''}${SaveData.unlocks.aegis ? ' · AEGIS-07 unlocked' : ''}`;
+    if (el) el.textContent = `Best endless: wave ${SaveData.bestWave} · ${SaveData.bestScore.toLocaleString()} pts${SaveData.demoCleared ? ' · Demo cleared' : ''}${SaveData.unlocks.aegis ? ' · AEGIS-07 beaten' : ''}`;
   },
   applyVisualToggles() {
     document.getElementById('scanlines').hidden = !S.visuals.scanlines;
@@ -108,9 +118,9 @@ const UI = {
     const boss = Game.mode === 'boss', duel = Game.mode === 'duel';
     document.getElementById('over-title').textContent = victory ? (duel ? 'Duel won' : boss ? 'Rival defeated' : 'Demo complete') : 'Signal lost';
     let sub;
-    if (victory && duel) sub = 'You beat AEGIS-07 blade to blade. Practice only: win the full Rival Fight to unlock it.';
+    if (victory && duel) sub = 'You beat AEGIS-07 blade to blade. Practice only: the full Rival Fight is the one that counts.';
     else if (victory && !boss && !Director.rivalBuilt()) sub = 'All six demo waves cleared. AEGIS-07 joins the demo as its last wave in a later build.';
-    else if (victory) sub = boss ? 'AEGIS-07 is down and unlocked for a future character roster.' : 'All demo waves cleared, rival included. AEGIS-07 is unlocked for a future character roster.';
+    else if (victory) sub = boss ? 'AEGIS-07 is down.' : 'All demo waves cleared, rival included.';
     else if (duel) sub = 'AEGIS-07 won the duel. Parry a swing, let it parry your counter, then parry its gold riposte.';
     else if (boss) sub = 'AEGIS-07 holds the street. Tether its pulse grenade and kick it back to break the shield.';
     else if (Game.mode === 'endless') sub = `You held the street until wave ${Director.wave}.`;
@@ -140,6 +150,8 @@ const UI = {
       ['Wall cling: holds while a move key is held, then slides; let go to drop; jump to kick off', `Jump into a wall, ${actionLabel('jump')}`],
       ['Crouch · slide while running', actionLabel('crouch')],
       ['Bullet jump (toward the crosshair)', `${actionLabel('crouch')} + ${actionLabel('jump')}`],
+    ];
+    const ronin = [
       ['Dash (2 charges, invulnerable)', `${actionLabel('dash')} + direction`],
       ['Dash slash (hold for a heavy one)', `${actionLabel('attack')} during a dash`],
       ['Slash string (toward the crosshair, up or down too)', `Tap ${actionLabel('attack')}`],
@@ -154,14 +166,35 @@ const UI = {
       ['Grab, swing and throw barrels', `Hold ${actionLabel('tether')}, release`],
       ['Rebound a pulse grenade: reel in, kick it back', `${actionLabel('tether')} on it, aim`],
       ['Sawblade ultimate (when charged)', `Hold ${actionLabel('ultimate')} 1s`],
+    ];
+    // AEGIS-07 as the player: two modes on F, the gun and beam or the blade and block
+    const aegis = [
+      ['Switch weapon mode, gunner or melee (letting go, dashing, attacking or a hit cancels it)', `Hold ${actionLabel('utility')} 1s`],
+      ['Gunner: machine gun, single-target rounds from a 40-round magazine', `Hold ${actionLabel('attack')}`],
+      ['Gunner: reload (it also reloads itself when empty)', actionLabel('reload')],
+      ['Gunner: beam (20 shield, drains while held); pierces everything on its line; you stand, or hover, still', `Hold ${actionLabel('sheathe')}`],
+      ['Melee: two lunging swipes and a thrust (toward the crosshair)', `Tap ${actionLabel('attack')}`],
+      ['Melee: overhead cleave that throws a ring across the ground', `Hold ${actionLabel('attack')}`],
+      ['Melee: slide attack, a low sweep that launches', `${actionLabel('attack')} while sliding`],
+      ['Melee: jet plunge (in the air)', `Hold ${actionLabel('attack')}`],
+      ['Melee: block on the blade (15 shield, refunded on a block)', actionLabel('sheathe')],
+      ['Melee: pulse burst after a block; hold to draw the arm back for more', `Release ${actionLabel('sheathe')}`],
+      ['Jet dash (2 charges, invulnerable); in melee, attack out of it for a boosted thrust', `${actionLabel('dash')} + direction`],
+      ['Hover on the jets after a double jump (crouch to drop)', `${actionLabel('jump')} twice`],
+      ['Tether: tap fling, hold zip; grab barrels; reel in and kick grenades', actionLabel('tether')],
+      ['Orbital strike (charged by kills): hold to aim in slow motion, press again to fire', `Hold ${actionLabel('ultimate')}, then ${actionLabel('ultimate')}`],
+    ];
+    const rival = [
       ['AEGIS-07 shielded: slash its bolts back (8 cracks) or kick its grenade back', `${actionLabel('attack')} · ${actionLabel('tether')}`],
       ['AEGIS-07 gold flash: parry its riposte to stun it', actionLabel('sheathe')],
       ['AEGIS-07 red flash: no parry stops it; dash through to its back', actionLabel('dash')],
+      ['AEGIS-07 strike rings: get out before the light erupts', 'Move · ' + actionLabel('dash')],
       ['Pause (training: spawn panel)', actionLabel('pause')],
       ['Skip a cutscene you have seen', `Hold ${actionLabel('sheathe')}`],
       ['Pick an endless upgrade', 'Click, or 1 / 2 / 3'],
     ];
-    document.getElementById('howto-table').innerHTML = rows.map(([a, k]) => `<tr><td>${a}</td><td><kbd>${k}</kbd></td></tr>`).join('');
+    const all = rows.concat(SaveData.character === 'aegis' ? aegis : ronin, rival);
+    document.getElementById('howto-table').innerHTML = all.map(([a, k]) => `<tr><td>${a}</td><td><kbd>${k}</kbd></td></tr>`).join('');
   },
 
   // ---------- settings ----------

@@ -2,11 +2,11 @@
 // AEGIS-07's effects in the world, synced each rendered frame: its shield bubble with the cracks your returned
 // bolts leave, the flames from its back thrusters, the shoulder cannon's charge and beam, the gun's aim line,
 // the pulse grenade charging in its hand with its arc, the dive bomb's mark, the beacon it arrives in, its
-// afterimages in a dash, and its blade waves and husk through Views. Every
+// afterimages in a dash, and its husk through Views (its orbital strikes are drawn by aegisviews.js). Every
 // material is made once here and compiled in Render.prewarm.
 
 const BossViews = {
-  mats: null, geos: null, ready: false, kinds: new Set(['bladewave', 'husk']),
+  mats: null, geos: null, ready: false, kinds: new Set(['husk']),
   ghosts: [], ghostRig: null, GHOSTS: 6,
 
   init() {
@@ -15,7 +15,7 @@ const BossViews = {
     // an open tube 1 m tall standing on its base, for beams and columns; a cone pointing down from its base
     const tube = new THREE.CylinderGeometry(1, 1, 1, 14, 1, true).translate(0, 0.5, 0);
     const cone = new THREE.ConeGeometry(1, 1, 8, 1, true).rotateX(Math.PI).translate(0, -0.5, 0);
-    this.geos = { tube, cone, sphere: new THREE.SphereGeometry(1, 16, 12), ring: new THREE.RingGeometry(0.85, 1, 40), flatRing: new THREE.RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2), disc: new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2), crescent: this.crescentGeo() };
+    this.geos = { tube, cone, sphere: new THREE.SphereGeometry(1, 16, 12), ring: new THREE.RingGeometry(0.85, 1, 40), flatRing: new THREE.RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2), disc: new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2) };
     this.geos.wire = this.latticeGeo();
     this.geos.cracks = this.crackGeo();
     this.mats = {
@@ -86,20 +86,6 @@ const BossViews = {
     g.setIndex(idx);
     return g;
   },
-  // A crescent: a band across the wave's path, bulging forward in the middle and thinning at its tips, in
-  // its own frame (x across, y up, forward -z), half-width and half-height 1.
-  crescentGeo() {
-    const N = 16, pos = [], idx = [];
-    for (let i = 0; i <= N; i++) {
-      const s = (i / N) * 2 - 1, h = 1 - 0.55 * s * s, z = -(1 - s * s) * 0.45;
-      pos.push(s, -h, z, s, h, z);
-    }
-    for (let i = 0; i < N; i++) { const a = i * 2; idx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setIndex(idx);
-    return g;
-  },
   // the shield's lattice: rings of latitude and meridians over a unit sphere, as line pairs
   latticeGeo() {
     const pos = [], N = 32, P = (lat, lon) => [Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)];
@@ -128,50 +114,23 @@ const BossViews = {
   prewarmShow(group) {
     if (!this.ready) this.init();
     for (const o of [this.shield, this.flames[0], this.beam, this.beamRings[0], this.flare, this.beacon, this.mark, this.chargeRings[0], this.chargeHalo, this.perilAura, this.perilRings[0]]) o.visible = true;
-    group.add(new THREE.Mesh(this.geos.crescent, this.add('#2f6bff')));
   },
   prewarmHide() { for (const o of [this.shield, this.flames[0], this.beam, this.beamRings[0], this.flare, this.beacon, this.mark, this.chargeRings[0], this.chargeHalo, this.perilAura, this.perilRings[0]]) o.visible = false; },
 
   // ---------- hazards through Views ----------
   make(o) {
-    const G = this.geos, g = new THREE.Group();
-    if (o.kind === 'bladewave') {
-      const outer = new THREE.Mesh(G.crescent, this.add('#2f6bff', { opacity: 0.85 })), core = new THREE.Mesh(G.crescent, this.add('#f0f6ff', { opacity: 0.95 })), haze = new THREE.Mesh(G.crescent, this.add('#2f6bff', { opacity: 0.25 }));
-      core.scale.set(0.92, 0.55, 1); core.position.z = -0.08;
-      haze.scale.set(1.08, 1.25, 1.6); haze.position.z = 0.3;
-      g.add(haze, outer, core);
-      g.userData = { outer, core, haze };
-    } else if (o.kind === 'husk') {
-      return { boss: true, husk: o };
-    }
-    Gfx.scene.add(g);
-    return { boss: true, group: g };
+    if (o.kind === 'husk') return { boss: true, husk: o };
+    return null;
   },
   update(o, v, t) {
     if (v.husk) {
       const R = o.rig;
       if (R) { const k = o.fade ? 1 - o.fade / 0.5 : 1; R.mat.opacity = k; R.mat.depthWrite = k > 0.99; if (R.blade) R.blade.visible = false; }
-      return;
-    }
-    const g = v.group, U = g.userData;
-    g.position.set(o.pos.x, o.pos.y, o.pos.z);
-    if (o.kind === 'bladewave') {
-      g.rotation.set(0, yawOf(o.dir.x, o.dir.z), o.roll || 0);
-      g.scale.set(o.W, o.H, 1);
-      const f = clamp(o.life / 0.2, 0, 1) * clamp(o.t / 0.06, 0, 1);
-      U.outer.material.color.set('#2f6bff');
-      U.haze.material.color.copy(U.outer.material.color);
-      U.outer.material.opacity = 0.85 * f; U.core.material.opacity = (((t * 30) | 0) % 2 ? 1 : 0.8) * f; U.haze.material.opacity = 0.25 * f;
     }
   },
   dispose(v) {
-    if (v.husk) {
-      const R = v.husk.rig;
-      if (R) { Gfx.scene.remove(R.mesh); R.geo.dispose(); R.mat.dispose(); R.outline.material.dispose(); v.husk.rig = null; }
-      return;
-    }
-    Gfx.scene.remove(v.group);
-    for (const c of v.group.children) c.material.dispose();
+    const R = v.husk && v.husk.rig;
+    if (R) { Gfx.scene.remove(R.mesh); R.geo.dispose(); R.mat.dispose(); R.outline.material.dispose(); v.husk.rig = null; }
   },
 
   // ---------- the rival itself ----------
