@@ -884,73 +884,134 @@ const CROSSROADS = (() => {
 //      on a mat in front of a dark wall (so its flashes read), and room for whatever the panel spawns.
 // Enemies only ever go in the hall: the course rooms are left out of the nav graph (noNav).
 const TRAINING = (() => {
-  const boxes = [], lights = [], emitters = [];
+  const boxes = [], lights = [], emitters = [], furniture = [];
   const B = (x0, y0, z0, x1, y1, z1, style, o = {}) => {
     const b = Object.assign({ min: { x: Math.min(x0, x1), y: y0, z: Math.min(z0, z1) }, max: { x: Math.max(x0, x1), y: y1, z: Math.max(z0, z1) }, style }, o);
     boxes.push(b);
     return b;
   };
-  const X = 15, N = -73, S0 = 42, TOP = 22, course = { noNav: true };
-  // the hall's floor is the arena's ground; the course rooms' floors are left out of the nav graph
-  B(-X - 2, -1, -31, X + 2, 0, N - 2, 'tile', { kind: 'ground', cell: 2 });
-  B(-X - 2, -1, S0 + 2, X + 2, 0, -31, 'tile', Object.assign({ kind: 'ground', cell: 2 }, course));
-  B(-X - 2, TOP, N - 2, X + 2, TOP + 1, S0 + 2, 'ceiling', { kind: 'ceiling', cell: 4, noNav: true });
+  // partitions; slick ones give no grip, so wall kicks stay at their station. The course rooms are left out
+  // of the nav graph, and their surfaces are reached along the course (feel-check skips them).
   const wall = (x0, y0, z0, x1, y1, z1, style = 'wall', o = {}) => B(x0, y0, z0, x1, y1, z1, style, Object.assign({ kind: 'wall', cell: 2, noNav: true }, o));
-  wall(-X - 2, 0, N - 2, -X, TOP, S0 + 2);
-  wall(X, 0, N - 2, X + 2, TOP, S0 + 2);
-  wall(-X, 0, S0, X, TOP, S0 + 2);
-  wall(-X, 0, N - 2, X, TOP, N, 'wallDark');
-  // 1. the movement course
-  B(-4, 0, 18, 4, 2.5, 22, 'block', Object.assign({ kind: 'course' }, course));
-  B(6, 0, 17, 12, 5.5, 21, 'block2', Object.assign({ kind: 'course' }, course));
-  B(6, 0, 10, 12, 13, 14, 'block3', Object.assign({ kind: 'course', plat: true }, course));
-  // the laser doorway (x -1.5..1.5, up to 3.5 m) in the wall at z 7-8
-  const GATE = { x0: -1.5, x1: 1.5, z: 7.5, h: 3.5 };
-  wall(-X, 0, 7, GATE.x0, TOP, 8); wall(GATE.x1, 0, 7, X, TOP, 8); wall(GATE.x0, GATE.h, 7, GATE.x1, TOP, 8, 'stripe');
-  for (let i = 0; i < 6; i++) {
-    const y = 0.3 + i * 0.58;
-    emitters.push({ min: { x: GATE.x0, y: y - 0.025, z: GATE.z - 0.025 }, max: { x: GATE.x1, y: y + 0.025, z: GATE.z + 0.025 }, color: '#ff2a3a', glow: true, buzz: true });
-  }
-  for (const x of [GATE.x0, GATE.x1]) emitters.push({ min: { x: x - 0.06, y: 0, z: GATE.z - 0.1 }, max: { x: x + 0.06, y: GATE.h, z: GATE.z + 0.1 }, color: '#3a1018' });
-  lights.push({ x: 0, y: 1.8, z: GATE.z + 1.2, color: '#ff3048', intensity: 1.2, range: 6, group: 'buzz' }, { x: 0, y: 1.8, z: GATE.z - 1.2, color: '#ff3048', intensity: 1.2, range: 6, group: 'buzz' });
-  // 2. the slide slot (x -3..3, 1.05 m high) under the wall at z -10..-9
-  const SLOT = { x0: -3, x1: 3, z0: -10, z1: -9, h: 1.05 };
-  wall(-X, 0, SLOT.z0, SLOT.x0, TOP, SLOT.z1); wall(SLOT.x1, 0, SLOT.z0, X, TOP, SLOT.z1); wall(SLOT.x0, SLOT.h, SLOT.z0, SLOT.x1, TOP, SLOT.z1, 'stripe');
-  // 3. the tether ledge and the doorway above it (x -1.5..1.5, 14 to 17.5 m) in the wall at z -31..-30
-  const LEDGE = B(-4, 0, -30, 4, 14, -26, 'block2', Object.assign({ kind: 'course', tetherOnly: true }, course));
-  wall(-X, 0, -31, -1.5, TOP, -30); wall(1.5, 0, -31, X, TOP, -30);
-  wall(-1.5, 0, -31, 1.5, 14, -30, 'block2'); wall(-1.5, 17.5, -31, 1.5, TOP, -30, 'stripe');
-  // 4. the hall: the balcony under the doorway and the fling platform
-  B(-4, 13.6, -35, 4, 14, -31, 'block2', { kind: 'balcony', plat: true, tetherOnly: true });
-  const FLING = B(-3, 15.6, -52, 3, 16, -47, 'block', { kind: 'course', plat: true, tetherOnly: true, noNav: true });
+  const slick = { slick: true };
+  const course = (o = {}) => Object.assign({ kind: 'course', noNav: true, viaCourse: true }, o);
+  // 1. the movement hall (x -12..20, z 6..74, 36 m tall): the course winds up round it
+  // 2. the tether room (x -15..15, z -50..4, 30 m): a zip up to the football field
+  // 3. the combat hall (x -15..15, z -94..-52, 24 m): the dummy, and practice afterwards
+  B(-14, -1, 4, 22, 0, 76, 'tile', { kind: 'ground', cell: 2, noNav: true });
+  B(-17, -1, -52, 17, 0, 4, 'tile', { kind: 'ground', cell: 2, noNav: true });
+  B(-17, -1, -96, 17, 0, -52, 'tile', { kind: 'ground', cell: 2 });
+  B(-14, 36, 4, 22, 37, 76, 'ceiling', { kind: 'ceiling', cell: 4, noNav: true });
+  B(-17, 30, -52, 17, 31, 4, 'ceiling', { kind: 'ceiling', cell: 4, noNav: true });
+  B(-17, 24, -96, 17, 25, -52, 'ceiling', { kind: 'ceiling', cell: 4, noNav: true });
+  wall(-14, 0, 6, -12, 36, 74, 'wall', slick); wall(20, 0, 6, 22, 36, 74, 'wall', slick);
+  wall(-14, 0, 74, -3, 36, 76, 'wall', slick); wall(3, 0, 74, 22, 36, 76, 'wall', slick);
+  // the wall-kick face, in the kick station's colour
+  wall(-3, 0, 74, 3, 36, 76, 'block3');
+  // between the movement hall and the tether room: the opening the long jump goes through (x -7..7, from
+  // 11.5 m, out of reach of the floor below)
+  const OPEN = { x0: -7, x1: 7, z0: 4, z1: 6, y0: 11.5, y1: 30 };
+  wall(-17, 0, 4, OPEN.x0, 36, 6, 'wall', slick); wall(OPEN.x1, 0, 4, 22, 36, 6, 'wall', slick);
+  wall(OPEN.x0, 0, 4, OPEN.x1, OPEN.y0 - 0.5, 6, 'wall', slick); wall(OPEN.x0, OPEN.y0 - 0.5, 4, OPEN.x1, OPEN.y0, 6, 'stripe', slick);
+  wall(OPEN.x0, OPEN.y1, 4, OPEN.x1, 36, 6, 'wall', slick);
+  wall(-17, 0, -52, -15, 31, 4, 'wall', slick); wall(15, 0, -52, 17, 31, 4, 'wall', slick);
+  // the door from the football field to the combat hall's balcony (x -2..2, 15 to 18.5 m)
+  const DOOR = { x0: -2, x1: 2, z: -51, y0: 15, y1: 18.5 };
+  wall(-17, 0, -52, DOOR.x0, 31, -50); wall(DOOR.x1, 0, -52, 17, 31, -50);
+  wall(DOOR.x0, 0, -52, DOOR.x1, DOOR.y0, -50); wall(DOOR.x0, DOOR.y1, -52, DOOR.x1, DOOR.y1 + 0.5, -50, 'stripe'); wall(DOOR.x0, DOOR.y1 + 0.5, -52, DOOR.x1, 31, -50);
+  // the shutter: an unseen box (training.js draws it) that rises into the wall when the door opens
+  DOOR.box = wall(DOOR.x0, DOOR.y0, -50.3, DOOR.x1, DOOR.y1, -50, 'stripe', { hidden: true });
+  wall(-17, 0, -96, -15, 24, -52); wall(15, 0, -96, 17, 24, -52);
+  wall(-17, 0, -96, 17, 24, -94, 'wallDark');
 
-  // ceiling light panels, and a light under each for the bake
-  for (let z = S0 - 6; z > N; z -= 10) {
-    for (const x of [-7.5, 7.5]) {
-      emitters.push({ min: { x: x - 2, y: TOP - 0.12, z: z - 0.7 }, max: { x: x + 2, y: TOP, z: z + 0.7 }, color: '#f4f8ff', glow: true, lamp: true });
-      lights.push({ x, y: TOP - 1.6, z, color: '#eaf0ff', intensity: 1.1, range: 20, group: 'lamp' });
-    }
+  // ---------- the movement hall ----------
+  // floor: climb a 2.5 m block, jump to a 5.5 m one, double jump to the 13 m tower in the corner
+  B(6, 0, 20, 12, 2.5, 24, 'block', course());
+  B(13, 0, 28, 19, 5.5, 33, 'block2', course());
+  B(16, 0, 36, 20, 13, 42, 'block3', course());
+  // the walkway at 13 m on from the tower, down the east wall and along the south one, hazard-striped edges
+  B(16, 12, 42, 20, 13, 74, 'stripe', course({ top: 'tile' }));
+  B(-3, 12, 70, 16, 13, 74, 'stripe', course({ top: 'tile' }));
+  // slide: a wall across it with a 1.05 m gap under it (too low to walk or crouch through)
+  const SLIDE = { x0: 16, x1: 20, z0: 48, z1: 49, y0: 13, y1: 14.05 };
+  wall(14, 12, SLIDE.z0, 16, 36, SLIDE.z1);
+  wall(16, SLIDE.y1, SLIDE.z0, 20, SLIDE.y1 + 0.55, SLIDE.z1, 'stripe'); wall(16, SLIDE.y1 + 0.55, SLIDE.z0, 20, 36, SLIDE.z1);
+  // vault: a 1 m barrier under a wall, with a 1.72 m slot between: solid below so no slide gets under it,
+  // too low to jump through standing, and it can't be climbed onto; only a vault takes you through
+  const VAULT = { x0: 16, x1: 20, z0: 64, z1: 64.6, y0: 13, top: 14, y1: 15.72 };
+  B(16, VAULT.y0, VAULT.z0, 20, VAULT.top, VAULT.z1, 'stripe', course({ vaultOnly: true }));
+  wall(14, 12, VAULT.z0, 16, 36, VAULT.z1);
+  wall(16, VAULT.y1, VAULT.z0, 20, VAULT.y1 + 0.5, VAULT.z1, 'stripe'); wall(16, VAULT.y1 + 0.5, VAULT.z0, 20, 36, VAULT.z1);
+  // dash: a doorway of red lasers (z 70.5..73.5, up to 16.5 m) in a wall across the south walkway at x 10
+  const GATE = { axis: 'x', at: 10, a0: 70.5, a1: 73.5, y0: 13, y1: 16.5 };
+  wall(9.5, 12, 68, 10.5, 36, 70.5); wall(9.5, 13, GATE.a1, 10.5, 36, 74);
+  wall(9.5, GATE.y1, GATE.a0, 10.5, GATE.y1 + 0.5, GATE.a1, 'stripe'); wall(9.5, GATE.y1 + 0.5, GATE.a0, 10.5, 36, GATE.a1);
+  for (let i = 0; i < 6; i++) {
+    const y = GATE.y0 + 0.3 + i * 0.58;
+    emitters.push({ min: { x: GATE.at - 0.025, y: y - 0.025, z: GATE.a0 }, max: { x: GATE.at + 0.025, y: y + 0.025, z: GATE.a1 }, color: '#ff2a3a', glow: true, buzz: true });
   }
-  // a warm spot on the dummy's mat
-  lights.push({ x: 0, y: 6, z: -58, color: '#ffe0b0', intensity: 1.4, range: 12, group: 'lamp' });
-  const perches = [{ x: 0, y: 14, z: -34.4 }, { x: -2.4, y: 16, z: -49.5 }, { x: 2.4, y: 16, z: -49.5 }];
-  const hall = { min: { x: -X, z: N }, max: { x: X, z: -31 } };
+  for (const z of [GATE.a0, GATE.a1]) emitters.push({ min: { x: GATE.at - 0.1, y: GATE.y0, z: z - 0.06 }, max: { x: GATE.at + 0.1, y: GATE.y1, z: z + 0.06 }, color: '#3a1018' });
+  lights.push({ x: GATE.at + 1.2, y: GATE.y0 + 1.8, z: 72, color: '#ff3048', intensity: 1.2, range: 6, group: 'buzz' }, { x: GATE.at - 1.2, y: GATE.y0 + 1.8, z: 72, color: '#ff3048', intensity: 1.2, range: 6, group: 'buzz' });
+  // wall kick: the walkway ends in a pocket between the purple south wall and the purple pier under the
+  // high deck (11.5 m up: past a double jump and a climb); a kick off one wall to the other gets you up
+  wall(-4, 0, 70, -3, 36, 74);
+  B(-3, 0, 66, 3, 24.5, 70, 'block3', course());
+  // the high deck: a run-up north to its edge, then the long jump across the hall and through the opening
+  const DECK = { x0: -3, x1: 3, z0: 48, z1: 70, y: 24.5 };
+  B(DECK.x0, 22.5, DECK.z0, DECK.x1, DECK.y, 66, 'stripe', course({ top: 'tile' }));
+  wall(-1, 0, 51, 1, 22.5, 53, 'wall', slick); wall(-1, 0, 58, 1, 22.5, 60, 'wall', slick);
+
+  // ---------- the tether room ----------
+  // the football field: a 15 m block (zip up its face) with turf on top, the machine on a plinth at the
+  // north-east, the goal posts over the door to the combat hall
+  const FIELD = { x0: -15, x1: 15, z0: -50, z1: -24, y: 15 };
+  B(FIELD.x0, 0, FIELD.z0, FIELD.x1, FIELD.y, FIELD.z1, 'block2', course({ top: 'turf' }));
+  B(9, FIELD.y, -46, 13, FIELD.y + 1, -42, 'wallDark', course());
+  const MACHINE = { x: 11, y: FIELD.y + 1, z: -44 };
+  const GOAL = { x0: -3, x1: 3, z: -49.4, y0: 19, y1: 30 };
+  for (const x of [GOAL.x0, GOAL.x1]) furniture.push({ shape: 'line', a: [x, GOAL.y0, GOAL.z], b: [x, GOAL.y0 + 8, GOAL.z], r: 0.1, color: '#f0c020' });
+  furniture.push({ shape: 'line', a: [GOAL.x0, GOAL.y0, GOAL.z], b: [GOAL.x1, GOAL.y0, GOAL.z], r: 0.1, color: '#f0c020' });
+  for (const x of [-1.4, 1.4]) furniture.push({ shape: 'line', a: [x, GOAL.y0, GOAL.z], b: [x, GOAL.y0 + 0.3, -50], r: 0.05, color: '#a8841c' });
+  // yard lines and worn patches on the turf
+  for (let z = -28; z >= -46; z -= 4) furniture.push({ shape: 'box', x: 0, y: FIELD.y, z, w: 29.6, d: 0.16, h: 0.02, color: '#e8ece4' });
+  for (const [x, z, w, d] of [[-6, -30.5, 2.2, 1.4], [4, -38, 1.6, 2.4], [-10, -43, 2.6, 1.2], [7.5, -27, 1.2, 1.2]]) furniture.push({ shape: 'box', x, y: FIELD.y, z, w, d, h: 0.025, color: '#6a5a3a' });
+
+  // ---------- the combat hall ----------
+  B(-4, 14.6, -56, 4, 15, -52, 'block2', { kind: 'balcony', tetherOnly: true });
+  const HALL = { x0: -15, x1: 15, z0: -94, z1: -52 };
+
+  // light: panels in each ceiling with a light under each, lower lights round the movement hall's floor and
+  // walkways, and a warm spot on the dummy's mat
+  const panels = (y, z0, z1, xs, dz, lightY, range) => {
+    for (let z = z0; z > z1; z -= dz) {
+      for (const x of xs) {
+        emitters.push({ min: { x: x - 2, y: y - 0.12, z: z - 0.7 }, max: { x: x + 2, y, z: z + 0.7 }, color: '#f4f8ff', glow: true, lamp: true });
+        lights.push({ x, y: lightY, z, color: '#eaf0ff', intensity: 1.2, range, group: 'lamp' });
+      }
+    }
+  };
+  panels(36, 68, 6, [-4, 12], 12, 32, 30);
+  panels(30, -2, -50, [-7.5, 7.5], 12, 27, 26);
+  panels(24, -56, -94, [-7.5, 7.5], 10, 22.4, 20);
+  for (const z of [14, 30, 46, 62]) lights.push({ x: -6, y: 8, z, color: '#eaf0ff', intensity: 0.8, range: 18, group: 'lamp' }, { x: 12, y: 8, z, color: '#eaf0ff', intensity: 0.8, range: 18, group: 'lamp' });
+  for (const z of [46, 60, 72]) lights.push({ x: 14, y: 17, z, color: '#fff4e0', intensity: 0.7, range: 12, group: 'lamp' });
+  lights.push({ x: 3, y: 17, z: 72, color: '#fff4e0', intensity: 0.7, range: 12, group: 'lamp' }, { x: 0, y: 28, z: 58, color: '#fff4e0', intensity: 0.8, range: 14, group: 'lamp' });
+  lights.push({ x: 0, y: 6, z: -76, color: '#ffe0b0', intensity: 1.4, range: 12, group: 'lamp' });
+  furniture.push({ shape: 'box', x: 0, y: 0, z: -80, w: 6, d: 6, h: 0.02, color: '#34446a' });
+  const perches = [{ x: 0, y: 15, z: -53.6 }, { x: -2.6, y: 15, z: -54.4 }, { x: 2.6, y: 15, z: -54.4 }];
   return {
-    name: 'The Training Hall', boxes, groundY: 0, emitters, lights, lamps: [], round: [], indoor: true,
-    // the dummy's mat: painted on the floor, so nothing trips on it
-    furniture: [{ shape: 'box', x: 0, y: 0, z: -62, w: 6, d: 6, h: 0.02, color: '#34446a' }],
-    ambient: [0.3, 0.31, 0.34], sky: [0.16, 0.16, 0.17], bg: '#c4cad6', fog: { near: 70, far: 200 },
-    bounds: { minX: -X, maxX: X, minZ: N, maxZ: S0 },
-    // practice starts in the hall facing the dummy; the tutorial at the course's start
-    playerStart: { x: 0, y: 0, z: -40, yaw: 0 },
-    tutorialStart: { x: 0, y: 0, z: 36, yaw: 0 },
+    name: 'The Training Hall', boxes, groundY: 0, emitters, lights, lamps: [], round: [], indoor: true, furniture,
+    ambient: [0.3, 0.31, 0.34], sky: [0.16, 0.16, 0.17], bg: '#c4cad6', fog: { near: 80, far: 220 },
+    bounds: { minX: -15, maxX: 20, minZ: HALL.z0, maxZ: 74 },
+    // practice starts in the combat hall facing the dummy; the tutorial at the movement hall's north end
+    playerStart: { x: 0, y: 0, z: -60, yaw: 0 },
+    tutorialStart: { x: 6, y: 0, z: 10, yaw: Math.PI },
     // the course, for the tutorial (training.js)
-    course: { GATE, SLOT, LEDGE, FLING, DUMMY: { x: 0, z: -62, yaw: Math.PI }, mats: [{ x: -6, z: -58 }, { x: 6, z: -58 }] },
-    spawn: { ground: [{ x: -10, y: 0, z: -66 }, { x: 10, y: 0, z: -66 }, { x: -10, y: 0, z: -40 }, { x: 10, y: 0, z: -40 }], high: perches.slice() },
+    course: { OPEN, DOOR, SLIDE, VAULT, GATE, DECK, FIELD, MACHINE, GOAL, HALL, DUMMY: { x: 0, z: -80, yaw: Math.PI } },
+    spawn: { ground: [{ x: -10, y: 0, z: -86 }, { x: 10, y: 0, z: -86 }, { x: -10, y: 0, z: -62 }, { x: 10, y: 0, z: -62 }], high: perches.slice() },
     perches, barrelSpots: [], perchesChecked: true,
-    clearance: { streets: [hall], alleys: [{ min: { x: -X, z: -9 }, max: { x: X, z: 7 } }] },
+    clearance: { streets: [{ min: { x: HALL.x0, z: HALL.z0 }, max: { x: HALL.x1, z: -57 } }], alleys: [{ min: { x: -15, z: -24 }, max: { x: 15, z: 4 } }] },
     orbit: { dist: 14, pitch: -0.3, lift: 3 },
   };
 })();
-
 const ARENAS = { crossroads: CROSSROADS, street: STREET, training: TRAINING };

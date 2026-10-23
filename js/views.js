@@ -128,6 +128,11 @@ const Views = {
       shell.scale.setScalar(0.24 * s); core.scale.setScalar(0.15 * s); halo.scale.setScalar(0.45 * s);
       g.add(shell, core, halo);
       g.userData = { core, halo };
+    } else if (o.kind === 'football') {
+      // the training machine's footballs (training.js)
+      const R = Rig.build(MODELS.football);
+      Gfx.scene.add(R.mesh);
+      return { rig: R, lit: null };
     } else if (o.kind === 'barrel') {
       const R = Rig.build(MODELS.barrel);
       R.feet.value.setRGB(0.3, 0.26, 0.34);
@@ -139,6 +144,17 @@ const Views = {
   },
   update(o, v, t) {
     if (v.boss) { BossViews.update(o, v, t); return; }
+    if (v.rig && o.kind === 'football') {
+      // nose along its flight, spiralling round it
+      const R = v.rig, m = R.mesh;
+      if (!this._fz) { this._fz = new THREE.Vector3(0, 0, 1); this._fd = new THREE.Vector3(); this._fq = new THREE.Quaternion(); }
+      m.position.set(o.pos.x, o.pos.y, o.pos.z);
+      m.quaternion.setFromUnitVectors(this._fz, this._fd.set(o.dir.x, o.dir.y, o.dir.z));
+      m.quaternion.multiply(this._fq.setFromAxisAngle(this._fz, o.roll));
+      m.scale.setScalar(o.state === 'rest' ? Math.max(0.01, 1 - o.rest / 1.6) : 1);
+      if (!v.lit || dist3(v.lit, o.pos) > 0.5) { Render.feet(R.feet, o.pos); v.lit = { x: o.pos.x, y: o.pos.y, z: o.pos.z }; }
+      return;
+    }
     if (v.rig) {
       const R = v.rig, m = R.mesh;
       m.position.set(o.pos.x, o.pos.y, o.pos.z);
@@ -352,6 +368,8 @@ const Views = {
       }
     }
     for (const g of Game.projectiles) if (g.kind === 'grenade' && g.hostile && g.impact && !g.dead) zone(g.impact, g.R, '#4af0ff');
+    // the training ball machine's throws
+    if (Game.mode === 'training') ai = Training.tells(this, ai, zone, cp, t);
     for (; li < this.lasers.length; li++) this.lasers[li].visible = false;
     for (; ai < this.arcs.length; ai++) this.arcs[ai].visible = false;
     for (; zi < this.zones.length; zi++) this.zones[zi].visible = false;

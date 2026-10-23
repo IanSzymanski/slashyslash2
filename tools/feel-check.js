@@ -196,9 +196,9 @@ for (const id of run('Object.keys(ARENAS)')) {
   const walkable = boxes.filter((b) => b.kind !== 'bound' && b.kind !== 'ground' && b.kind !== 'wall' && b.kind !== 'ceiling');
   let worst = 0;
   for (const s of walkable) {
-    // cars and props are climbed over, not onto; the crane and the training hall's tether course are reached by
-    // tether; pillar and beam tops aren't floors
-    if (s.kind === 'car' || s.kind === 'prop' || s.kind === 'crane' || s.tetherOnly || Math.min(s.max.x - s.min.x, s.max.z - s.min.z) < 0.8) continue;
+    // cars and props are climbed over, not onto; the crane is reached by tether, and the training course's
+    // tops along the course (wall kicks, the tether); pillar and beam tops aren't floors
+    if (s.kind === 'car' || s.kind === 'prop' || s.kind === 'crane' || s.tetherOnly || s.viaCourse || Math.min(s.max.x - s.min.x, s.max.z - s.min.z) < 0.8) continue;
     let from = def.groundY, fromName = 'the ground';
     for (const o of walkable) {
       if (o === s || o.max.y >= s.max.y - 0.3 || gap(o, s) > 3) continue;

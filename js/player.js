@@ -111,7 +111,8 @@ class Player {
     if (l > 1) { mx /= l; mz /= l; }
     return {
       mx, mz, jump: Input.wasPressed('jump'), jumpHeld: Input.isDown('jump'), jumpReleased: Input.wasReleased('jump'),
-      crouch: Input.isDown('crouch'), crouchPressed: Input.wasPressed('crouch'), aim: this.aimDir,
+      // (the tutorial holds the bullet jump back until it's past the movement course)
+      crouch: Input.isDown('crouch'), crouchPressed: Input.wasPressed('crouch'), aim: Tutorial.locked('bullet') ? null : this.aimDir,
     };
   }
   // The aim point is where the camera's crosshair ray lands (camera.js).
@@ -1130,6 +1131,8 @@ class Player {
       return;
     }
     if (this.sheathe || this.iaido || this.ultHold > 0 || this.plunge) return;
+    // the tutorial hands you the tether in the tether room
+    if (Tutorial.locked('tether')) { Sound.play('denied'); return; }
     this.fireTether();
   }
   // the enemy, barrel or tetherable grenade nearest the crosshair's line, within the assist angle and in reach

@@ -262,6 +262,10 @@ table.keys td:last-child { text-align: right; }
 .tut kbd { font-size: 0.6em; vertical-align: 0.15em; }
 .tut.done { border-left-color: #5aff9a; }
 .tut.done b { color: #5aff9a; }
+/* put back at the step's checkpoint */
+.tut.fail { border-left-color: #ff5a6a; animation: tut-shake 0.3s; }
+.tut.fail b { color: #ff8a9a; }
+@keyframes tut-shake { 0%, 100% { transform: translateX(-50%); } 25% { transform: translateX(calc(-50% - 6px)); } 75% { transform: translateX(calc(-50% + 6px)); } }
 
 /* ---------- touch controls (touch.js) ---------- */
 #touch {

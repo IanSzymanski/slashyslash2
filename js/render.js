@@ -212,6 +212,7 @@ const Render = {
     this.syncModels(realDt);
     Views.sync();
     Tutorial.syncMarker(t);
+    Training.sync(t);
     FX.sync(Gfx.camera);
     // bullet time drains the colour from the lit world; glowing parts and effects stay bright
     Gfx.desat.value = G.bulletK() * 0.85;
@@ -548,7 +549,8 @@ const Render = {
     // the Glints Only modifier leaves just the glints and where hits came from
     const glintsOnly = Game.mod('glints');
     for (const e of Game.enemies) {
-      if (e.dead || glintsOnly) continue;
+      // (the training dummy standing idle isn't a threat)
+      if (e.dead || glintsOnly || (e.type === 'dummy' && e.state === 'idle')) continue;
       const s = this.project(e.center());
       if (s && !s.off) continue;
       const yaw = yawOf(e.pos.x - Camera.pos.x, e.pos.z - Camera.pos.z);
@@ -568,7 +570,7 @@ const Render = {
     const x = VIEW_W / 2, y = VIEW_H / 2;
     const hand = p.hand(), afford = p.ult || p.shield >= PC.TETHER_COST || S.gameplay.invincible;
     const target = p.tetherTarget(hand);
-    const live = (target && (afford || target.kind === 'grenade')) || (afford && dist3(Camera.aim, hand) <= PC.TETHER_RANGE);
+    const live = !Tutorial.locked('tether') && ((target && (afford || target.kind === 'grenade')) || (afford && dist3(Camera.aim, hand) <= PC.TETHER_RANGE));
     const col = live ? '#ff3a52' : '#7a6a7a';
     ctx.fillStyle = '#0b0910';
     ctx.fillRect(x - 5, y - 1, 3, 3); ctx.fillRect(x + 3, y - 1, 3, 3); ctx.fillRect(x - 1, y - 5, 3, 3); ctx.fillRect(x - 1, y + 3, 3, 3);

@@ -20,6 +20,8 @@ const TEX_STYLES = {
   wallDark: ['#3e4452', '#2e3440', '#4e5666'], mat: ['#34446a', '#263252', '#46588a'],
   block: ['#d8843a', '#a8601e', '#f0a45a'], block2: ['#2e98a6', '#1e7480', '#52b8c4'], block3: ['#7a68c8', '#5848a0', '#9c8ce0'],
   stripe: ['#e8b820', '#1a1a1e', '#f4d050'],
+  // the football field's worn turf
+  turf: ['#4a8a3e', '#3a6e30', '#5ea24e'],
 };
 // grid-lined styles: a line every metre, with a lit edge beside it
 const GRID_STYLES = new Set(['tile', 'wall', 'ceiling', 'wallDark', 'mat', 'block', 'block2', 'block3']);
@@ -185,6 +187,12 @@ const Gfx = {
         g.fillStyle = dark; g.fillRect(0, 0, 64, 3); g.fillRect(0, 61, 64, 3); g.fillRect(0, 31, 64, 2);
         g.fillStyle = '#7a4a30';
         for (let i = 0; i < 12; i++) g.fillRect((R() * 64) | 0, (R() * 50) | 0, 1, 4 + ((R() * 10) | 0));
+      } else if (style === 'turf') {
+        // mown stripes and blades of grass
+        g.fillStyle = dark; g.fillRect(0, 0, 64, 32);
+        speckle(1100);
+        g.fillStyle = light;
+        for (let i = 0; i < 90; i++) g.fillRect((R() * 64) | 0, (R() * 64) | 0, 1, 2);
       } else if (style === 'dirt') {
         speckle(1400);
         g.fillStyle = '#5a4a38';

@@ -860,67 +860,136 @@ async function run(browser, file, errors) {
     {
       Game.toMenu(); SaveData.tutorialDone = false; S.gameplay.invincible = false;
       UI.act('training'); T.frame(5);
-      const P = Game.player, D = Training.dummy, St = World.def.tutorialStart;
+      const P = Game.player, St = World.def.tutorialStart;
+      let D = Training.dummy;
       ok(Arena.id === 'training' && Tutorial.active && Tutorial.step().id === 'move' && distXZ(P.pos, St) < 0.5 && D && D.type === 'dummy' && !document.getElementById('tut').hidden,
         'Training opens in the training hall with the tutorial at the course start, its text up, and the dummy on its mat');
       const face = (x, z) => { Camera.yaw = yawOf(x - P.pos.x, z - P.pos.z); };
       // the orbit camera moves as it pitches, so aim until the crosshair settles on the point
       const aimHard = (c) => { for (let i = 0; i < 8; i++) T.aimAt(c); };
       const walkTo = (x, z, max = 300) => { for (let i = 0; i < max; i++) { face(x, z); T.press('KeyW'); T.frame(1); if (Math.hypot(P.pos.x - x, P.pos.z - z) < 0.5) break; } T.release('KeyW'); T.frame(20); };
-      walkTo(0, 28); T.frame(70);
-      walkTo(0, 21); T.frame(70);
-      ok(Tutorial.step().id === 'jump' && P.pos.y > 2.4, `walking to the marker and into the orange block finishes the first two steps (${Tutorial.step().id}, on top at ${P.pos.y.toFixed(1)} m)`);
-      // the teal block takes a jump, the tower a double jump from it
-      face(9, 19); T.press('KeyW'); T.press('Space'); T.frame(40); T.release('Space'); T.frame(30); T.release('KeyW'); T.frame(70);
-      walkTo(9, 18.2, 100);
-      face(9, 12); T.press('KeyW'); T.press('Space'); T.frame(14); T.release('Space'); T.frame(4); T.press('Space'); T.frame(30); T.release('Space'); T.frame(20); T.release('KeyW'); T.frame(70);
-      ok(Tutorial.step().id === 'dash', `a jump onto the teal block and a double jump onto the tower finish the platforming (${Tutorial.step().id})`);
-      // the laser door: walking in throws you back; a dash goes through
-      Training.place(P, { x: 0, y: 0, z: 12, yaw: 0 }); T.frame(3);
+      const stepIs = (id, n = 200) => { for (let i = 0; i < n && Tutorial.step().id !== id; i++) T.frame(1); return Tutorial.step().id === id; };
+      const fails = (id) => TUTORIAL_STEPS.find((q) => q.id === id).fails || 0;
+      ok(!Training.doorOpen && Tutorial.locked('tether') && Tutorial.locked('bullet'), 'the tutorial starts with the door to the combat hall shut and the tether and bullet jump held back');
+      // the movement hall's floor: a marker, the 2.5 m block, a jump to the 5.5 m one, a double jump to the tower
+      walkTo(6, 16); walkTo(9, 19); face(9, 24); T.press('KeyW'); T.frame(40); T.release('KeyW');
+      ok(stepIs('jump') && P.pos.y > 2.4, `walking to the marker and into the orange block finishes the first two steps (${Tutorial.step().id}, on top at ${P.pos.y.toFixed(1)} m)`);
+      walkTo(9, 23); face(16, 30); T.press('KeyW'); T.frame(8); T.press('Space');
+      for (let i = 0; i < 90 && !(P.onGround && P.pos.y > 5.4); i++) T.frame(1);
+      T.release('Space'); T.release('KeyW');
+      stepIs('double');
+      walkTo(17, 32.4, 200); face(18, 40); T.press('KeyW'); T.press('Space'); T.frame(16); T.release('Space'); T.frame(3); T.press('Space'); T.frame(40); T.release('Space'); T.frame(30); T.release('KeyW');
+      ok(stepIs('slide') && P.pos.y > 12.9, `a jump onto the teal block and a double jump onto the 13 m tower lead onto the walkway (${Tutorial.step().id})`);
+      // falling off the walkway puts you back at the step's checkpoint
+      walkTo(17, 44); face(10, 44); T.press('KeyW'); T.frame(90); T.release('KeyW'); T.frame(10);
+      ok(fails('slide') === 1 && P.pos.y > 12.9 && Tutorial.step().id === 'slide', `walking off the walkway's edge puts you back on it to try again (${P.pos.y.toFixed(1)} m)`);
+      // the slide gap: too low to walk or crouch through; a slide goes under
+      walkTo(18, 44); face(18, 60); T.press('KeyW'); T.frame(60); T.release('KeyW'); T.frame(5);
+      const blocked = P.pos.z < 48;
+      walkTo(18, 38.5); face(18, 60); T.press('KeyW');
+      for (let i = 0; i < 200 && P.pos.z < 44.5; i++) T.frame(1);
+      T.press('KeyC'); T.frame(70); T.release('KeyC'); T.frame(10); T.release('KeyW');
+      ok(blocked && stepIs('vault'), `the wall's gap stops a run and lets a slide through (${Tutorial.step().id})`);
+      // the vault slot: a jump at it doesn't get through; a run vaults it
+      walkTo(18, 56); face(18, 70); T.press('KeyW'); T.frame(20); T.press('Space'); T.frame(30); T.release('Space'); T.frame(30); T.release('KeyW'); T.frame(20);
+      const jumpBlocked = P.pos.z < 64.2;
+      walkTo(18, 54); face(18, 70); T.press('KeyW'); T.frame(120); T.release('KeyW');
+      ok(jumpBlocked && stepIs('dash'), `a jump can't get through the slot above the barrier; a run vaults it (${Tutorial.step().id})`);
+      // the laser doorway: walking in throws you back; a dash goes through
+      walkTo(18, 72); walkTo(14, 72);
       const zaps = Training.n('zap');
-      for (let i = 0; i < 80; i++) { face(0, 0); T.press('KeyW'); T.frame(1); }
-      T.release('KeyW'); T.frame(20);
-      const zapped = Training.n('zap') > zaps && P.pos.z > 7.5;
-      Training.place(P, { x: 0, y: 0, z: 11, yaw: 0 }); T.frame(3);
-      face(0, 0); T.press('KeyW'); T.frame(20); T.tap('ShiftLeft'); T.frame(30); T.release('KeyW'); T.frame(70);
-      ok(zapped && P.pos.z < 7.5 && Tutorial.step().id === 'slide', `the red lasers throw back a walk and let a dash through (${P.pos.z.toFixed(1)} m past them)`);
-      // the slot under the wall: too low to walk under, a slide goes through
-      Training.place(P, { x: 0, y: 0, z: -4, yaw: 0 }); T.frame(3);
-      for (let i = 0; i < 60; i++) { face(0, -20); T.press('KeyW'); T.frame(1); }
-      T.release('KeyW'); T.frame(10);
-      const blocked = P.pos.z > -9;
-      Training.place(P, { x: 0, y: 0, z: 2, yaw: 0 }); T.frame(3);
-      face(0, -20); T.press('KeyW'); T.frame(30); T.press('KeyC'); T.frame(50); T.release('KeyC'); T.release('KeyW'); T.frame(70);
-      ok(blocked && P.pos.z < -10.5 && Tutorial.step().id === 'zip', `the slot stops you standing and lets a slide under (${P.pos.z.toFixed(1)})`);
-      // the tether: hold zips up the 14 m ledge; a tap at the floating platform's edge throws you onto it
-      Training.place(P, { x: 0, y: 0, z: -20, yaw: 0 }); T.frame(3);
-      aimHard({ x: 0, y: 13.8, z: -26 }); T.press('Mouse2'); T.frame(120); T.release('Mouse2'); T.frame(70);
-      const zipped = Tutorial.step().id === 'fling' && P.pos.y > 13.9;
-      walkTo(0, -34.5, 200);
-      aimHard({ x: 0, y: 15.8, z: -47 }); T.tap('Mouse2', 2); T.frame(120); T.frame(30);
-      ok(zipped && Tutorial.step().id === 'slash' && P.pos.y > 15.9, `a held tether zips up the ledge, a tap flings you onto the platform (${Tutorial.step().id} at ${P.pos.y.toFixed(1)} m)`);
+      face(0, 72); T.press('KeyW'); T.frame(40); T.release('KeyW'); T.frame(10);
+      const zapped = Training.n('zap') > zaps && P.pos.x > 10;
+      walkTo(13, 72); face(0, 72); T.press('KeyW'); T.frame(6); T.tap('ShiftLeft'); T.frame(30); T.release('KeyW');
+      ok(zapped && stepIs('kick') && P.pos.x < 10, `the red lasers throw back a walk and let a dash through (${P.pos.x.toFixed(1)})`);
+      // the wall kick: a double jump at the pier falls short of the deck; kicking from wall to wall gets up
+      walkTo(0, 71.2); face(0, 60); T.press('KeyW'); T.press('Space'); T.frame(16); T.release('Space'); T.frame(3); T.press('Space'); T.frame(60); T.release('Space'); T.release('KeyW'); T.frame(60);
+      const short = Tutorial.step().id === 'kick' && P.pos.y < 14;
+      walkTo(0, 71); face(0, 80); T.press('KeyW'); T.press('Space');
+      for (let i = 0; i < 90 && !P.cling; i++) T.frame(1);
+      T.release('Space');
+      let clings = P.cling ? 1 : 0;
+      for (let k = 0; k < 6 && !(P.onGround && P.pos.y > 24); k++) {
+        face(0, k % 2 ? 80 : 60); T.frame(2); T.press('Space');
+        for (let i = 0; i < 10 && P.cling; i++) T.frame(1);
+        for (let i = 0; i < 60 && !P.cling && !(P.onGround && P.pos.y > 24); i++) T.frame(1);
+        T.release('Space'); if (P.cling) clings++;
+      }
+      T.release('KeyW');
+      ok(short && clings >= 2 && stepIs('gap'), `wall kicks from the purple wall to the pier and back climb to the deck a double jump can't reach (${clings} grabs)`);
+      // the long jump through the opening: one dash falls short (back to the deck), two clear it
+      const longJump = (dashes) => {
+        walkTo(0, 68); face(0, 0); T.press('KeyW');
+        let t0 = -1, dj = false;
+        const fired = dashes.map(() => false);
+        for (let i = 0; i < 400; i++) {
+          T.frame(1);
+          if (t0 < 0 && P.pos.z < 48.6) { T.press('Space'); t0 = Game.time; }
+          if (t0 < 0) continue;
+          const a = Game.time - t0;
+          if (!dj && a >= 0.45) { dj = true; T.release('Space'); T.frame(1); T.press('Space'); }
+          dashes.forEach((d, k) => { if (!fired[k] && a >= d) { fired[k] = true; T.tap('ShiftLeft'); } });
+          if ((P.onGround || P.mantle) && a > 0.3) break;
+        }
+        T.release('KeyW'); T.release('Space'); T.frame(30);
+      };
+      longJump([1.2]);
+      const oneShort = fails('gap') === 1 && Tutorial.step().id === 'gap' && P.pos.y > 24;
+      longJump([1.0, 1.3]);
+      ok(oneShort && stepIs('zip') && P.pos.z < 4, `the gap to the tether room: a double jump and one dash falls short and puts you back, two dashes clear it (${Tutorial.step().id})`);
+      ok(!Tutorial.locked('tether'), 'the tether comes free in the tether room');
+      // the tether: hold zips up the 15 m ledge to the football field
+      walkTo(0, -14); aimHard({ x: 0, y: 14.4, z: -24 }); T.press('Mouse2'); T.frame(150); T.release('Mouse2'); T.frame(40);
+      ok(stepIs('football') && P.pos.y > 14.9, `a held tether zips up the ledge onto the field (${P.pos.y.toFixed(1)} m)`);
+      // the ball machine: tether a ball in the air, aim between the posts, and the kick goes where you aim
+      walkTo(-3, -31);
+      const GL = World.def.course.GOAL;
+      let arcSeen = false, rebounds = 0;
+      for (let k = 0; k < 8 && Tutorial.step().id === 'football'; k++) {
+        let ball = null;
+        for (let i = 0; i < 400; i++) { T.frame(1); Views.syncTells(Game.realTime); arcSeen = arcSeen || Views.arcs.some((m) => m.visible); ball = Game.projectiles.find((o) => o.kind === 'football' && o.state === 'flying' && o.t > 0.35); if (ball) break; }
+        if (!ball) break;
+        T.aimAt(ball.pos); T.tap('Mouse2', 1);
+        for (let i = 0; i < 30 && !(P.tether && P.tether.mode === 'rebound'); i++) T.aimAt(ball.pos);
+        if (P.tether && P.tether.mode === 'rebound') rebounds++;
+        for (let i = 0; i < 160 && P.tether; i++) T.aimAt({ x: 0, y: GL.y0 + 3, z: GL.z });
+        T.frame(60);
+        if (Tutorial.step().id === 'football' && fails('football')) walkTo(-3, -31);
+      }
+      ok(arcSeen && rebounds >= 2 && Training.n('goal') >= 2 && stepIs('slash') && Training.doorOpen, `the machine's balls show their arcs; tethered and kicked between the posts, two goals open the door (${Training.n('goal')} goals, ${rebounds} catches)`);
+      // through the door and down into the combat hall
+      walkTo(0, -50.5); walkTo(0, -62, 300);
+      ok(P.pos.z < -55 && P.pos.y < 0.5 && Tutorial.step().id === 'slash', `the open door leads onto the balcony and down into the combat hall (${P.pos.z.toFixed(1)})`);
       // the dummy: a string, a heavy
       const faceD = () => { Camera.yaw = yawOf(D.pos.x - P.pos.x, D.pos.z - P.pos.z); Camera.pitch = -0.1; };
-      Training.place(P, { x: 0, y: 0, z: -59.8, yaw: 0 }); faceD(); T.frame(5);
+      const nearD = (k) => ({ x: D.pos.x, y: 0, z: D.pos.z + k, yaw: 0 });
+      Training.place(P, nearD(2.2)); faceD(); T.frame(5);
       for (let i = 0; i < 3; i++) { T.tap('Mouse0'); T.frame(16); }
       T.frame(70); faceD(); T.press('Mouse0'); T.frame(30); T.release('Mouse0'); T.frame(80);
       ok(Tutorial.step().id === 'fight', `a three-hit string and a heavy on the dummy finish the attack steps (${Tutorial.step().id})`);
-      // two scrappers, the sword beam
+      // two scrappers in front of you while the dummy steps off; it's back afterwards; the sword beam
+      const fw = { x: fwdX(Camera.yaw), z: fwdZ(Camera.yaw) }, sc = Game.enemies.filter((e) => e.tutorial);
+      const ahead = sc.length === 2 && sc.every((e) => { const dx = e.pos.x - P.pos.x, dz = e.pos.z - P.pos.z; return (dx * fw.x + dz * fw.z) / Math.hypot(dx, dz) > 0.5; });
+      const dummyGone = !Game.enemies.includes(D);
       for (let i = 0; i < 900 && Tutorial.step().id === 'fight'; i++) {
         const e = Game.enemies.find((x) => x.tutorial && !x.dead && !x.spawning);
         if (e) { Camera.yaw = yawOf(e.pos.x - P.pos.x, e.pos.z - P.pos.z); if (i % 12 === 0) T.tap('Mouse0'); }
         T.frame(1);
       }
-      T.frame(80); Training.place(P, { x: 0, y: 0, z: -55, yaw: 0 }); faceD(); T.frame(3);
+      T.frame(80);
+      const D2 = Training.dummy;
+      ok(ahead && dummyGone && D2 && Game.enemies.includes(D2) && Tutorial.step().id === 'beam', `the fight's scrappers spawn in front of you with the dummy off its mat, and it's back once they're down (${Tutorial.step().id})`);
+      D = D2;
+      Training.place(P, nearD(7)); faceD(); T.frame(3);
       T.press('KeyF'); T.frame(80); T.release('KeyF'); T.frame(100);
-      ok(Tutorial.step().id === 'parry', `the scrappers go down and a full sword beam hits the dummy (${Tutorial.step().id})`);
+      ok(Tutorial.step().id === 'parry', `a full sword beam hits the dummy (${Tutorial.step().id})`);
       // yellow: E on the flash parries it; then a counter
       const parryLoop = (id) => {
-        Training.place(P, { x: 0, y: 0, z: -60, yaw: 0 }); faceD(); T.frame(3);
+        Training.place(P, nearD(2)); faceD(); T.frame(3);
         let armed = true;
         for (let i = 0; i < 1500 && Tutorial.step().id === id; i++) {
           faceD();
-          if (distXZ(P.pos, D.pos) > 2.6 && D.state === 'idle') Training.place(P, { x: 0, y: 0, z: -60, yaw: 0 });
+          if (distXZ(P.pos, D.pos) > 2.6 && D.state === 'idle') Training.place(P, nearD(2));
           if (D.state !== 'windup') armed = true;
           if (armed && D.state === 'windup' && D.st >= D.tele(DUMMY.WIND) - 0.14) { T.press('KeyE'); armed = false; }
           if (Input.down.has('KeyE') && (!P.sheathe || (P.sheathe.empowered && P.sheathe.t > P.sheathe.parriedAt + 0.12))) T.release('KeyE');
@@ -931,12 +1000,12 @@ async function run(browser, file, errors) {
       parryLoop('parry'); parryLoop('counter');
       ok(Tutorial.step().id === 'red' && Training.n('parry') >= 3 && Training.n('iaido') >= 1, `E on the dummy's yellow flash parries it, and letting go counters (${Training.n('parry')} parries)`);
       // red: no parry stops it in front; a dash through its body to its back beats it
-      Training.place(P, { x: 0, y: 0, z: -58, yaw: 0 }); faceD(); T.frame(3);
+      Training.place(P, nearD(4)); faceD(); T.frame(3);
       const h0 = Training.n('redHit');
       for (let i = 0; i < 400 && Training.n('redHit') === h0; i++) { faceD(); if (D.state === 'redWind' && !P.sheathe && D.st > 0.6) T.tap('KeyE'); T.frame(1); }
       const redHit = Training.n('redHit') > h0;
       for (let i = 0; i < 2400 && Tutorial.step().id === 'red'; i++) {
-        if (D.state === 'idle' && P.dashT <= 0) { if (distXZ(P.pos, D.pos) > 3.2 || D.behindMe(P)) { T.release('KeyW'); Training.place(P, { x: 0, y: 0, z: -59, yaw: 0 }); } D._dashed = false; }
+        if (D.state === 'idle' && P.dashT <= 0) { if (distXZ(P.pos, D.pos) > 3.2 || D.behindMe(P)) { T.release('KeyW'); Training.place(P, nearD(3)); } D._dashed = false; }
         faceD();
         if (D.state === 'redWind' && D.st > 0.3 && !D._dashed) { T.press('KeyW'); T.tap('ShiftLeft'); D._dashed = true; continue; }
         if (P.dashT <= 0 && P.dashEndT <= 0) T.release('KeyW');
@@ -953,7 +1022,7 @@ async function run(browser, file, errors) {
       const n0 = Game.enemies.length; Training.act('train-spawn', { dataset: { type: 'scrapper' } }); await new Promise((r) => setTimeout(r, 30)); T.frame(5);
       ok(alive && panel && Game.enemies.length === n0 + 1 && Game.state === 'playing', `in practice a 999 hit leaves you at ${Math.round(P.hp)}, and pause opens the training panel, which spawns a scrapper`);
       Game.pause(); Training.act('train-tutorial'); await new Promise((r) => setTimeout(r, 30)); T.frame(5);
-      ok(Tutorial.active && Tutorial.step().id === 'move' && distXZ(P.pos, St) < 0.5 && Game.state === 'playing', 'Replay the tutorial puts you back at the start of the course');
+      ok(Tutorial.active && Tutorial.step().id === 'move' && distXZ(P.pos, St) < 0.5 && Game.state === 'playing' && !Training.doorOpen, 'Replay the tutorial puts you back at the start of the course, the door shut again');
       Game.toMenu(); UI.act('training'); T.frame(5);
       ok(!Tutorial.active && distXZ(Game.player.pos, World.def.playerStart) < 0.5, 'once done, Training opens straight into practice in the hall');
 
