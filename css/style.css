@@ -137,6 +137,12 @@ button:hover small, button:focus-visible small { color: var(--accent-hot); }
 button:disabled { opacity: 0.45; cursor: default; transform: none; }
 button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
 button.ghost:hover, button.ghost:focus-visible { color: var(--ink); border-color: var(--panel-edge); transform: none; }
+/* the character picker: RONIN in the menu's red, AEGIS-07 in its cyan */
+button.char { border-color: var(--accent); margin-bottom: 0.3em; }
+button.char b { color: var(--accent-hot); font-weight: inherit; }
+button.char.aegis { border-color: #21b8ff; }
+button.char.aegis b { color: #7ad8ff; }
+button.char.aegis:hover, button.char.aegis:focus-visible { background: rgba(14, 64, 96, 0.85); }
 .best { color: var(--shield); margin: auto 0 0; font-size: 0.95em; }
 .need { color: var(--muted); margin: 0; font-size: 0.85em; }
 

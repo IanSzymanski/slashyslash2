@@ -5,8 +5,10 @@
 const UTILITIES = {};
 function registerUtility(def) { UTILITIES[def.id] = def; }
 function getUtility(id) { return UTILITIES[id] || null; }
-// rival.js adds AEGIS-07, which has no utility until it becomes playable.
-const CHARACTERS = { ronin: { id: 'ronin', name: 'RONIN', utility: 'overload' } };
+// aegisplayer.js adds AEGIS-07, whose F switches its weapon mode instead of a cooldown.
+const CHARACTERS = { ronin: { id: 'ronin', name: 'RONIN', utility: 'overload', make: (pos) => new Player(pos) } };
+// the player for a run, as the character picked on the title screen
+function makePlayer(id, pos) { const C = CHARACTERS[id] || CHARACTERS.ronin; return C.make(pos); }
 
 // RONIN: vents the core in a red shock sphere. Everything close is interrupted and thrown back, and hostile
 // bolts are burned out of the air. Bosses shrug it off and pulse grenades are untouched, so it never

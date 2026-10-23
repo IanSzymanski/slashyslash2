@@ -745,7 +745,7 @@ async function run(browser, file, errors) {
     for (let i = 0; i < 60 * 8 && roofT < 0; i++) { T.frame(1); if (R.onGround && Math.abs(R.pos.y - 6) < 0.3) roofT = i / 60; }
     ok(roofT >= 0, `on a 6 m rooftop it boosts up after you (${roofT >= 0 ? 'there in ' + roofT.toFixed(1) + ' s' : 'never got there'})`);
     // charging from far off in phase 2, it takes a long dash chain in rather than leaping
-    R = rival(0, -24, { phase2: true, think: true, move: true }); R.mode = 'charge'; R.modeT = 99; R.cds.chain = 0; R.cds.closer = 0; R.cds.combo = 99; R.cds.wave = 99;
+    R = rival(0, -24, { phase2: true, think: true, move: true }); R.mode = 'charge'; R.modeT = 99; R.cds.chain = 0; R.cds.closer = 0; R.cds.combo = 99; R.cds.strike = 99;
     let longChain = '', leapt = false;
     for (let i = 0; i < 60 * 2 && !longChain; i++) { T.frame(1); if (R.act && R.act.kind === 'chain') longChain = R.act.name; leapt = leapt || !!R.leap || (R.act && R.act.kind === 'dive'); }
     ok(['blitz', 'longZigzag', 'sweep', 'zigzag3'].includes(longChain) && !leapt, `charging from 24 m it takes a long dash chain in (${longChain || 'none'}${leapt ? ', leapt first' : ''})`);
@@ -790,17 +790,38 @@ async function run(browser, file, errors) {
     }
     ok(diveTop > 12 && flashAt > 0 && diveAt > flashAt && impactAt - diveAt < 20 && p.hp + p.shield < PC.MAX_HP + PC.MAX_SHIELD,
       `its dive bomb leaps ${diveTop.toFixed(1)} m, flashes ${((diveAt - flashAt) / 60).toFixed(2)} s before diving, comes down in ${((impactAt - diveAt) / 60).toFixed(2)} s and hits you on the mark`);
-    // its blade waves fly fast, tilted 45 degrees, at where you're running to
+    // run from it and it calls orbital strikes: probes that land on the street ahead of your run, pulse, then erupt
     R = rival(0, -14, { phase2: true });
     p.vel.x = 9.5; p.vel.z = 0;
-    R.fireWave(RIVAL_MOVES.wave);
-    const fw = Game.projectiles.filter((b) => b.kind === 'bladewave').pop();
-    ok(fw && fw.dir.x > 0.15 && Math.abs(Math.abs(fw.roll) - Math.PI / 4) < 0.01 && fw.speed >= 36, `its blade waves lead you (aimed ${fw ? (Math.asin(fw.dir.x) * 180 / Math.PI).toFixed(0) : '-'} degrees ahead), fly at ${fw ? fw.speed.toFixed(0) : '-'} m/s and are tilted 45 degrees`);
-    Game.projectiles = [];
-    // phase 2 doesn't stand off and throw: waves and the dive only come when you run from it
+    R.startStrikes(p);
+    const sx = p.pos.x;
+    let probes = 0, strikes = [];
+    for (let i = 0; i < 60 * 3 && !strikes.some((h) => h.phase === 'erupt'); i++) {
+      if (R.act && R.act.kind === 'strike') { p.vel.x = 9.5; p.vel.z = 0; }
+      T.frame(1);
+      probes = Math.max(probes, Game.projectiles.filter((b) => b.kind === 'probe').length);
+      strikes = Game.hazards.filter((h) => h.kind === 'strike');
+    }
+    const ahead = strikes.filter((h) => h.pos.x > sx + 3).length;
+    ok(probes >= 2 && strikes.length >= 2 && ahead >= 2 && strikes.every((h) => h.hostile && h.R < 4), `running from it, it lobs ${probes} probes that become ${strikes.length} strike rings, ${ahead} on the street ahead of you`);
+    Game.projectiles = []; Game.hazards = [];
+    // a strike erupting under you hits you once; out of its ring by then, it doesn't
+    R = rival(0, -14, { phase2: true });
+    S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
+    Game.hazards.push(new OrbitalStrike({ x: p.pos.x, y: p.pos.y, z: p.pos.z }, { owner: R, hostile: true, cfg: STRIKE.boss }));
+    for (let i = 0; i < 60 * 2.5 && Game.hazards.length; i++) T.frame(1);
+    const inHit = p.hp + p.shield < PC.MAX_HP + PC.MAX_SHIELD;
+    p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0; p.vel.x = p.vel.y = p.vel.z = 0; T.frame(30);
+    p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
+    const st2 = new OrbitalStrike({ x: p.pos.x, y: p.pos.y, z: p.pos.z }, { owner: R, hostile: true, cfg: STRIKE.boss });
+    Game.hazards.push(st2);
+    T.frame(20); p.pos.x = p.prev.x = st2.pos.x + 6;
+    for (let i = 0; i < 60 * 2.5 && Game.hazards.length; i++) T.frame(1);
+    ok(inHit && p.hp === PC.MAX_HP && p.shield === PC.MAX_SHIELD, 'a strike ring erupting under you hits you, and stepping out of it before it erupts is safe');
+    // phase 2 doesn't stand off and throw: strikes and the dive only come when you run from it
     const p2Acts = (run) => {
       R = rival(0, -11, { phase2: true, think: true, move: true });
-      R.cds.wave = 0; R.cds.dive = 0; R.cds.chain = 99; R.cds.closer = 0; R.cds.combo = 99;
+      R.cds.strike = 0; R.cds.dive = 0; R.cds.chain = 99; R.cds.closer = 0; R.cds.combo = 99;
       const seen = new Set();
       if (run) { Camera.yaw = yawOf(p.pos.x - R.pos.x, p.pos.z - R.pos.z); T.press('KeyW'); }
       for (let i = 0; i < 60 * 2.5; i++) { T.frame(1); if (R.act) seen.add(R.act.move || R.act.kind); }
@@ -808,16 +829,9 @@ async function run(browser, file, errors) {
       return seen;
     };
     const stood = p2Acts(false), ran = p2Acts(true);
-    const ranged = (q) => q.has('wave') || q.has('waveAir') || q.has('dive');
-    ok(!ranged(stood) && ranged(ran), `phase 2 throws waves or dives only when you run (standing: ${[...stood].join(' ') || 'nothing'}; running: ${[...ran].join(' ') || 'nothing'})`);
-    // its blade waves can't be sent back: a parry breaks one on the blade
-    R = rival(0, -12, { phase2: true });
-    p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0; p.parryCD = 0;
-    const rhp = R.hp, w = new BladeWave({ x: R.pos.x, y: p.pos.y + 0.7, z: R.pos.z + 1.2 }, { x: 0, y: 0, z: 1 }, 12, R, false);
-    Game.projectiles.push(w);
-    for (let i = 0; i < 60 && !w.dead; i++) { if (distXZ(w.pos, p.pos) < 3 && !p.sheathe) T.press('KeyE'); T.frame(1); }
-    T.release('KeyE'); T.frame(30);
-    ok(w.dead && R.hp === rhp && p.hp === PC.MAX_HP && !Game.projectiles.some((b) => b.kind === 'bladewave' && !b.dead), 'a parried blade wave breaks on the blade and is never sent back');
+    const ranged = (q) => q.has('strike') || q.has('dive');
+    ok(!ranged(stood) && ranged(ran) && typeof BladeWave === 'undefined', `phase 2 calls strikes or dives only when you run, and throws no blade waves (standing: ${[...stood].join(' ') || 'nothing'}; running: ${[...ran].join(' ') || 'nothing'})`);
+    Game.projectiles = []; Game.hazards = [];
     // the knockout: a slow-motion cutscene, then it lies in the street as a husk until the next wave
     R = rival(0, -6, { phase2: true });
     R.hp = 5; hurtEnemy(R, 30, { cause: 'slash', dir: { x: 0, y: 0, z: -1 } });
@@ -827,6 +841,127 @@ async function run(browser, file, errors) {
     const husk = Game.props.find((q) => q.kind === 'husk');
     ok(koCine && R.dead && husk && husk.rig, 'the last hit plays the knockout cutscene and leaves its husk lying in the street');
     S.gameplay.invincible = false;
+
+    // ---------- AEGIS-07 as the player ----------
+    // picked on the title screen, it plays as the mech: a taller body, gunner mode first, its own model
+    const aegis = () => {
+      Game.toMenu(); SaveData.character = 'aegis'; UI.act('street'); T.frame(3);
+      p = Game.player; S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD;
+      Game.props = []; Game.projectiles = []; Game.hazards = []; Game.enemies = [];
+      return p;
+    };
+    p = aegis(); Render.draw(1 / 60);
+    ok(p instanceof AegisPlayer && p.h > 2.3 && p.mode === 'gun' && Render.playerRig === Render.rigs.aegis && !Render.rigs.ronin.mesh.visible, 'picking AEGIS-07 plays it: a 2.4 m body in gunner mode, drawn with its own model');
+    // gunner: held fire cuts down a scrapper, and each round stops in the first body it meets
+    {
+      const g1 = T.enemy('scrapper', 8, 0, { frozen: true }), g2 = T.enemy('scrapper', 11, 0, { frozen: true });
+      T.aimAt(g1.center());
+      const a0 = p.gun.ammo;
+      let backHp = -1;
+      T.press('Mouse0');
+      for (let i = 0; i < 90 && backHp < 0; i++) { T.frame(1); if (g1.dead) backHp = g2.hp; }
+      T.release('Mouse0'); T.frame(2);
+      ok(g1.dead && backHp === g2.maxHp && p.gun.ammo < a0, `held fire cuts down a scrapper (${a0 - p.gun.ammo} rounds) and each round stops in the first body (the one behind untouched: ${backHp}/${g2.maxHp})`);
+      // an empty magazine reloads itself; R reloads a partial one
+      p.gun.ammo = 1; T.press('Mouse0'); T.frame(4); const rel = p.gun.reload > 0; T.release('Mouse0');
+      T.frame(Math.ceil(AP.RELOAD * 60) + 2);
+      const full = p.gun.ammo === AP.MAG;
+      p.gun.ammo = 10; T.tap('KeyR'); T.frame(Math.ceil(AP.RELOAD * 60) + 2);
+      ok(rel && full && p.gun.ammo === AP.MAG, 'an empty magazine reloads itself, and R reloads a partial one');
+    }
+    // gunner: E's beam pierces everything on its line, drains shield and holds you where you stand
+    {
+      p = aegis();
+      const b1 = T.enemy('scrapper', 8, 0, { frozen: true, hp: 500 }), b2 = T.enemy('scrapper', 13, 0, { frozen: true, hp: 500 });
+      T.aimAt(b1.center());
+      const x0 = p.pos.x, z0 = p.pos.z;
+      T.press('KeyE'); T.press('KeyD'); T.frame(75);
+      const moved = Math.hypot(p.pos.x - x0, p.pos.z - z0), sh = p.shield;
+      T.release('KeyE'); T.release('KeyD'); T.frame(10);
+      ok(b1.hp < 500 && b2.hp < 500 && sh < PC.MAX_SHIELD - AP.BEAM_COST && moved < 0.3 && !p.beamAct, `the beam pierces both scrappers in line (${500 - b1.hp}, ${500 - b2.hp}), drains shield (to ${sh.toFixed(0)}) and holds you still (moved ${moved.toFixed(2)} m)`);
+      p.shield = 10; T.tap('KeyE'); T.frame(2);
+      ok(!p.beamAct, 'with less than 20 shield the beam does not fire');
+      // in the air it hangs on its jets
+      p.shield = PC.MAX_SHIELD; T.press('Space'); T.frame(14); T.release('Space');
+      T.press('KeyE'); const y0 = p.pos.y; T.frame(60); const y1 = p.pos.y; T.release('KeyE'); T.frame(10);
+      ok(y0 > 1 && y1 > y0 - 0.5, `firing the beam in the air hovers (${y0.toFixed(1)} m to ${y1.toFixed(1)} m)`);
+    }
+    // F held a full second switches modes; letting go early or taking a hit cancels it
+    {
+      p = aegis(); T.frame(5);
+      T.press('KeyF'); T.frame(30); T.release('KeyF'); T.frame(2);
+      const early = p.mode;
+      T.press('KeyF'); T.frame(20); p.iframes = 0; p.takeHit({ dmg: 5, from: { x: p.pos.x + 2, y: p.pos.y + 1, z: p.pos.z } }); T.frame(60); T.release('KeyF');
+      const hit = p.mode;
+      T.frame(60);
+      T.press('KeyF'); T.frame(64); T.release('KeyF'); T.frame(2);
+      ok(early === 'gun' && hit === 'gun' && p.mode === 'blade', `holding F for a second switches to melee; half a second (${early}) or a hit in the middle (${hit}) doesn't`);
+    }
+    // melee: a swipe, a backhand and a thrust, each stepping in
+    {
+      const m1 = T.enemy('scrapper', 3, 0, { frozen: true, hp: 500 });
+      T.face(m1.pos.x, m1.pos.z);
+      const hits = [];
+      let h0 = m1.hp;
+      for (let i = 0; i < 3; i++) { T.tap('Mouse0'); T.frame(20); hits.push(h0 - m1.hp); h0 = m1.hp; }
+      ok(hits.every((d) => d > 0) && hits[2] > hits[0], `melee: swipe, backhand and thrust all land (${hits.join(', ')})`);
+      Game.enemies = [];
+    }
+    // melee: E blocks on the blade; held after the block, release drives a pulse burst through what's in line
+    {
+      p.shield = PC.MAX_SHIELD; p.parryCD = 0;
+      const e1 = T.enemy('scrapper', 2.2, 0, { cd: 0 });
+      T.face(e1.pos.x, e1.pos.z);
+      for (let i = 0; i < 120 && !e1.glinted; i++) T.frame(1);
+      const parries = Game.stats.parries;
+      T.frame(6); T.press('KeyE');
+      for (let i = 0; i < 40 && Game.stats.parries === parries; i++) T.frame(1);
+      const blocked = Game.stats.parries === parries + 1 && p.sheathe && p.sheathe.empowered;
+      e1.hp = 90;
+      const e3 = T.enemy('scrapper', 10, 0.3, { frozen: true }); e3.hp = 90;
+      T.frame(30);
+      T.release('KeyE'); T.frame(40);
+      ok(blocked && e1.dead && e3.dead, `a block on the scrapper's glint charges the pulse burst, which kills it and one 10 m behind (${blocked ? 'blocked' : 'not blocked'})`);
+    }
+    // gunner mode has no parry: E there is the beam, so the scrapper's blow lands
+    {
+      p = aegis();
+      const e1 = T.enemy('scrapper', 2.2, 0, { cd: 0 });
+      T.face(e1.pos.x, e1.pos.z);
+      for (let i = 0; i < 120 && !e1.glinted; i++) T.frame(1);
+      const parries = Game.stats.parries;
+      T.frame(6); T.press('KeyE');
+      for (let i = 0; i < 40 && p.hurtT <= 0; i++) T.frame(1);
+      T.release('KeyE'); T.frame(5);
+      ok(Game.stats.parries === parries && p.shield < PC.MAX_SHIELD - AP.BEAM_COST, 'in gunner mode E is the beam, not a parry: the blow lands');
+      Game.enemies = []; Game.hazards = []; Game.projectiles = [];
+    }
+    // a double jump lights the jets and they hold it near the top for over a second
+    {
+      p = aegis(); T.frame(5);
+      T.press('Space'); T.frame(16); T.release('Space'); T.frame(3); T.press('Space'); T.frame(12); T.release('Space');
+      let top = 0, held = 0;
+      for (let i = 0; i < 200; i++) { T.frame(1); top = Math.max(top, p.pos.y); if (p.hover && p.pos.y > top - 1) held++; }
+      ok(held > 72, `after a double jump it hovers on its jets (${(held / 60).toFixed(2)} s within a metre of the top)`);
+    }
+    // the orbital strike: hold Q into bullet time with the arc shown, press again to fire the probe, and the
+    // eruption burns down a brute standing in its ring; with no charge, Q does nothing
+    {
+      p = aegis(); T.frame(5);
+      const br = T.enemy('brute', 14, 0, { frozen: true });
+      T.aimAt({ x: br.pos.x, y: br.pos.y, z: br.pos.z });
+      p.ultCharge = 0; T.tap('KeyQ'); T.frame(40);
+      const denied = !p.ultAim && !p.ultCharging;
+      p.ultCharge = 1; T.press('KeyQ'); T.frame(36); T.release('KeyQ'); T.frame(2);
+      const aiming = !!p.ultAim && Game.btKind === 'aim' && Game.slowScale < 0.5 && p.ultAim.plan && distXZ(p.ultAim.plan.land, br.pos) < 3;
+      T.tap('KeyQ'); T.frame(2);
+      const fired = !p.ultAim && Game.projectiles.some((b) => b.kind === 'probe') && Game.slowScale === 1 && p.ultCharge === 0;
+      let erupted = false;
+      for (let i = 0; i < 60 * 7 && !br.dead; i++) { T.frame(1); erupted = erupted || Game.hazards.some((h) => h.kind === 'strike' && h.phase === 'erupt'); }
+      ok(denied && aiming && fired && erupted && br.dead, `the orbital strike: no charge, no strike; held Q aims in bullet time, a press fires the probe, and the eruption kills a brute in its ring (${br.dead ? 'dead' : br.hp + ' hp left'})`);
+      Game.enemies = []; Game.hazards = []; Game.projectiles = [];
+    }
+    SaveData.character = 'ronin';
 
     // Retro renders at the 2D game's 480x270
     S.visuals.retro = true; Render.resize();
@@ -841,19 +976,22 @@ async function run(browser, file, errors) {
   for (const c of checks) { console.log(`  ${c.pass ? 'ok  ' : 'FAIL'} ${c.msg}`); if (!c.pass) errors.push(`${name}: ${c.msg}`); }
 
   // ---------- random play ----------
-  // Endless from wave 6, so every enemy type turns up; then the rival fight
-  for (const [mode, secs] of [['endless', seconds], ['boss', Math.min(seconds, 30)]]) {
-  const res = await page.evaluate(async ([frames, mode]) => {
+  // Endless from wave 6, so every enemy type turns up; then the rival fight; then endless and the rival fight
+  // again as AEGIS-07
+  const runs = [['endless', seconds, 'ronin'], ['boss', Math.min(seconds, 30), 'ronin'], ['endless', Math.min(seconds, 30), 'aegis'], ['boss', Math.min(seconds, 30), 'aegis']];
+  for (const [mode, secs, char] of runs) {
+  const res = await page.evaluate(async ([frames, mode, char]) => {
     const problems = [];
     const fail = (m) => problems.push(m);
     S.visuals.resScale = 0.5; Render.resize();
     S.enemies.waveBreak = 1;
+    SaveData.character = char;
     UI.act(mode);
     if (mode === 'endless') Director.wave = 5;
     S.gameplay.invincible = true;
     T.frame(1); Render.draw(1 / 60);
     const progs0 = Gfx.renderer.info.programs.length;
-    const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'Mouse0', 'KeyE', 'Mouse2', 'KeyF'];
+    const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'Mouse0', 'KeyE', 'Mouse2', 'KeyF'].concat(char === 'aegis' ? ['KeyQ', 'KeyR'] : []);
     const B = World.def.bounds, PM = Camera.PITCH_MAX + 1e-6;
     const inBox = (b) => World.overlap(b.pos.x, b.pos.y + 0.02, b.pos.z, b.r * 0.9, b.h - 0.04);
     let maxEnemies = 0;
@@ -873,13 +1011,15 @@ async function run(browser, file, errors) {
         if (e) { Camera.yaw = yawOf(e.pos.x - p.x, e.pos.z - p.z); Camera.pitch = -0.15; }
       }
       if (Game.state === 'pick') Game.chooseUpgrade(UI.pickIds[0]);
+      // AEGIS gets its strike now and then, so the aim, the probe and the eruption get played
+      if (char === 'aegis' && f % 400 === 200) Game.player.ultCharge = 1;
       // a third of the way into the rival fight, bring it to half health so its blade phase gets played too
       if (mode === 'boss' && f === Math.floor(frames / 3)) { const r = Game.enemies.find((e) => e.isBoss && !e.spawning); if (r) r.hp = Math.floor(r.maxHp / 2) - 1; }
       if (f === Math.floor(frames / 2)) { Game.pause(); if (Game.state !== 'paused') fail('pause failed'); await UI.resumeGame(); if (Game.state !== 'playing') fail('resume failed'); }
       T.frame(1);
       if (f % 3 === 0) Render.draw(1 / 60);
       // the player's last few frames, to explain a failure
-      { const q = Game.player; hist.push(`${f}: ${q.pos.x.toFixed(2)},${q.pos.y.toFixed(3)},${q.pos.z.toFixed(2)} v ${q.vel.x.toFixed(1)},${q.vel.y.toFixed(1)},${q.vel.z.toFixed(1)}${q.onGround ? ' ground' : ''}${q.sliding ? ' slide' : ''}${q.crouching ? ' crouch' : ''}${q.dashT > 0 ? ' dash' : ''}${q.vault ? ' vault' : ''}${q.plunge ? ' plunge' : ''}${q.iaido ? ' iaido' : ''}${q.tether ? ' tether ' + q.tether.phase + '/' + q.tether.mode : ''} h ${q.h.toFixed(2)}`); if (hist.length > 6) hist.shift(); }
+      { const q = Game.player; hist.push(`${f}: ${q.pos.x.toFixed(2)},${q.pos.y.toFixed(3)},${q.pos.z.toFixed(2)} v ${q.vel.x.toFixed(1)},${q.vel.y.toFixed(1)},${q.vel.z.toFixed(1)}${q.onGround ? ' ground' : ''}${q.sliding ? ' slide' : ''}${q.crouching ? ' crouch' : ''}${q.dashT > 0 ? ' dash' : ''}${q.vault ? ' vault' : ''}${q.plunge ? ' plunge' : ''}${q.iaido ? ' iaido' : ''}${q.hover ? ' hover' : ''}${q.beamAct ? ' beam' : ''}${q.tether ? ' tether ' + q.tether.phase + '/' + q.tether.mode : ''} h ${q.h.toFixed(2)}`); if (hist.length > 6) hist.shift(); }
       maxEnemies = Math.max(maxEnemies, Game.enemies.length);
       for (const e of Game.enemies) seen.add(e.type);
       const cp = Camera.pos, p = Game.player;
@@ -898,16 +1038,18 @@ async function run(browser, file, errors) {
     }
     if (Gfx.renderer.info.programs.length !== progs0) fail(`shaders compiled mid-fight: ${progs0} programs before, ${Gfx.renderer.info.programs.length} after`);
     const boss = Game.enemies.find((e) => e.isBoss);
-    const r = { problems, wave: Director.wave, kills: Game.stats.kills, maxEnemies, types: [...seen].join(' '), style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length, boss: boss ? `rival at ${boss.hp}/${boss.maxHp}, phase ${boss.phase}` : 'no rival left' };
+    SaveData.character = 'ronin';
+    const r = { problems, wave: Director.wave, kills: Game.stats.kills, hits: Game.stats.maxCombo, maxEnemies, types: [...seen].join(' '), style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length, boss: boss ? `rival at ${boss.hp}/${boss.maxHp}, phase ${boss.phase}` : 'no rival left' };
     Game.toMenu();
     S.visuals.resScale = 1; Render.resize();
     return r;
-  }, [Math.round(secs * 60), mode]);
+  }, [Math.round(secs * 60), mode, char]);
+  const who = char === 'aegis' ? ' as AEGIS-07' : '';
   if (mode === 'endless') {
-    console.log(`  endless from wave 6: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies (${res.types}), style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
-    if (res.kills < 1) errors.push(`${name}: random play killed nothing`);
-  } else console.log(`  rival fight: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
-  errors.push(...res.problems.map((m) => `${name}: ${mode}: ${m}`));
+    console.log(`  endless from wave 6${who}: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies (${res.types}), style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
+    if (res.kills < 1 && !res.hits) errors.push(`${name}: random play${who} hit nothing`);
+  } else console.log(`  rival fight${who}: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
+  errors.push(...res.problems.map((m) => `${name}: ${mode}${who}: ${m}`));
   }
   await page.waitForTimeout(300);
   const keys = await page.evaluate(() => Object.keys(localStorage));

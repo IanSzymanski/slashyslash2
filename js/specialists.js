@@ -15,9 +15,10 @@ Object.assign(ENEMY_DEFS, {
 });
 Object.assign(ENEMY_BASE_STATE, { shielder: 'chase', crawler: 'crawl', grenadier: 'move', sniper: 'perch' });
 
-// Hits that ignore the shielder's shield and crack the crawler's armour.
-const ARMOR_BREAKERS = new Set(['plunge', 'groundcut', 'rock', 'barrel', 'saw']);
-const SHIELD_BYPASS = new Set(['plunge', 'chain', 'barrel', 'saw']);
+// Hits that ignore the shielder's shield and crack the crawler's armour. AEGIS's beam, pulse burst and orbital
+// strike burn through armour; the beam and the strike pass a riot shield too.
+const ARMOR_BREAKERS = new Set(['plunge', 'groundcut', 'rock', 'barrel', 'saw', 'beam', 'burst', 'strike']);
+const SHIELD_BYPASS = new Set(['plunge', 'chain', 'barrel', 'saw', 'beam', 'strike']);
 const SNIPER_BOLT = { outer: '#ff3a52', core: '#ffe0e8', light: '#ff3048' };
 // the shield covers 60 degrees either side of where it faces
 const SHIELD_COS = Math.cos((60 * Math.PI) / 180);

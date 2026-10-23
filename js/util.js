@@ -333,3 +333,29 @@ function segDistXZ(px, pz, ax, az, bx, bz) {
   const t = l2 > 0 ? clamp(((px - ax) * dx + (pz - az) * dz) / l2, 0, 1) : 0;
   return Math.hypot(px - (ax + dx * t), pz - (az + dz * t));
 }
+// a direction turned toward another by at most maxAng radians
+function turnDir(cur, want, maxAng) {
+  const dot = clamp(cur.x * want.x + cur.y * want.y + cur.z * want.z, -1, 1), ang = Math.acos(dot);
+  if (ang <= maxAng || ang < 1e-5) return { x: want.x, y: want.y, z: want.z };
+  const k = maxAng / ang, x = lerp(cur.x, want.x, k), y = lerp(cur.y, want.y, k), z = lerp(cur.z, want.z, k), l = Math.hypot(x, y, z) || 1;
+  return { x: x / l, y: y / l, z: z / l };
+}
+// Where a ray from o along unit d first meets a standing body (feet at pos, radius r, height h) grown by pad,
+// within L metres: the distance along the ray, or -1.
+function rayBody(o, d, L, b, pad = 0) {
+  const R = b.r + pad, ox = o.x - b.pos.x, oz = o.z - b.pos.z, y0 = b.pos.y - pad, y1 = b.pos.y + b.h + pad;
+  const A = d.x * d.x + d.z * d.z, B = 2 * (ox * d.x + oz * d.z), C = ox * ox + oz * oz - R * R;
+  let t0 = 0, t1 = L;
+  if (A > 1e-9) {
+    const disc = B * B - 4 * A * C;
+    if (disc < 0) return -1;
+    const s = Math.sqrt(disc);
+    t0 = Math.max(0, (-B - s) / (2 * A)); t1 = Math.min(L, (-B + s) / (2 * A));
+  } else if (C > 0) return -1;
+  if (t0 > t1) return -1;
+  // the stretch of the ray inside the body's circle, cut to its height
+  const ya = o.y + d.y * t0, yb = o.y + d.y * t1;
+  if (Math.max(ya, yb) < y0 || Math.min(ya, yb) > y1) return -1;
+  if (ya >= y0 && ya <= y1) return t0;
+  return clamp(((ya < y0 ? y0 : y1) - o.y) / d.y, t0, t1);
+}

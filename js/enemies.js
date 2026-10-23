@@ -530,7 +530,7 @@ function hurtEnemy(e, dmg, o = {}) {
   if (e.heavy) {
     e.poise += d;
     if (!steady && (o.heavy || e.poise > 80)) { e.poise = 0; e.stagger(o.stagger || 0.4); }
-  } else if (!steady) e.stagger(Math.max(o.stagger || 0.2, 0.12));
+  } else if (!steady && !o.noStagger) e.stagger(Math.max(o.stagger || 0.2, 0.12));
   const c = e.center();
   const dir = o.dir || { x: c.x - Game.player.pos.x, y: 0.3, z: c.z - Game.player.pos.z };
   FX.sparks(c, o.heavy ? 12 : 7, dir, 1.3, 5.5, 21.8);

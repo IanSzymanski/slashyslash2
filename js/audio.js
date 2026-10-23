@@ -6,7 +6,7 @@ const Sound = (() => {
   let comp, master, lowpass, sfxBus, musicBus, reverbIn, noiseBuf, crackleBuf;
   let focusMute = 1;
   const last = {};
-  const GAP = { hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08, scrape: 0.12, grab: 0.1 };
+  const GAP = { aegisGun: 0.03, probePulse: 0.08, dryFire: 0.1, hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08, scrape: 0.12, grab: 0.1 };
 
   function makeNoise(sec) {
     const n = (ac.sampleRate * sec) | 0, b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0);
@@ -592,6 +592,103 @@ const Sound = (() => {
       noise({ dur: 0.3, vol: 0.4, type: 'highpass', f0: 3000, rev: 0.5 });
       crackle(0.3, 0.3);
     },
+    // ---------- AEGIS as the player ----------
+    // the forearm gun: a hard, short electric crack with a thump under it
+    aegisGun() {
+      const pm = rand(0.94, 1.06);
+      tone({ type: 'square', f0: 1300 * pm, f1: 300, dur: 0.04, vol: 0.05 });
+      noise({ dur: 0.045, vol: 0.18, f0: 3400 * pm, f1: 1100, q: 1.1 });
+      tone({ type: 'sine', f0: 140, f1: 60, dur: 0.05, vol: 0.18 });
+    },
+    // the magazine vents and the housing spins down, then locks back up
+    reload() {
+      noise({ dur: 0.18, vol: 0.12, type: 'highpass', f0: 2500 });
+      tone({ type: 'sawtooth', f0: 520, f1: 140, dur: 0.3, vol: 0.04 });
+      tone({ type: 'square', f0: 1800, dur: 0.02, vol: 0.04, delay: 0.32 });
+    },
+    reloadDone() {
+      tone({ type: 'sawtooth', f0: 160, f1: 700, dur: 0.16, vol: 0.05 });
+      tone({ type: 'square', f0: 2200, dur: 0.025, vol: 0.05, delay: 0.16 });
+      noise({ dur: 0.04, vol: 0.12, f0: 3000, q: 2, delay: 0.16 });
+    },
+    dryFire() { tone({ type: 'square', f0: 900, dur: 0.02, vol: 0.04 }); },
+    // the housing starts to reconfigure, and locks into its new shape
+    modeCharge() { tone({ type: 'sawtooth', f0: 90, f1: 240, dur: 0.3, vol: 0.05 }); crackle(0.25, 0.12); },
+    modeSwitch(p) {
+      if (p.blade) {
+        tone({ type: 'sawtooth', f0: 180, f1: 1100, dur: 0.22, vol: 0.07, rev: 0.4 });
+        noise({ dur: 0.2, vol: 0.2, f0: 1200, f1: 5200, q: 1.5 });
+        tone({ type: 'sine', f0: 2200, f1: 2600, dur: 0.3, vol: 0.05, delay: 0.12, rev: 0.4 });
+      } else {
+        tone({ type: 'sawtooth', f0: 900, f1: 160, dur: 0.2, vol: 0.06 });
+        for (let i = 0; i < 5; i++) tone({ type: 'square', f0: 1600 + i * 150, dur: 0.015, vol: 0.04, delay: 0.04 * i });
+      }
+      tone({ type: 'sine', f0: 120, f1: 50, dur: 0.18, vol: 0.4, delay: 0.05 });
+      noise({ dur: 0.05, vol: 0.2, type: 'highpass', f0: 3000, delay: 0.05 });
+    },
+    // the back jets firing
+    jetBurst(p) {
+      noise({ dur: p.soft ? 0.25 : 0.32, vol: p.soft ? 0.22 : 0.4, type: 'bandpass', f0: 900, f1: 260, q: 0.8 });
+      tone({ type: 'sawtooth', f0: 90, f1: 55, dur: 0.25, vol: 0.06 });
+    },
+    // the blade raised to block, and lowered
+    blockUp() {
+      tone({ type: 'sawtooth', f0: 240, f1: 760, dur: 0.12, vol: 0.05 });
+      noise({ dur: 0.06, vol: 0.12, type: 'highpass', f0: 4000 });
+    },
+    blockDown() { tone({ type: 'sawtooth', f0: 600, f1: 200, dur: 0.12, vol: 0.04 }); },
+    blockHit() {
+      tone({ type: 'sine', f0: 180, f1: 70, dur: 0.25, vol: 0.5 });
+      noise({ dur: 0.15, vol: 0.3, f0: 2600, f1: 900, q: 1.2, rev: 0.3 });
+    },
+    // the pulse burst out of the blade: a bass hit, a bright tearing rush, a ringing tail
+    pulseBurst(p) {
+      const k = p.power || 0;
+      tone({ type: 'sine', f0: 150, f1: 28, dur: 0.7, vol: 0.9 });
+      noise({ dur: 0.5 + 0.3 * k, vol: 0.55, f0: 5200, f1: 500, q: 0.8, rev: 0.5 });
+      tone({ type: 'sawtooth', f0: 1400 + 600 * k, f1: 200, dur: 0.45, vol: 0.07, rev: 0.4 });
+      for (const f of [2093, 2794]) tone({ type: 'sine', f0: f, dur: 0.5, vol: 0.04, delay: 0.05, rev: 0.6 });
+      crackle(0.4, 0.4, { f: 900 });
+    },
+    // the strike: the probe leaves the cannon, lands, pulses under a siren, and the ground erupts
+    probeFire() {
+      tone({ type: 'sine', f0: 220, f1: 60, dur: 0.35, vol: 0.6 });
+      tone({ type: 'sawtooth', f0: 900, f1: 2600, dur: 0.25, vol: 0.05, rev: 0.4 });
+      noise({ dur: 0.3, vol: 0.3, f0: 1800, f1: 600, q: 1 });
+    },
+    probeLand(p) {
+      tone({ type: 'sine', f0: p.big ? 160 : 220, f1: 50, dur: 0.3, vol: p.big ? 0.5 : 0.3 });
+      noise({ dur: 0.12, vol: 0.2, type: 'highpass', f0: 2500 });
+      tone({ type: 'square', f0: 1760, dur: 0.06, vol: 0.04 });
+    },
+    probePulse(p) {
+      tone({ type: 'sine', f0: 880 * (p.pm || 1), f1: 440 * (p.pm || 1), dur: 0.16, vol: 0.06, rev: 0.4 });
+      tone({ type: 'sine', f0: 90, f1: 45, dur: 0.18, vol: 0.3 });
+    },
+    // a two-tone wail that climbs over its length; the rival's calls are shorter and thinner
+    siren(p) {
+      const d = p.dur || 1.5, small = !!p.small, n = Math.max(2, Math.round(d / 0.3));
+      for (let i = 0; i < n; i++) {
+        const at = (i / n) * d, hi = i % 2 === 0, f = (hi ? 960 : 720) * (1 + (i / n) * 0.25) * (small ? 1.2 : 1);
+        tone({ type: 'sawtooth', f0: f, f1: f * 1.04, dur: d / n * 0.9, vol: small ? 0.025 : 0.045, a: 0.02, delay: at, rev: 0.5 });
+        tone({ type: 'square', f0: f * 0.5, dur: d / n * 0.9, vol: small ? 0.01 : 0.02, a: 0.02, delay: at });
+      }
+      tone({ type: 'sawtooth', f0: 40, f1: 110, dur: d, vol: small ? 0.05 : 0.1, a: d * 0.6, slide: d, rev: 0.4 });
+      noise({ dur: d, vol: small ? 0.08 : 0.16, type: 'lowpass', f0: 200, f1: 900, a: d * 0.8 });
+    },
+    eruption(p) {
+      const big = p.big;
+      tone({ type: 'sine', f0: big ? 120 : 160, f1: 22, dur: big ? 1.6 : 0.7, vol: big ? 1.0 : 0.6 });
+      noise({ dur: big ? 2.2 : 0.8, vol: big ? 0.9 : 0.5, type: 'lowpass', f0: 5000, f1: 120, rev: 0.6 });
+      noise({ dur: big ? 1.6 : 0.6, vol: big ? 0.4 : 0.2, f0: 700, f1: 5200, q: 0.9, rev: 0.5 });
+      tone({ type: 'sawtooth', f0: 110, f1: 990, dur: big ? 1.2 : 0.5, vol: big ? 0.07 : 0.04, rev: 0.5 });
+      crackle(big ? 1.6 : 0.6, big ? 0.6 : 0.35, { f: 700 });
+    },
+    // the strike locks into its aim
+    aimLock() {
+      for (const [f, d] of [[1760, 0], [2349, 0.07], [3136, 0.14]]) tone({ type: 'square', f0: f, dur: 0.05, vol: 0.04, delay: d });
+      tone({ type: 'sine', f0: 3520, dur: 0.3, vol: 0.05, delay: 0.2, rev: 0.5 });
+    },
     ui() { tone({ type: 'square', f0: 660, dur: 0.04, vol: 0.05 }); },
     uiHover() { tone({ type: 'sine', f0: 990, dur: 0.02, vol: 0.02 }); },
     gameOver() {
@@ -709,6 +806,19 @@ const Sound = (() => {
           gg.gain.setTargetAtTime(grinding ? 0.5 : 0, n, 0.03);
         },
       };
+    }
+    if (kind === 'jets') {
+      // the back jets holding it up: a rough roar with a low hum under it
+      const roar = mk(ac.createBufferSource()); roar.buffer = noiseBuf; roar.loop = true;
+      const rf = ac.createBiquadFilter(); rf.type = 'bandpass'; rf.frequency.value = 520; rf.Q.value = 0.7;
+      const o = mk(ac.createOscillator()); o.type = 'sawtooth'; o.frequency.value = 62;
+      const of = ac.createBiquadFilter(); of.type = 'lowpass'; of.frequency.value = 300;
+      const og = ac.createGain(); og.gain.value = 0.4;
+      roar.connect(rf); rf.connect(out); o.connect(of); of.connect(og); og.connect(out);
+      roar.start(t); o.start(t);
+      crackG.gain.value = 0.1;
+      out.gain.setTargetAtTime(0.12, t, 0.04);
+      api = { set() {} };
     }
     if (kind === 'beam') {
       const o1 = mk(ac.createOscillator()), o2 = mk(ac.createOscillator());

@@ -24,16 +24,22 @@ const Views = {
       band: new THREE.CylinderGeometry(1, 1, 1, 48, 1, true).translate(0, 0.5, 0),
       beam: new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
     };
-    // afterimages share the player's geometry; each has its own skeleton of loose bones posed by copying
-    const src = Render.playerRig.mesh;
-    for (let i = 0; i < this.GHOSTS; i++) {
-      const bones = src.skeleton.bones.map(() => { const b = new THREE.Bone(); b.matrixAutoUpdate = false; b.matrixWorldAutoUpdate = false; return b; });
-      const m = new THREE.SkinnedMesh(Render.playerRig.geo, add('#ff2a48', { opacity: 0.5 }));
-      m.bind(new THREE.Skeleton(bones, src.skeleton.boneInverses), src.bindMatrix);
-      m.frustumCulled = false; m.visible = false;
-      Gfx.scene.add(m);
-      this.ghosts.push({ mesh: m, fx: null });
+    // afterimages share a player rig's geometry; each has its own skeleton of loose bones posed by copying.
+    // Each character's rig has its own pool.
+    this.ghostPools = new Map();
+    for (const k in Render.rigs) {
+      const R = Render.rigs[k], src = R.mesh, pool = [];
+      for (let i = 0; i < this.GHOSTS; i++) {
+        const bones = src.skeleton.bones.map(() => { const b = new THREE.Bone(); b.matrixAutoUpdate = false; b.matrixWorldAutoUpdate = false; return b; });
+        const m = new THREE.SkinnedMesh(R.geo, add('#ff2a48', { opacity: 0.5 }));
+        m.bind(new THREE.Skeleton(bones, src.skeleton.boneInverses), src.bindMatrix);
+        m.frustumCulled = false; m.visible = false;
+        Gfx.scene.add(m);
+        pool.push({ mesh: m, fx: null });
+      }
+      this.ghostPools.set(R, pool);
     }
+    this.ghosts = this.ghostPools.get(Render.playerRig);
     this.tetherMesh = FX.stripMesh(24);
     for (let i = 0; i < this.ZIPS; i++) this.zips.push(FX.stripMesh(24));
     // spawn beams: a column of light where an enemy is arriving
@@ -54,6 +60,7 @@ const Views = {
     for (const m of [this.tetherMesh, ...this.zips, ...this.lasers, ...this.arcs]) m.visible = false;
     this.initWeather();
     BossViews.init();
+    AegisViews.init();
   },
   // everything once, visible, for the shader compile
   prewarmShow(group) {
@@ -67,14 +74,17 @@ const Views = {
     this.beams[0].visible = true;
     this.rain.visible = this.ash.visible = true;
     add(new THREE.Mesh(this.geos.rock, FX.gibMaterial('#5c5464', false)));
-    this.ghosts[0].mesh.visible = true;
+    for (const pool of this.ghostPools.values()) pool[0].mesh.visible = true;
     this.zones[0].visible = true;
     this.tetherMesh.visible = true;
     BossViews.prewarmShow(group);
+    AegisViews.prewarmShow(group);
   },
   prewarmHide() {
-    this.ghosts[0].mesh.visible = false; this.zones[0].visible = false; this.tetherMesh.visible = false; this.beams[0].visible = false;
+    for (const pool of this.ghostPools.values()) pool[0].mesh.visible = false;
+    this.zones[0].visible = false; this.tetherMesh.visible = false; this.beams[0].visible = false;
     BossViews.prewarmHide();
+    AegisViews.prewarmHide();
   },
   waveMat() { return new THREE.MeshBasicMaterial({ color: '#ff7a2a', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }); },
 
@@ -97,9 +107,11 @@ const Views = {
     this.syncWeather();
     this.syncTells(t);
     BossViews.sync();
+    AegisViews.sync();
   },
   make(o) {
     if (BossViews.kinds.has(o.kind)) return BossViews.make(o);
+    if (AegisViews.kinds.has(o.kind)) return AegisViews.make(o);
     const M = this.mats, G = this.geos, g = new THREE.Group();
     if (o.kind === 'bolt') {
       g.add(new THREE.Mesh(G.bolt, this.boltMat(o)), new THREE.Mesh(G.boltCore, M.boltCore));
@@ -128,6 +140,7 @@ const Views = {
   },
   update(o, v, t) {
     if (v.boss) { BossViews.update(o, v, t); return; }
+    if (v.aegis) { AegisViews.update(o, v, t); return; }
     if (v.rig) {
       const R = v.rig, m = R.mesh;
       m.position.set(o.pos.x, o.pos.y, o.pos.z);
@@ -167,6 +180,7 @@ const Views = {
   },
   dispose(v) {
     if (v.boss) { BossViews.dispose(v); return; }
+    if (v.aegis) { AegisViews.dispose(v); return; }
     if (v.rig) { Gfx.scene.remove(v.rig.mesh); v.rig.geo.dispose(); v.rig.mat.dispose(); v.rig.outline.material.dispose(); return; }
     Gfx.scene.remove(v.group);
     if (v.group.userData.halo) v.group.userData.halo.material.dispose();
@@ -174,9 +188,15 @@ const Views = {
   },
   boltMat(o) { return !o.hostile ? this.mats.boltF : o.col && o.col.outer === '#ff3a52' ? this.mats.boltS : o.col && o.col.outer === '#2f6bff' ? this.mats.boltB : this.mats.boltH; },
 
-  // Afterimages: each new request copies the player's current bone matrices into a free pool mesh.
+  // Afterimages: each new request copies the player's current bone matrices into a free pool mesh (from the
+  // pool for the rig the player is drawn with).
   syncGhosts() {
-    const src = Render.playerRig, sb = src.mesh.skeleton.bones;
+    const src = Render.playerRig, sb = src.mesh.skeleton.bones, pool = this.ghostPools.get(src);
+    if (pool !== this.ghosts) {
+      for (const s of this.ghosts) { s.mesh.visible = false; s.fx = null; }
+      for (const g of FX.ghosts) g.slot = null;
+      this.ghosts = pool;
+    }
     const used = new Set();
     for (const g of FX.ghosts) {
       if (g.slot === null) {
