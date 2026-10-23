@@ -1,5 +1,5 @@
 'use strict';
-// AEGIS-07's body, from its reference sheets: a blocky mech 2.5 m tall in white and grey pixel camo with
+// AEGIS-07's body, from its reference sheets: a blocky mech 2.5 m tall in light and mid grey pixel camo with
 // blue patches, dark joints and gold fittings. A T-shaped visor and a square chest core glow electric blue,
 // as do its knees, shins and boots. Big pauldrons; a beam cannon on the left shoulder; a thruster pack with
 // two round jets on its back; and on the right forearm a long housing that is its gun barrel and its blade
@@ -7,7 +7,7 @@
 // AegisPose turns the rival's state (rival.js) into bone rotations, with IK for the arms and legs.
 
 const AEGIS_COL = {
-  W: '#ffffff', M: '#c2c7d0', D: '#3a3c46', K: '#1e1f25', G: '#d29a3c',
+  W: '#d6d9df', M: '#a3a8b2', D: '#33353e', K: '#1b1c22', G: '#c08a34',
   glow: '#2f6bff', hi: '#9cc4ff', red: '#ff2a3a', off: '#22262f', wire: '#34262c',
 };
 const AEGIS_SCALE = 1.3;
@@ -311,7 +311,9 @@ const AegisPose = {
       }
       case 'dive': {
         if (a.phase === 'crouch') {
-          o.legs = 'plant'; o.fF = [0.24, 0, -0.3]; o.fB = [-0.26, 0, 0.35]; o.drop = 0.5 * S; o.lean = 0.45;
+          // charging: sunk low and shaking, the blade drawn back down by its side
+          const k = clamp(a.t / Math.max(0.05, e.tele(DIVE.CHARGE)), 0, 1);
+          o.legs = 'plant'; o.fF = [0.26, 0, -0.32]; o.fB = [-0.28, 0, 0.38]; o.drop = (0.4 + 0.2 * k) * S; o.lean = 0.45 + 0.1 * k; o.tremble = 0.4 + 0.8 * k;
           o.armR = { D: { x: 0, y: -0.6, z: 0 }, reach: 0.6, back: true }; o.armL = { rot: [0.6, -0.4, 0.8] }; o.blade = 1;
         } else if (a.phase === 'dive') {
           // pitched along the dive, the blade driven ahead of it
@@ -323,6 +325,17 @@ const AegisPose = {
           const f = e.fwd();
           o.armR = { D: { x: f.x * 0.25, y: 1, z: f.z * 0.25 }, reach: 0.95 }; o.armL = { rot: [-0.4, -0.8, 0.6] }; o.blade = 1;
         }
+        return true;
+      }
+      case 'zip': {
+        // the left arm out along the line, the body hanging off it, legs trailing
+        if (a.phase === 'drop') return false;
+        const h = a.hook, sh = e.local(-0.43, 2.05, 0), dx = h.x - sh.x, dy = h.y - sh.y, dz = h.z - sh.z, l = Math.hypot(dx, dy, dz) || 1;
+        o.armL = { D: { x: dx / l, y: dy / l, z: dz / l }, reach: 0.98 };
+        o.armR = { rot: [0.4, 0.5, 0.6] };
+        if (a.phase === 'reel') { o.legs = 'air'; o.lean = 0.3; }
+        else if (o.legs === 'stand' || o.legs === 'plant') { o.legs = 'plant'; o.fF = [0.22, 0, -0.3]; o.fB = [-0.24, 0, 0.36]; o.drop = 0.12; }
+        o.twist = 0.3;
         return true;
       }
       case 'chain': {

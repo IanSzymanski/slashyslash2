@@ -62,7 +62,11 @@ const Camera = {
     if (!this.cineView) this.cineView = { yaw: this.yaw, pitch: this.pitch, dist: Math.max(1.5, this.curDist), look: { x: this.pivot.x, y: this.pivot.y, z: this.pivot.z } };
     const V = this.cineView, k = 1 - Math.exp(-realDt * (s.ease || 3));
     V.yaw += angDiff(V.yaw, s.yaw) * k; V.pitch = lerp(V.pitch, s.pitch, k); V.dist = lerp(V.dist, s.dist, k);
-    V.look.x = lerp(V.look.x, s.look.x, k); V.look.y = lerp(V.look.y, s.look.y, k); V.look.z = lerp(V.look.z, s.look.z, k);
+    // the focus eases toward the shot's, but never into anything solid (from under the overpass to the rival
+    // on top of it, say): blocked, it cuts straight to the shot's focus, or waits where it is
+    const L = V.look, nx = lerp(L.x, s.look.x, k), ny = lerp(L.y, s.look.y, k), nz = lerp(L.z, s.look.z, k);
+    if (!World.pointSolid(nx, ny, nz, this.RADIUS)) { L.x = nx; L.y = ny; L.z = nz; }
+    else if (!World.pointSolid(s.look.x, s.look.y, s.look.z, this.RADIUS)) { L.x = s.look.x; L.y = s.look.y; L.z = s.look.z; }
     this.yaw = V.yaw; this.pitch = V.pitch;
     this.pivot.x = V.look.x; this.pivot.y = V.look.y; this.pivot.z = V.look.z;
     this.base = null; this.fp = false;

@@ -285,7 +285,7 @@ const Gfx = {
       }
     };
     blob(1, 30, 9); blob(2, 22, 7); blob(3, 10, 5); blob(4, 5, 4); blob(5, 18, 2);
-    const COLS = [[228, 231, 236], [192, 197, 206], [142, 148, 160], [96, 122, 184], [64, 92, 166], [74, 78, 92]];
+    const COLS = [[164, 168, 177], [134, 139, 150], [100, 105, 118], [74, 96, 146], [52, 74, 132], [58, 61, 73]];
     for (let y = 0; y < M; y++) {
       for (let x = 0; x < M; x++) {
         const [r, gg, b] = COLS[grid[y * M + x]], k = 0.94 + R() * 0.08;
@@ -294,7 +294,7 @@ const Gfx = {
       }
     }
     // plate seams
-    g.fillStyle = 'rgb(120,124,136)';
+    g.fillStyle = 'rgb(84,88,99)';
     g.fillRect(0, 31, N, 1); g.fillRect(31, 0, 1, N);
     t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
