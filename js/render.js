@@ -164,12 +164,17 @@ const Render = {
       const v = this._pv.set(0, py, 0).applyEuler(R.mesh.rotation);
       R.mesh.position.set(p.x - v.x, p.y + py - v.y, p.z - v.z);
       PlayerPose.apply(R, P);
+      // first person looks out from the model's eyes, wherever the pose has put the head (crouched, sliding,
+      // leaning into a sprint), kept as an offset from the body so the camera never lags it
+      const hv = Rig.boneWorld(R, 'head', this._hv || (this._hv = new THREE.Vector3()));
+      P.eyeOff = { x: hv.x - p.x + fwdX(P.yaw) * 0.06, y: hv.y - p.y + 0.13, z: hv.z - p.z + fwdZ(P.yaw) * 0.06 };
       const want = Camera.fp || Camera.curDist >= 1 ? 1 : clamp(Camera.curDist - 0.4, 0, 1) / 0.6;
       const blink = P.blinkT > 0 && P.hurtT <= 0 && ((Game.realTime * 30) | 0) % 2 ? 0.55 : 1;
       R.mat.opacity = want * blink;
       R.mat.depthWrite = R.mat.opacity > 0.99;
       R.extras[0].material.opacity = 0.2 * want;
-      R.mat.emissive.setScalar(P.hurtT > 0.12 ? 0.8 : 0);
+      // in first person the screen's own hit effects stand in for the body's white flash
+      R.mat.emissive.setScalar(P.hurtT > 0.12 && !Camera.fp ? 0.8 : 0);
       this.feet(R.feet, p);
     }
   },
@@ -194,6 +199,7 @@ const Render = {
     FX.sync(Gfx.camera);
     // bullet time drains the colour from the lit world; glowing parts and effects stay bright
     Gfx.desat.value = G.bulletK() * 0.85;
+    Gfx.nearCut.value = Camera.fp && G.state === 'playing' ? 0.28 : 0;
     Gfx.beginFrame();
     this.bladeLight();
     BossViews.pushLights();
@@ -204,6 +210,7 @@ const Render = {
 
     const ctx = this.ctx;
     ctx.clearRect(0, 0, VIEW_W, VIEW_H);
+    FPFX.render(ctx, realDt);
     this.drawTexts(ctx);
     if (FX.flashA > 0) {
       ctx.globalAlpha = Math.min(0.7, FX.flashA);

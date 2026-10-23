@@ -152,15 +152,21 @@ const FX = {
   // A sword trail: a curved ribbon around a centre (o.follow keeps it on a character). The arc lies in
   // the plane of the facing direction and a sweep axis tilted from horizontal by o.tilt; o.dir picks
   // which way the head travels. The head draws over o.sweep seconds, then the trail fades by o.dur.
+  // Across its width it's feathered (dark at both edges, hot along a line near the blade's path), it narrows
+  // toward its tail and both tips, its head has a soft leading edge, and it fades in and eases out (half as long
+  // again as asked) while drawing in toward its head, so it never starts or stops on a hard edge.
   // With o.bolts, that many strands of lightning crawl along its lit stretch, each throwing a fork outward
   // (o.boltPal colours them apart from the trail).
   swoosh(o) {
-    const s = Object.assign({ t: 0, dur: 0.24, sweep: 0.09, trail: 0.85, thick: 0.4, dir: 1, tilt: 0, pal: 'red', oy: 1.15, N: 24, bolts: 0 }, o);
-    const geo = new THREE.BufferGeometry(), n = (s.N + 1) * 2;
+    const s = Object.assign({ t: 0, dur: 0.24, sweep: 0.09, trail: 0.85, thick: 0.4, dir: 1, tilt: 0, pal: 'red', oy: 1.15, N: 36, bolts: 0 }, o);
+    s.dur = Math.max(s.dur * 1.5, s.sweep + 0.22);
+    const R = this.SW_ROWS.length, geo = new THREE.BufferGeometry(), n = (s.N + 1) * R;
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
     const idx = [];
-    for (let i = 0; i < s.N; i++) { const a = i * 2; idx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
+    for (let i = 0; i < s.N; i++) {
+      for (let j = 0; j < R - 1; j++) { const a = i * R + j, b = a + 1, c = a + R, d = c + 1; idx.push(a, b, d, a, d, c); }
+    }
     geo.setIndex(idx);
     s.mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false, fog: false }));
     s.mesh.frustumCulled = false; s.ownGeo = true; s.ownMat = true;
@@ -172,14 +178,20 @@ const FX = {
     this.swooshes.push(s);
     return s;
   },
+  // rows across a trail: [offset from its hot line (-1 the inner edge, 1 the outer edge past the blade's
+  // reach), brightness, how hot a colour]
+  SW_ROWS: [[-1, 0, 0.4], [-0.5, 0.72, 0.72], [0, 1.15, 1], [0.5, 0.62, 0.8], [1, 0, 0.5]],
   ARC_BOLT: 18, FORK_N: 6,
-  // a drawn slash: a camera-facing band from a to b that grows over o.grow seconds
+  // A drawn slash: a camera-facing blade of light from a to b that grows over o.grow seconds, pointed at both
+  // ends with a hot core inside a wider glow, easing out over a little longer than asked.
   slashLine(a, b, o = {}) {
     const l = Object.assign({ a, b, t: 0, dur: 0.35, w: 0.2, pal: 'red', grow: 0.05 }, o);
-    l.mesh = this.stripMesh(2); l.ownGeo = true; l.ownMat = true;
+    l.dur *= 1.35;
+    l.mesh = this.stripMesh(this.LINE_N * 2); l.ownGeo = true; l.ownMat = true;
     this.lines.push(l);
     return l;
   },
+  LINE_N: 14,
   // Lightning from a to b: a jagged path by midpoint displacement, re-struck every frame, with o.forks short
   // branches off it.
   bolt(a, b, dur = 0.1, o = {}) {
@@ -413,10 +425,19 @@ const FX = {
     this.syncPoints();
     const col = [0, 0, 0], cp = cam.position;
     for (const s of this.swooshes) this.syncSwoosh(s, col);
+    const hot = [0, 0, 0], glow = [0, 0, 0];
     for (const l of this.lines) {
-      const k = clamp(l.t / l.grow, 0, 1), f = 1 - clamp((l.t - l.grow) / Math.max(0.01, l.dur - l.grow), 0, 1);
-      const b = { x: lerp(l.a.x, l.b.x, k), y: lerp(l.a.y, l.b.y, k), z: lerp(l.a.z, l.b.z, k) };
-      this.writeStrip(l.mesh, [l.a, b], l.w * (0.4 + 0.6 * f), cp, (i, out) => { palAt(l.pal, f * (i ? 1 : 0.7), out); out[0] *= f; out[1] *= f; out[2] *= f; });
+      // grows out from a with an eased head, then fades on a smooth curve, thinning as it goes
+      const k = easeOutCubic(clamp(l.t / l.grow, 0, 1)), u = clamp((l.t - l.grow) / Math.max(0.01, l.dur - l.grow), 0, 1), f = 1 - u * u * (3 - 2 * u);
+      const N = this.LINE_N, pts = [];
+      for (let i = 0; i < N; i++) { const q = (i / (N - 1)) * k; pts.push({ x: lerp(l.a.x, l.b.x, q), y: lerp(l.a.y, l.b.y, q), z: lerp(l.a.z, l.b.z, q) }); }
+      palAt(l.pal, f, hot); palAt(l.pal, f * 0.6, glow);
+      // pointed at both ends: the width follows a sine along it
+      const shape = (i) => { const j = i < N ? i : 2 * N - 1 - i; return Math.pow(Math.sin(((j + 0.5) / N) * Math.PI), 0.7); };
+      this.writeStrip(l.mesh, pts.concat(pts.slice().reverse()), (i) => l.w * (0.45 + 0.55 * f) * 1.3 * shape(i), cp, (i, out) => {
+        const c = i < N ? glow : hot, e = shape(i), g = (i < N ? 0.45 : 1) * f * e;
+        out[0] = c[0] * g; out[1] = c[1] * g; out[2] = c[2] * g;
+      }, N);
     }
     for (const B of this.bolts) {
       // re-struck every frame so it flickers; a wide outer strip and a thin hot core
@@ -474,22 +495,37 @@ const FX = {
     const ct = Math.cos(s.tilt), st = Math.sin(s.tilt);
     // sweep axis: the right vector tipped toward up by the tilt
     const ax = rx * ct - yx * sp * st, ay = cp * st, az = rz * ct - yz * sp * st;
-    const P = s.mesh.geometry.attributes.position, C = s.mesh.geometry.attributes.color;
-    const k = Math.min(1, s.t / s.sweep), fade = s.t < s.sweep ? 1 : 1 - (s.t - s.sweep) / Math.max(0.01, s.dur - s.sweep);
-    const r1 = s.r, r0 = s.r * (1 - s.thick);
+    const P = s.mesh.geometry.attributes.position, C = s.mesh.geometry.attributes.color, ROWS = this.SW_ROWS, R = ROWS.length;
+    // the head's travel, a fade that holds and then eases away, a quick fade in, and a tail that draws in
+    // toward the head as it fades
+    const k = Math.min(1, s.t / s.sweep), out = s.t < s.sweep ? 0 : clamp((s.t - s.sweep) / Math.max(0.01, s.dur - s.sweep), 0, 1);
+    const fade = 1 - out * out * (3 - 2 * out), fin = easeOutQuad(clamp(s.t / 0.035, 0, 1));
+    const trail = Math.max(0.05, s.trail * (1 - 0.65 * out)), lead = 0.07;
+    const r1 = s.r, r0 = s.r * (1 - s.thick * 1.15), rb = lerp(r0, r1, 0.74), rf = r1 + s.r * 0.08;
+    const hotC = this._swHot || (this._swHot = [0, 0, 0]);
     for (let i = 0; i <= s.N; i++) {
       const u = i / s.N, th = s.dir * (u - 0.5) * s.span, c = Math.cos(th), sn = Math.sin(th);
       const dx = fx * c + ax * sn, dy = fy * c + ay * sn, dz = fz * c + az * sn;
-      P.setXYZ(i * 2, cx + dx * r0, cy + dy * r0, cz + dz * r0);
-      P.setXYZ(i * 2 + 1, cx + dx * r1, cy + dy * r1, cz + dz * r1);
-      const lit = u <= k ? clamp(1 - (k - u) / Math.max(0.05, s.trail), 0, 1) * fade : 0;
-      palAt(s.pal, lit, col);
-      const g = lit > 0 ? 1 : 0;
-      C.setXYZ(i * 2, col[0] * 0.25 * g, col[1] * 0.25 * g, col[2] * 0.25 * g);
-      C.setXYZ(i * 2 + 1, col[0] * g * lit, col[1] * g * lit, col[2] * g * lit);
+      // bright at the head, falling off smoothly toward the tail, a short soft edge ahead of the head while
+      // it travels, and tapered to nothing at the arc's two tips
+      let lit;
+      if (u <= k) { const q = clamp(1 - (k - u) / trail, 0, 1); lit = q * q * (3 - 2 * q); }
+      else { const q = k < 1 ? clamp(1 - (u - k) / lead, 0, 1) : 0; lit = q * q; }
+      const tips = clamp(u / 0.07, 0, 1) * clamp((1 - u) / 0.07, 0, 1);
+      lit *= fade * fin * tips * tips * (3 - 2 * tips);
+      // the band narrows with its brightness: thin at the tail, full at the head
+      const w = 0.4 + 0.6 * lit;
+      for (let j = 0; j < R; j++) {
+        const [off, br, heat] = ROWS[j], rad = off < 0 ? rb + off * (rb - r0) * w : rb + off * (rf - rb) * w;
+        P.setXYZ(i * R + j, cx + dx * rad, cy + dy * rad, cz + dz * rad);
+        const g = br * lit;
+        if (g <= 0) { C.setXYZ(i * R + j, 0, 0, 0); continue; }
+        palAt(s.pal, Math.min(1, lit * heat * 1.1), hotC);
+        C.setXYZ(i * R + j, hotC[0] * g, hotC[1] * g, hotC[2] * g);
+      }
     }
     P.needsUpdate = true; C.needsUpdate = true;
-    if (s.extra) this.syncSwooshBolts(s, cx, cy, cz, fx, fy, fz, ax, ay, az, r0, r1, k, fade);
+    if (s.extra) this.syncSwooshBolts(s, cx, cy, cz, fx, fy, fz, ax, ay, az, r0, r1, k, fade * fin);
   },
   // Lightning crawling along a trail's lit stretch: each strand follows the arc at its own radius with a jagged
   // path re-struck every frame, and throws a fork out past the blade's reach.
@@ -521,7 +557,8 @@ const FX = {
       this.writeFork(fork, q, { x: d.x / dl, y: d.y / dl, z: d.z / dl }, rand(0.35, 0.8), 0.1, cp, glow, hot, kk);
     }
   },
-  // Writes a camera-facing band through pts. With split, the second half of pts is a thinner core strip.
+  // Writes a camera-facing band through pts, w wide (or w(i) at point i). With split, the second half of pts is a
+  // thinner core strip.
   writeStrip(mesh, pts, w, cp, color, split = 0) {
     const P = mesh.geometry.attributes.position, C = mesh.geometry.attributes.color, out = [0, 0, 0];
     const cap = P.count / 2;
@@ -530,7 +567,7 @@ const FX = {
       const tx = q.x - o.x, ty = q.y - o.y, tz = q.z - o.z;
       const vx = cp.x - p.x, vy = cp.y - p.y, vz = cp.z - p.z;
       let nx = ty * vz - tz * vy, ny = tz * vx - tx * vz, nz = tx * vy - ty * vx;
-      const nl = Math.hypot(nx, ny, nz) || 1, hw = (split && i >= split ? w * 0.35 : w) / 2;
+      const wi = typeof w === 'function' ? w(i) : w, nl = Math.hypot(nx, ny, nz) || 1, hw = (split && i >= split ? wi * 0.35 : wi) / 2;
       nx = (nx / nl) * hw; ny = (ny / nl) * hw; nz = (nz / nl) * hw;
       P.setXYZ(i * 2, p.x - nx, p.y - ny, p.z - nz);
       P.setXYZ(i * 2 + 1, p.x + nx, p.y + ny, p.z + nz);

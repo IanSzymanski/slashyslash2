@@ -538,6 +538,7 @@ function hurtEnemy(e, dmg, o = {}) {
   FX.text(String(d), { x: c.x, y: e.pos.y + e.h + 0.4, z: c.z }, { c: o.crit ? '#ffd070' : o.heavy || d >= 30 ? '#ff8a9a' : '#ffffff', scale: o.crit || d >= 60 ? 2 : 1 });
   FX.light(c, '#ff3048', 2.5, 4, 0.1);
   Sound.play('hit', { heavy: o.heavy || d >= 30 }, c);
+  FPFX.impact(o.heavy || d >= 30);
   if (o.hitstop) Game.hitstop(o.hitstop);
   if (o.shake) Game.shake(o.shake);
   Game.registerHit(d, o.cause);

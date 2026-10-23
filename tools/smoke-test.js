@@ -546,7 +546,39 @@ async function run(browser, file, errors) {
       for (let i = 0; i < 220; i++) { if (p.onGround && !p.mantle && p.pos.y > 1) { top = p.pos.y; break; } T.frame(1); }
       ok(Math.abs(top - (A.top || 0)) < 0.05, `${label} (landed at ${top.toFixed(2)} m, top ${A.top} m)`);
     }
+    // ledges: walking into a 2.6 m shipping container climbs it; a held tether at its edge zips you up and over
+    // onto it, and a tap at its edge throws you onto it
+    for (const [hold, label] of [[0, 'walking into a shipping container climbs it'], [60, 'a zip at a container\'s edge climbs onto it'], [2, 'a tap of the tether at a container\'s edge throws you onto it']]) {
+      Game.toMenu(); UI.act('test'); T.frame(2);
+      p = Game.player; S.gameplay.invincible = true;
+      p.pos.x = p.prev.x = hold ? 22.5 : 30.5; p.pos.z = p.prev.z = -6; p.pos.y = p.prev.y = 0; T.frame(2);
+      let climbed = false;
+      if (hold) { T.aimAt({ x: 32.5, y: 2.3, z: -6 }); T.press('Mouse2'); for (let i = 0; i < hold; i++) { T.frame(1); climbed = climbed || !!p.mantle; } T.release('Mouse2'); }
+      else { T.face(34, -6); T.press('KeyW'); for (let i = 0; i < 60; i++) { T.frame(1); climbed = climbed || !!p.mantle; } T.release('KeyW'); }
+      let top = 0;
+      for (let i = 0; i < 220; i++) { climbed = climbed || !!p.mantle; if (p.onGround && !p.mantle && p.pos.y > 1) { top = p.pos.y; break; } T.frame(1); }
+      ok(Math.abs(top - 2.6) < 0.05 && (hold === 2 || climbed), `${label} (at ${top.toFixed(2)} m${climbed ? ', climbed' : ''})`);
+    }
     S.gameplay.invincible = false;
+
+    // first person: a dash punches the view wider, a hit rolls it and darkens the screen's edges; none of it in
+    // third person
+    {
+      Game.toMenu(); UI.act('test'); T.frame(2);
+      p = Game.player; S.gameplay.invincible = false;
+      const d0 = S.camera.distance;
+      S.camera.distance = 0; T.face(p.pos.x + 1, p.pos.z, -0.1); T.frame(30);
+      const fov0 = Gfx.camera.fov;
+      let fovDash = 0;
+      T.press('KeyW'); T.frame(3); T.tap('ShiftLeft'); for (let i = 0; i < 8; i++) { T.frame(1); fovDash = Math.max(fovDash, Gfx.camera.fov); } T.release('KeyW'); T.frame(40);
+      p.iframes = 0; p.shield = 0; p.takeHit({ dmg: 20, from: { x: p.pos.x + 3, y: 1, z: p.pos.z } });
+      let roll = 0; for (let i = 0; i < 6; i++) { T.frame(1); roll = Math.max(roll, Math.abs(Gfx.camera.rotation.z)); }
+      const vig = document.getElementById('fpfx').style.background;
+      ok(fovDash > fov0 + 8 && roll > 0.02 && /radial-gradient/.test(vig), `first person punches the view on a dash (${fov0.toFixed(0)} to ${fovDash.toFixed(0)} deg), rolls (${roll.toFixed(3)}) and darkens the edges on a hit`);
+      S.camera.distance = 5; T.frame(10);
+      ok(!document.getElementById('fpfx').style.background && Gfx.camera.rotation.z === 0, 'third person has no vignette or roll');
+      S.camera.distance = d0; p.hp = PC.MAX_HP;
+    }
 
     // ---------- AEGIS-07 ----------
     // the rival fight opens on its entry cutscene, and it fights once that's over
@@ -638,21 +670,59 @@ async function run(browser, file, errors) {
     const legSide = (L) => sign((L.px - L.x) * L.vz - (L.pz - L.z) * L.vx);
     ok(legs.length === 3 && legAng(legs[0]) > 40 && legAng(legs[1]) > 40 && legSide(legs[0]) !== legSide(legs[1]) && legs[2].cut && closest < 1.8,
       `a sword dash chain goes side (${legs[0] ? legAng(legs[0]).toFixed(0) : '-'} deg), other side (${legs[1] ? legAng(legs[1]).toFixed(0) : '-'} deg), then cuts through you (closest ${closest.toFixed(1)} m)`);
-    // zoning backs off to its range; charging closes in
+    // zoning backs off to its range; charging (phase 2) closes in
     R = rival(0, -6, { move: true }); R.mode = 'zone'; R.modeT = 99;
     for (let i = 0; i < 60 * 3; i++) T.frame(1);
     const zoneD = distXZ(R.pos, p.pos);
-    R = rival(0, -16, { move: true }); R.mode = 'charge'; R.modeT = 99; R.cds.closer = 0;
+    R = rival(0, -16, { move: true, phase2: true }); R.chooseAct = () => {}; R.mode = 'charge'; R.modeT = 99; R.cds.closer = 0;
     for (let i = 0; i < 60 * 4; i++) T.frame(1);
     const chargeD = distXZ(R.pos, p.pos);
     ok(zoneD > 8 && chargeD < 4, `zoning it backs off to range (${zoneD.toFixed(1)} m); charging it closes in (${chargeD.toFixed(1)} m)`);
-    // up on a rooftop you're not safe: it boosts up after you
-    R = rival(0, -6, { move: true });
+    // up on a rooftop you're not safe: charging, it boosts up after you
+    R = rival(0, -6, { move: true, phase2: true }); R.chooseAct = () => {};
     p.pos.x = p.prev.x = -15; p.pos.z = p.prev.z = -15; p.pos.y = p.prev.y = 6; p.vel.x = p.vel.y = p.vel.z = 0;
     R.pos.x = R.prev.x = -5; R.pos.z = R.prev.z = -15; R.pos.y = R.prev.y = World.groundAt(-5, -15, 1); R.mode = 'charge'; R.modeT = 99; R.cds.leap = 0;
     let roofT = -1;
     for (let i = 0; i < 60 * 8 && roofT < 0; i++) { T.frame(1); if (R.onGround && Math.abs(R.pos.y - 6) < 0.3) roofT = i / 60; }
     ok(roofT >= 0, `on a 6 m rooftop it boosts up after you (${roofT >= 0 ? 'there in ' + roofT.toFixed(1) + ' s' : 'never got there'})`);
+    // phase 1 always zones: it never picks charging, tether-zips to a vantage at range, and cuts and boosts away
+    // when you crowd it
+    R = rival(0, -6, { move: true, think: true });
+    let charged = false;
+    for (let i = 0; i < 20; i++) { R.modeT = 0; R.pickMode(p, 6); charged = charged || R.mode === 'charge'; }
+    R.cds.zip = 0; R.cds.zipTry = 0; R.cds.gun = 99; R.cds.beam = 99; R.cds.grenade = 99;
+    let zipped = null;
+    for (let i = 0; i < 60 * 4 && !(zipped && R.onGround && !R.act); i++) { T.frame(1); if (R.act && R.act.kind === 'zip' && !zipped) zipped = R.act; }
+    const zipD = distXZ(R.pos, p.pos), zipShot = R.clearShot(R.shoulderR());
+    R = rival(0, -2.5, { move: true, think: true });
+    R.cds.blade = 0; R.cds.chain = 0; R.cds.zip = 99; R.cds.gun = 99; R.cds.beam = 99; R.cds.grenade = 99;
+    let shoved = '', minHp = PC.MAX_HP;
+    for (let i = 0; i < 60 * 2.5; i++) { T.frame(1); if (R.act && R.act.kind === 'chain' && !shoved) shoved = R.act.name; }
+    const shoveD = distXZ(R.pos, p.pos);
+    ok(!charged && zipped && zipD > 8 && zipShot && shoved.startsWith('shove') && shoveD > 4,
+      `phase 1 only zones: it zips to a vantage ${zipD.toFixed(1)} m from you ${zipped && zipped.land.y > 1 ? zipped.land.y.toFixed(1) + ' m up' : 'on the street'} with a clear shot, and crowded it cuts and boosts away (${shoved || 'nothing'}, to ${shoveD.toFixed(1)} m)`);
+    // the dive bomb: a charge, a leap high over you, a flash as the mark locks, then a fast dive onto it
+    R = rival(0, -9, { phase2: true }); R.storm = null; Game.hazards = [];
+    S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
+    R.startDive(p);
+    let diveTop = 0, flashAt = -1, diveAt = -1, impactAt = -1;
+    for (let i = 0; i < 60 * 5 && R.act && impactAt < 0; i++) {
+      T.frame(1);
+      diveTop = Math.max(diveTop, R.pos.y);
+      if (R.diveFlash > 0 && flashAt < 0) flashAt = i;
+      if (R.act && R.act.kind === 'dive' && R.act.phase === 'dive' && diveAt < 0) diveAt = i;
+      if (R.act && R.act.kind === 'recover' && diveAt >= 0) impactAt = i;
+    }
+    ok(diveTop > 12 && flashAt > 0 && diveAt > flashAt && impactAt - diveAt < 20 && p.hp + p.shield < PC.MAX_HP + PC.MAX_SHIELD,
+      `its dive bomb leaps ${diveTop.toFixed(1)} m, flashes ${((diveAt - flashAt) / 60).toFixed(2)} s before diving, comes down in ${((impactAt - diveAt) / 60).toFixed(2)} s and hits you on the mark`);
+    // its blade waves can't be sent back: a parry breaks one on the blade
+    R = rival(0, -12, { phase2: true }); R.storm = null; Game.hazards = [];
+    p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0; p.parryCD = 0;
+    const rhp = R.hp, w = new BladeWave({ x: R.pos.x, y: p.pos.y + 0.7, z: R.pos.z + 1.2 }, { x: 0, y: 0, z: 1 }, 12, R, false);
+    Game.projectiles.push(w);
+    for (let i = 0; i < 60 && !w.dead; i++) { if (distXZ(w.pos, p.pos) < 3 && !p.sheathe) T.press('KeyE'); T.frame(1); }
+    T.release('KeyE'); T.frame(30);
+    ok(w.dead && R.hp === rhp && p.hp === PC.MAX_HP && !Game.projectiles.some((b) => b.kind === 'bladewave' && !b.dead), 'a parried blade wave breaks on the blade and is never sent back');
     // the knockout: a slow-motion cutscene, then it lies in the street as a husk until the next wave
     R = rival(0, -6, { phase2: true });
     R.hp = 5; hurtEnemy(R, 30, { cause: 'slash', dir: { x: 0, y: 0, z: -1 } });

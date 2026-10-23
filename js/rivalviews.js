@@ -57,9 +57,9 @@ const BossViews = {
     this.mark.add(mr, mx1, mx2);
     this.mark.userData = { mr, mx: mx1.material };
     this.zone = new THREE.Mesh(G.flatRing, add('#4a8aff', { opacity: 0.7 }));
-    this.aimLine = FX.stripMesh(40); this.arcLine = FX.stripMesh(28); this.diveLine = FX.stripMesh(24);
+    this.aimLine = FX.stripMesh(40); this.arcLine = FX.stripMesh(28); this.diveLine = FX.stripMesh(24); this.zipLine = FX.stripMesh(24);
     for (const o of [this.shield, ...this.flames, this.beam, ...this.beamRings, this.flare, this.charge, this.orb, this.orbHalo, this.beacon, this.mark, this.zone]) { o.visible = false; o.renderOrder = 2; Gfx.scene.add(o); }
-    for (const m of [this.aimLine, this.arcLine, this.diveLine]) m.visible = false;
+    for (const m of [this.aimLine, this.arcLine, this.diveLine, this.zipLine]) m.visible = false;
     this.ready = true;
   },
   // A crescent: a band across the wave's path, bulging forward in the middle and thinning at its tips, in
@@ -139,8 +139,8 @@ const BossViews = {
     if (o.kind === 'bladewave') {
       g.rotation.y = yawOf(o.dir.x, o.dir.z);
       g.scale.set(o.W, o.H, 1);
-      const f = clamp(o.life / 0.2, 0, 1) * clamp(o.t / 0.06, 0, 1), red = !o.hostile || (o.owner && o.owner.phase === 2);
-      U.outer.material.color.set(!o.hostile ? '#ff2a48' : red ? '#ff3a4a' : '#2f6bff');
+      const f = clamp(o.life / 0.2, 0, 1) * clamp(o.t / 0.06, 0, 1), red = o.owner && o.owner.phase === 2;
+      U.outer.material.color.set(red ? '#ff3a4a' : '#2f6bff');
       U.haze.material.color.copy(U.outer.material.color);
       U.outer.material.opacity = 0.85 * f; U.core.material.opacity = (((t * 30) | 0) % 2 ? 1 : 0.8) * f; U.haze.material.opacity = 0.25 * f;
     } else if (o.kind === 'eruption') {
@@ -177,7 +177,7 @@ const BossViews = {
   sync() {
     if (!this.ready) return;
     const t = Game.realTime, r = Game.enemies.find((e) => e.isBoss && !e.dead), R = r && r.model;
-    const hide = [this.shield, ...this.flames, this.beam, ...this.beamRings, this.flare, this.charge, this.orb, this.orbHalo, this.beacon, this.mark, this.zone, this.aimLine, this.arcLine, this.diveLine];
+    const hide = [this.shield, ...this.flames, this.beam, ...this.beamRings, this.flare, this.charge, this.orb, this.orbHalo, this.beacon, this.mark, this.zone, this.aimLine, this.arcLine, this.diveLine, this.zipLine];
     for (const o of hide) o.visible = false;
     if (!r) { this.syncGhosts(null); return; }
     this.syncBeacon(r, t);
@@ -284,12 +284,13 @@ const BossViews = {
       this.zone.position.set(end.x, (gy > -Infinity ? gy : end.y) + 0.05, end.z);
       this.zone.scale.setScalar(5.1 * (0.85 + 0.15 * Math.sin(t * 14)));
     }
-    // the dive bomb's mark: blinking faster through the hang, white once locked, with a line down to it
-    if (a && a.kind === 'dive' && a.phase !== 'crouch' && a.phase !== 'dive') {
-      const U = this.mark.userData, on = a.locked || ((t * (a.phase === 'hang' ? 16 : 8)) | 0) % 2;
+    // the dive bomb's mark: under you from the charge, blinking faster through the hang, white once locked,
+    // with a line down to it
+    if (a && a.kind === 'dive') {
+      const U = this.mark.userData, on = a.locked || ((t * (a.phase === 'hang' ? 16 : a.phase === 'rise' ? 10 : 6)) | 0) % 2;
       this.mark.visible = true;
       this.mark.position.set(a.tx, a.ty + 0.06, a.tz);
-      this.mark.scale.setScalar(1.3);
+      this.mark.scale.setScalar(a.phase === 'crouch' ? lerp(2.4, 1.4, clamp(a.t / r.tele(DIVE.CHARGE), 0, 1)) : 1.4);
       U.mr.material.color.set(a.locked ? '#ffffff' : on ? '#ff6a7a' : '#ff9aaa');
       U.mx.color.copy(U.mr.material.color);
       if (a.phase === 'hang' && a.locked) {
@@ -299,6 +300,18 @@ const BossViews = {
         this.diveLine.visible = true;
         FX.writeStrip(this.diveLine, pts, 0.04, cp, (i, out) => { const c = (i >> 1) % 2 === 0 ? col : off; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; });
       }
+    }
+    // a tether zip: the line from its left hand to the hook, flying out, then taut while it reels in
+    if (a && a.kind === 'zip' && a.phase !== 'drop') {
+      const h = r.orbPos(), k = a.phase === 'fire' ? a.line : 1, n = 12, pts = [], jag = a.phase === 'fire' ? 0.08 : 0.04;
+      const b = { x: lerp(h.x, a.hook.x, k), y: lerp(h.y, a.hook.y, k), z: lerp(h.z, a.hook.z, k) };
+      for (let i = 0; i < n; i++) {
+        const u = i / (n - 1), j = i && i < n - 1 ? jag * Math.sin(u * Math.PI) : 0;
+        pts.push({ x: lerp(h.x, b.x, u) + rand(-j, j), y: lerp(h.y, b.y, u) + rand(-j, j), z: lerp(h.z, b.z, u) + rand(-j, j) });
+      }
+      const outer = hexLinear(red ? '#ff3a4a' : '#2f6bff'), core = hexLinear('#e8f0ff');
+      this.zipLine.visible = true;
+      FX.writeStrip(this.zipLine, pts.concat(pts.slice().reverse()), 0.07, cp, (i, out) => { const c = i < n ? outer : core; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; }, n);
     }
     this.syncGhosts(R, r);
   },
