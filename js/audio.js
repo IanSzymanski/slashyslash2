@@ -527,11 +527,43 @@ const Sound = (() => {
       noise({ dur: 0.07, vol: 0.4, type: 'lowpass', f0: 2600, f1: 400 });
       tone({ type: 'square', f0: 900, f1: 300, dur: 0.04, vol: 0.05 });
     },
-    overload() {
-      tone({ type: 'sawtooth', f0: 1600, f1: 120, dur: 0.4, vol: 0.09 });
-      tone({ type: 'sine', f0: 140, f1: 30, dur: 0.45, vol: 0.75 });
-      noise({ dur: 0.4, vol: 0.5, type: 'bandpass', f0: 3200, f1: 500, q: 0.8, rev: 0.4 });
-      crackle(0.45, 0.45, { f: 900 });
+    // the sword beam: the blade taking light, the chime when it's full, a quick zing for a tap, a roar and
+    // a long tearing sweep for the massive wave, a crack where it hits a wall, and glass breaking for a lost charge
+    beamStart() {
+      tone({ type: 'sine', f0: 600, f1: 1400, dur: 0.14, vol: 0.06 });
+      noise({ dur: 0.12, vol: 0.18, type: 'highpass', f0: 4000 });
+    },
+    beamFull() {
+      for (const [f, d] of [[1568, 0], [2349, 0.05], [3136, 0.1]]) tone({ type: 'sine', f0: f, dur: 0.5, vol: 0.07, delay: d, rev: 0.55 });
+      tone({ type: 'triangle', f0: 784, dur: 0.35, vol: 0.06, rev: 0.4 });
+      noise({ dur: 0.18, vol: 0.2, type: 'bandpass', f0: 6000, f1: 9000, q: 2 });
+      crackle(0.2, 0.2, { f: 1200 });
+    },
+    beamTap(p) {
+      const k = p.power || 0;
+      noise({ dur: 0.16, vol: 0.32, f0: 5200, f1: 1400, q: 1.1 });
+      tone({ type: 'sawtooth', f0: 1900 - 500 * k, f1: 500, dur: 0.16, vol: 0.06 + 0.03 * k });
+      tone({ type: 'sine', f0: 3400, f1: 2600, dur: 0.12, vol: 0.05, rev: 0.3 });
+    },
+    beamMassive() {
+      tone({ type: 'sine', f0: 110, f1: 28, dur: 0.7, vol: 0.85 });
+      tone({ type: 'sawtooth', f0: 420, f1: 60, dur: 0.6, vol: 0.12 });
+      tone({ type: 'sawtooth', f0: 425, f1: 61, dur: 0.6, vol: 0.09, detune: 18 });
+      noise({ dur: 1.1, vol: 0.6, type: 'bandpass', f0: 5200, f1: 380, q: 0.7, rev: 0.6 });
+      noise({ dur: 0.25, vol: 0.5, type: 'lowpass', f0: 1800, f1: 200 });
+      for (const f of [1568, 2349]) tone({ type: 'triangle', f0: f, f1: f * 0.9, dur: 0.6, vol: 0.05, rev: 0.6 });
+      crackle(0.9, 0.5, { f: 900 });
+    },
+    beamImpact() {
+      tone({ type: 'sine', f0: 160, f1: 40, dur: 0.35, vol: 0.55 });
+      noise({ dur: 0.4, vol: 0.45, type: 'bandpass', f0: 2600, f1: 300, q: 0.8, rev: 0.4 });
+      crackle(0.3, 0.35, { f: 800 });
+    },
+    beamBreak(p) {
+      const k = p.power || 0;
+      for (let i = 0; i < 4 + Math.round(4 * k); i++) tone({ type: 'triangle', f0: rand(2600, 5200), f1: rand(1200, 2200), dur: 0.08, vol: 0.05, delay: i * 0.018 });
+      noise({ dur: 0.25, vol: 0.35 + 0.2 * k, type: 'highpass', f0: 3000, f1: 1200 });
+      tone({ type: 'sawtooth', f0: 900 + 600 * k, f1: 120, dur: 0.22, vol: 0.06 });
     },
     utilReady() {
       tone({ type: 'triangle', f0: 880, dur: 0.07, vol: 0.05 });
@@ -707,6 +739,39 @@ const Sound = (() => {
           o1.frequency.setTargetAtTime(90 + speed * 0.35, n, 0.05);
           o2.frequency.setTargetAtTime(92.5 + speed * 0.36, n, 0.05);
           gg.gain.setTargetAtTime(grinding ? 0.5 : 0, n, 0.03);
+        },
+      };
+    }
+    if (kind === 'beamHold') {
+      // the blade drinking in light: a pair of detuned sines climbing as it fills, a bright air swelling over
+      // them, and at full a fast shimmer that holds until you let go
+      const o1 = mk(ac.createOscillator()), o2 = mk(ac.createOscillator()), sub = mk(ac.createOscillator());
+      o1.type = 'sine'; o2.type = 'triangle'; o2.detune.value = 12; sub.type = 'sine';
+      o1.frequency.value = 220; o2.frequency.value = 330; sub.frequency.value = 55;
+      const trem = mk(ac.createOscillator()); trem.frequency.value = 6;
+      const tg = ac.createGain(); tg.gain.value = 0;
+      const g = ac.createGain(); g.gain.value = 0.5;
+      trem.connect(tg); tg.connect(g.gain);
+      const sg = ac.createGain(); sg.gain.value = 0.4;
+      o1.connect(g); o2.connect(g); sub.connect(sg); sg.connect(out); g.connect(out);
+      const air = mk(ac.createBufferSource()); air.buffer = noiseBuf; air.loop = true;
+      const af = ac.createBiquadFilter(); af.type = 'bandpass'; af.Q.value = 1.2; af.frequency.value = 2000;
+      const ag = ac.createGain(); ag.gain.value = 0;
+      air.connect(af); af.connect(ag); ag.connect(out);
+      o1.start(t); o2.start(t); sub.start(t); trem.start(t); air.start(t);
+      out.gain.setTargetAtTime(0.06, t, 0.03);
+      api = {
+        set(v, full) {
+          const n = ac.currentTime, f = 220 + 440 * v * v;
+          o1.frequency.setTargetAtTime(f, n, 0.04);
+          o2.frequency.setTargetAtTime(f * 1.5, n, 0.04);
+          sub.frequency.setTargetAtTime(55 + 30 * v, n, 0.05);
+          af.frequency.setTargetAtTime(2000 + 5000 * v, n, 0.05);
+          ag.gain.setTargetAtTime(0.1 + 0.35 * v, n, 0.05);
+          trem.frequency.setTargetAtTime(full ? 22 : 6 + 8 * v, n, 0.05);
+          tg.gain.setTargetAtTime(full ? 0.35 : 0.1 * v, n, 0.05);
+          out.gain.setTargetAtTime(0.06 + 0.08 * v, n, 0.03);
+          crackG.gain.setTargetAtTime(0.05 + 0.35 * v, n, 0.03);
         },
       };
     }

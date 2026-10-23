@@ -16,8 +16,8 @@ Object.assign(ENEMY_DEFS, {
 Object.assign(ENEMY_BASE_STATE, { shielder: 'chase', crawler: 'crawl', grenadier: 'move', sniper: 'perch' });
 
 // Hits that ignore the shielder's shield and crack the crawler's armour.
-const ARMOR_BREAKERS = new Set(['plunge', 'groundcut', 'rock', 'barrel', 'saw']);
-const SHIELD_BYPASS = new Set(['plunge', 'chain', 'barrel', 'saw']);
+const ARMOR_BREAKERS = new Set(['plunge', 'groundcut', 'rock', 'barrel', 'saw', 'beamFull']);
+const SHIELD_BYPASS = new Set(['plunge', 'chain', 'barrel', 'saw', 'beamFull']);
 const SNIPER_BOLT = { outer: '#ff3a52', core: '#ffe0e8', light: '#ff3048' };
 // the shield covers 60 degrees either side of where it faces
 const SHIELD_COS = Math.cos((60 * Math.PI) / 180);
@@ -35,7 +35,7 @@ Enemy.prototype.shielded = function (o = {}) {
     // projectiles are judged by the way they travel, everything else by where the player stands
     const f = this.fwd();
     let fx, fz;
-    if ((o.cause === 'reflect' || o.cause === 'rock') && o.dir) { fx = -o.dir.x; fz = -o.dir.z; }
+    if ((o.cause === 'reflect' || o.cause === 'rock' || o.cause === 'beam') && o.dir) { fx = -o.dir.x; fz = -o.dir.z; }
     else { fx = Game.player.pos.x - this.pos.x; fz = Game.player.pos.z - this.pos.z; }
     const l = Math.hypot(fx, fz);
     return l < 1e-3 || (fx * f.x + fz * f.z) / l > SHIELD_COS;

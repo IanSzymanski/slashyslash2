@@ -330,12 +330,30 @@ async function run(browser, file, errors) {
     for (let i = 0; i < 3; i++) { T.press('Mouse0'); T.frame(12); T.release('Mouse0'); T.frame(i < 2 ? 18 : 60); e.pos.x = p.pos.x + 2.4; e.pos.z = p.pos.z; e.vel.x = e.vel.z = 0; }
     ok(far.hp < 500, `the heavy slam's ground ring hits a scrapper 6 m behind (${500 - far.hp})`);
 
-    // Overload shocks everything close, then refuses until its cooldown is done
-    p = T.fresh(); const o1 = T.enemy('scrapper', 3, 0), o2 = T.enemy('scrapper', -2, 2);
-    T.tap('KeyF'); T.frame(10);
-    ok(o1.hp < o1.maxHp && o2.hp < o2.maxHp && p.utilCD > 9, 'Overload shocks everything close and starts its cooldown');
+    // the sword beam: a tap throws a weak blade that breaks on the first scrapper, then refuses on cooldown
+    p = T.fresh();
+    const b1 = T.enemy('scrapper', 12, 0, { hp: 500, frozen: true }), b2 = T.enemy('scrapper', 18, 0, { hp: 500, frozen: true });
+    T.aimAt(b1.center()); T.tap('KeyF'); T.frame(40);
+    ok(b1.hp < 500 && 500 - b1.hp <= 20 && b2.hp === 500 && p.utilCD > 6, `a tapped sword beam is a weak blade that stops at the first scrapper (${500 - b1.hp}, ${500 - b2.hp} behind)`);
     T.tap('KeyF'); T.frame(2);
-    ok(p.utilFlash > 0, 'Overload on cooldown is refused');
+    ok(p.utilFlash > 0, 'the sword beam on cooldown is refused');
+    // held to full, the massive wave cuts a whole line, one off to the side and a shield scrapper from the front
+    p = T.fresh();
+    const line = [6, 12, 18, 26].map((d) => T.enemy('scrapper', d, 0, { hp: 500, frozen: true }));
+    const wide = T.enemy('scrapper', 20, 5, { hp: 500, frozen: true }), guard = T.enemy('shielder', 9, 2, { hp: 500 });
+    guard.yaw = yawOf(-1, 0);
+    T.aimAt(line[1].center()); T.press('KeyF'); T.frame(75);
+    const full = p.charging && p.charging.full;
+    T.release('KeyF'); T.frame(100);
+    const cut = [...line, wide, guard].map((e) => 500 - e.hp);
+    ok(full && cut.every((d) => d >= 40), `a full charge sweeps a massive wave through everything in its path (${cut.join(', ')})`);
+    // a hit while charging breaks it: no wave, a short cooldown; a dash drops it at no cost
+    p = T.fresh(); T.press('KeyF'); T.frame(40);
+    p.takeHit({ dmg: 5, from: { x: p.pos.x + 3, y: 1, z: p.pos.z }, kind: 'melee' });
+    T.frame(2); T.release('KeyF'); T.frame(10);
+    ok(!p.charging && p.utilCD > 1 && p.utilCD < 2.5 && !Game.projectiles.some((q) => q.kind === 'swordbeam'), `a hit while charging breaks the sword beam (cooldown ${p.utilCD.toFixed(1)} s)`);
+    p = T.fresh(); T.press('KeyF'); T.frame(30); T.tap('ShiftLeft'); T.frame(5); T.release('KeyF'); T.frame(5);
+    ok(!p.charging && p.utilCD === 0 && !Game.projectiles.some((q) => q.kind === 'swordbeam'), 'a dash drops a charging sword beam at no cost');
 
     // bullet jump out of a slide; wall slide and wall kick off a building
     p = T.fresh(); Camera.pitch = 0.35; T.press('KeyW'); T.frame(30); T.press('KeyC'); T.frame(3);

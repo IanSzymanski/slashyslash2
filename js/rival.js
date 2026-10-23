@@ -240,13 +240,25 @@ class Rival extends Enemy {
   intercept(o) {
     if (this.transT > 0) return true;
     if (this.parryInvulnT > 0) { FX.sparks(this.chest(), 4, null, TAU, 5.5, 14.5, AEGIS_SPARK); return true; }
-    if (this.phase === 2 && this.guardT > 0) { this.parryPlayer(o); return true; }
+    if (this.phase === 2 && this.guardT > 0) {
+      // a blade of light from range breaks on its guard; only a blade in reach gets the counter
+      if (o.ranged) { this.blockBeam(o); return true; }
+      this.parryPlayer(o);
+      return true;
+    }
     return false;
+  }
+  blockBeam(o) {
+    const p = Game.player, c = this.chest(), u = flat(p.pos.x - this.pos.x, p.pos.z - this.pos.z);
+    this.yaw = this.faceYaw = this.yawTo(p.pos);
+    FX.sparks({ x: c.x + u.x * 0.8, y: c.y, z: c.z + u.z * 0.8 }, o.full ? 24 : 10, { x: u.x, y: 0.2, z: u.z }, 1.6, 6, 20, AEGIS_SPARK);
+    Sound.play('clash', {}, c);
   }
   noteHurt(d) { this.hurtRecent += d; }
   shieldHit(o) {
     // bolts sent back into the shield crack it; enough cracks break it like a rebounded grenade
-    if (o.cause === 'reflect' && this.phase === 1 && !this.dying) {
+    // so does the full sword beam
+    if ((o.cause === 'reflect' || o.cause === 'beamFull') && this.phase === 1 && !this.dying) {
       this.cracks++;
       FX.ring(this.center(), 0.3, 1.8, 0.2, { c: '#9cc4ff', flat: false });
       Sound.play('reflect', {}, this.center());

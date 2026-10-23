@@ -174,7 +174,10 @@ const Render = {
       const blink = P.blinkT > 0 && P.hurtT <= 0 && ((Game.realTime * 30) | 0) % 2 ? 0.55 : 1;
       R.mat.opacity = want * blink;
       R.mat.depthWrite = R.mat.opacity > 0.99;
-      R.extras[0].material.opacity = 0.2 * want;
+      // the blade's halo burns brighter as the beam charges, and gold once it's full
+      const ck = P.charging ? P.charging.k : 0, hot = ck >= 1 && ((Game.realTime * 16) | 0) % 2;
+      R.extras[0].material.opacity = Math.min(1, 0.2 * want * (1 + 3.5 * ck));
+      R.extras[0].material.color.set(ck >= 1 ? (hot ? '#ffd070' : '#ff8a3a') : '#ff1a2e');
       // in first person the screen's own hit effects stand in for the body's white flash
       R.mat.emissive.setScalar(P.hurtT > 0.12 && !Camera.fp ? 0.8 : 0);
       this.feet(R.feet, p);
@@ -186,7 +189,8 @@ const Render = {
     if (!P || P.dead || !R.mesh.visible) return;
     const v = this._v.set(0, 0.55, 0.03);
     R.bones.weapon.localToWorld(v);
-    Gfx.light(v.x, v.y, v.z, '#ff2030', P.sheathe || P.idleT > 2.5 ? 0.5 : 1.4, 3.5);
+    const ck = P.charging ? P.charging.k : 0;
+    Gfx.light(v.x, v.y, v.z, ck >= 1 ? '#ffb040' : '#ff2030', P.sheathe || P.idleT > 2.5 ? 0.5 : 1.4 + 2.6 * ck, 3.5 + 3 * ck);
     // in a Blackout you carry a little light of your own, as in 2D
     if (World.blackout) { const c = P.rp || P.pos; Gfx.light(c.x, c.y + 2.2, c.z, '#c8a0b8', 2.2, 11); }
   },
@@ -298,15 +302,17 @@ const Render = {
       if (cdK < 1) this.fillDiamond(ctx, px, py, cdK, '#ffd070');
       drawText(ctx, 'PARRY', px + 7, y2 + 8, { color: afford ? '#7a849c' : '#5a4a4a' });
     }
-    // utility: fills as its cooldown runs down, flashes when pressed too early
+    // utility: fills as its cooldown runs down, flashes when pressed too early; a charge fills it white-hot
+    // and it flickers gold once full
     const U = p.utility();
     if (U) {
-      const ux = x + 88, uy = y2 + 10;
+      const ux = x + 88, uy = y2 + 10, C = p.charging;
       const k = p.utilCD > 0 ? 1 - p.utilCD / U.cooldown : 1;
       const fl = p.utilFlash > 0 && ((t * 20) | 0) % 2;
       ctx.fillStyle = '#0b0910'; this.diamond(ctx, ux, uy, 4);
-      ctx.fillStyle = fl ? '#ffffff' : k >= 1 ? '#ff3a52' : '#3a1a24'; this.diamond(ctx, ux, uy, 3);
-      if (k < 1) this.fillDiamond(ctx, ux, uy, k, '#a01c30');
+      ctx.fillStyle = fl ? '#ffffff' : C ? '#3a1a24' : k >= 1 ? '#ff3a52' : '#3a1a24'; this.diamond(ctx, ux, uy, 3);
+      if (C) this.fillDiamond(ctx, ux, uy, Math.max(0.05, C.k), C.k >= 1 ? (((t * 16) | 0) % 2 ? '#ffffff' : '#ffd070') : '#ffd0d8');
+      else if (k < 1) this.fillDiamond(ctx, ux, uy, k, '#a01c30');
       drawText(ctx, hudKey('utility') + ' ' + U.hud, ux + 7, y2 + 8, { color: k >= 1 ? '#7a849c' : '#5a4a5a' });
     }
     // wave info
@@ -533,5 +539,16 @@ const Render = {
     ctx.fillStyle = col;
     ctx.fillRect(x - 4, y, 2, 1); ctx.fillRect(x + 3, y, 2, 1); ctx.fillRect(x, y - 4, 1, 2); ctx.fillRect(x, y + 3, 1, 2);
     ctx.fillStyle = '#ffffff'; ctx.fillRect(x, y, 1, 1);
+    // the sword beam's charge: a ring round the crosshair filling clockwise, flickering gold once full
+    const C = p.charging;
+    if (C && C.k > 0) {
+      const N = 32, R = 9, n = Math.ceil(C.k * N), full = C.k >= 1, flick = ((Game.realTime * 16) | 0) % 2;
+      const pts = [];
+      for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + (i / N) * TAU; pts.push([Math.round(x + Math.cos(a) * R), Math.round(y + Math.sin(a) * R)]); }
+      ctx.fillStyle = '#0b0910';
+      for (const [px, py] of pts) ctx.fillRect(px - 1, py - 1, 3, 3);
+      ctx.fillStyle = full ? (flick ? '#ffffff' : '#ffd070') : '#ff8a9a';
+      for (const [px, py] of pts) ctx.fillRect(px, py, 1, 1);
+    }
   },
 };

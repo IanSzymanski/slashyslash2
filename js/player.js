@@ -69,7 +69,7 @@ class Player {
     this.runPhase = 0; this.spinT = 0; this.spinDur = 0.32; this.landSquash = 0; this.idleT = 0; this.blinkT = 0;
     // body lean from acceleration (forward, and toward the inside of a turn), and the landing roll
     this.accF = 0; this.accL = 0; this.bank = 0; this.tilt = 0; this.rollT = 0; this.rollDur = 0.4;
-    this.charId = 'ronin'; this.utilCD = 0; this.utilT = 0; this.utilFlash = 0;
+    this.charId = 'ronin'; this.utilCD = 0; this.utilT = 0; this.utilFlash = 0; this.charging = null; this.utilBuf = 0;
     this.plunge = null; this.kickAnim = null; this.ghostT = 0; this.bulletT = 0;
     this.onMove = (ev, d) => this.moveEvent(ev, d);
     this.initScarf();
@@ -85,6 +85,17 @@ class Player {
   hand() {
     const c = this.chest(), Y = this.yaw;
     return { x: c.x - Math.cos(Y) * 0.3 + fwdX(Y) * 0.25, y: c.y + 0.1, z: c.z + Math.sin(Y) * 0.3 + fwdZ(Y) * 0.25 };
+  }
+  // a point u of the way along the drawn blade (0 the guard, 1 the tip), from the posed model when there is one
+  bladeAt(u) {
+    const R = typeof Render !== 'undefined' && Render.playerRig;
+    if (R && R.bones && R.bones.weapon && this === Game.player) {
+      const v = (this._bv || (this._bv = new THREE.Vector3())).set(0, 0.13 + 0.86 * u, 0.04 * u);
+      R.bones.weapon.localToWorld(v);
+      return { x: v.x, y: v.y, z: v.z };
+    }
+    const c = this.chest(), Y = this.yaw;
+    return { x: c.x + fwdX(Y) * (0.3 + 0.6 * u), y: c.y - 0.2, z: c.z + fwdZ(Y) * (0.3 + 0.6 * u) };
   }
 
   // Movement intent from the keys, relative to where the camera faces.
@@ -115,7 +126,7 @@ class Player {
     this.animT += dt;
     this.updateAim();
     const dec = (k) => { if (this[k] > 0) this[k] = Math.max(0, this[k] - dt); };
-    for (const k of ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT', 'utilT', 'utilFlash', 'bulletT', 'rollT']) dec(k);
+    for (const k of ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT', 'utilT', 'utilFlash', 'bulletT', 'rollT', 'utilBuf']) dec(k);
     Controller.timers(this, dt);
     for (const m of this.hitMarks) m.t -= dt;
     this.hitMarks = this.hitMarks.filter((m) => m.t > 0);
@@ -133,7 +144,7 @@ class Player {
       if (this.utilCD <= 0) { this.utilCD = 0; Sound.play('utilReady'); FX.ring(this.center(), 0.4, 1.5, 0.25, { c: '#ff3a52', flat: false }); }
     }
 
-    if (this.dead) { this.updateDead(dt); return; }
+    if (this.dead) { if (this.charging) this.cancelCharge(); this.updateDead(dt); return; }
 
     const I = this.intent();
     this.updateSheathe(dt);
@@ -144,6 +155,7 @@ class Player {
     if (Input.wasPressed('attack')) this.onAttackPressed();
     this.updateAttackInput(dt);
     if (Input.wasPressed('utility')) this.tryUtility();
+    this.updateCharge(dt);
     Controller.buffer(this, I);
 
     // what the stance and swings do to movement (the 2D moveNormal modifiers)
@@ -151,6 +163,7 @@ class Player {
     if (this.sheathe) sp = this.onGround ? 38 / 152 : 70 / 152;
     if (this.attack && this.onGround) sp *= this.attack.heavy && this.attack.t <= this.attack.act1 ? 0.25 : 0.45;
     if (this.landLag > 0 || this.postPose > 0.12) sp *= 0.2;
+    if (this.charging) sp *= this.onGround ? 0.5 : 0.8;
     this.speedMul = sp;
     let gk = Game.gravMul();
     if (this.attack && !this.onGround && this.vel.y < 0) gk *= 0.45;
@@ -233,7 +246,7 @@ class Player {
   // While attacking or parrying (and for FACE_AIM after) the body faces the aim; otherwise where it's going.
   updateFacing(dt) {
     const T = this.tether;
-    if (this.attack || this.sheathe || this.atkPend || this.iaido || (T && (T.phase === 'fly' || T.mode === 'tow'))) this.aimHold = PC.FACE_AIM;
+    if (this.attack || this.sheathe || this.atkPend || this.iaido || this.charging || this.utilT > 0 || (T && (T.phase === 'fly' || T.mode === 'tow'))) this.aimHold = PC.FACE_AIM;
     let want = null;
     if (this.kickAnim || this.cling) return;
     // first person: the body always faces the view, and the keys strafe
@@ -1431,10 +1444,53 @@ class Player {
   utility() { const c = CHARACTERS[this.charId]; return c && c.utility ? getUtility(c.utility) : null; }
   tryUtility() {
     const def = this.utility();
-    if (!def || this.dead) return;
+    if (!def || this.dead || this.charging) return;
     if (this.utilCD > 0 || (def.canUse && !def.canUse(this))) { Sound.play('denied'); this.utilFlash = 0.35; return; }
+    // a held utility waits out a swing or a dash in progress, then starts charging
+    if (def.charge) { this.utilBuf = 0.4; return; }
     def.use(this);
     this.utilCD = def.cooldown;
+  }
+  // what takes the body over and drops a charge (or keeps one from starting)
+  chargeBlocked() {
+    return !!(this.attack || this.atkPend || this.sheathe || this.iaido || this.ult || this.ultHold > 0 || this.dashT > 0 || this.tether || this.plunge || this.kickAnim || this.mantle || this.vault || this.cling || Game.cineActive());
+  }
+  // A held utility (the sword beam) charges while F is down and lets go when it comes up. A charge F was
+  // tapped for starts once the body is free and lets go at once.
+  updateCharge(dt) {
+    const def = this.utility();
+    if (!this.charging) {
+      if (this.utilBuf <= 0 || !def || this.utilCD > 0 || this.chargeBlocked()) return;
+      this.utilBuf = 0;
+      this.charging = { def, t: 0, k: 0 };
+      def.begin(this, this.charging);
+    }
+    const C = this.charging;
+    if (this.chargeBlocked()) { this.cancelCharge(); return; }
+    C.t += dt;
+    this.aimHold = Math.max(this.aimHold, 0.2);
+    C.def.hold(this, C, dt);
+    if (!Input.isDown('utility')) {
+      this.charging = null;
+      C.def.release(this, C);
+      this.utilCD = C.def.cooldown;
+    }
+  }
+  // a hit lands while charging: the charge is lost and the utility waits a little
+  breakCharge() {
+    const C = this.charging;
+    if (!C) return;
+    this.charging = null; this.utilBuf = 0;
+    C.def.interrupt(this, C);
+    this.utilCD = C.def.breakCD || 0;
+  }
+  // another action took over: the charge is dropped at no cost
+  cancelCharge() {
+    const C = this.charging;
+    this.utilBuf = 0;
+    if (!C) return;
+    this.charging = null;
+    C.def.cancel(this, C);
   }
 
   // ---------- damage ----------
@@ -1446,6 +1502,7 @@ class Player {
     if (this.parryActive() && !h.unparryable) { this.doParry(h); return 'parried'; }
     if ((this.iframes > 0 || this.iaido) && !h.through) return 'ignored';
     if (h.through) { this.iaido = null; this.dashT = 0; }
+    if (this.charging) this.breakCharge();
     let dmg = h.dmg * (Game.has('glass') ? 1.25 : 1);
     if (S.gameplay.invincible) dmg = 0;
     // on the tether, a bullet only hurts: no knockback, and you stay on the line. Anything bigger (a blade, a

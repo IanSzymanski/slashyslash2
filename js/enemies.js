@@ -550,7 +550,7 @@ function killEnemy(e, o) {
   if (e.onDeath) { e.onDeath(o); return; }
   e.dead = true; e.tethered = false; e.hp = 0;
   const c = e.center();
-  const cut = ['slash', 'heavy', 'iaido', 'saw', 'tether', 'plunge', 'chain', 'groundcut'].includes(o.cause);
+  const cut = ['slash', 'heavy', 'iaido', 'saw', 'tether', 'plunge', 'chain', 'groundcut', 'beam', 'beamFull'].includes(o.cause);
   // the model comes apart: a cut throws the halves either side of the blade
   FX.gibs(e, { kv: o.kv, dir: o.dir, cut });
   if (cut && o.dir) {

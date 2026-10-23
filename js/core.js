@@ -4,7 +4,7 @@
 
 // Style: hits build a meter that ranks you C to SSS. Repeating the same move earns less,
 // and the rank multiplies score and ultimate charge.
-const STYLE_GAIN = { lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, overload: 5 };
+const STYLE_GAIN = { lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, beam: 4, beamFull: 9 };
 const STYLE_RANKS = [
   { th: 380, r: 'SSS', c: '#ffffff', mul: 2.5 }, { th: 260, r: 'SS', c: '#ffd070', mul: 2 }, { th: 170, r: 'S', c: '#ffb040', mul: 1.75 },
   { th: 100, r: 'A', c: '#ff5a6a', mul: 1.5 }, { th: 50, r: 'B', c: '#d0a0ff', mul: 1.25 }, { th: 20, r: 'C', c: '#9ab0d0', mul: 1.1 },
@@ -73,7 +73,7 @@ const Game = {
   pause() {
     if (this.state !== 'playing') return;
     this.state = 'paused';
-    if (this.player) { this.player.stopLoop('charge'); this.player.stopLoop('reel'); this.player.stopLoop('ult'); }
+    if (this.player) { this.player.cancelCharge(); this.player.stopLoop('charge'); this.player.stopLoop('reel'); this.player.stopLoop('ult'); }
     for (const e of this.enemies) if (e.stopLoops) e.stopLoops();
     Sound.setSlow(true);
     Input.releaseLock();
@@ -140,6 +140,7 @@ const Game = {
     const p = this.player;
     if (p.sheathe) p.cancelSheathe();
     if (p.tether) p.releaseTether();
+    p.cancelCharge();
     p.attackQueued = null; p.atkPend = null; p.ultHold = 0; p.stopLoop('ult');
     this.endBulletTime();
   },

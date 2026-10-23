@@ -108,6 +108,17 @@ const Views = {
       band.renderOrder = 2;
       g.add(band);
       g.userData = { band };
+    } else if (o.kind === 'swordbeam') {
+      // the player's sword beam: a crescent like the rival's waves, in crimson round a white-hot core (gold
+      // through the massive one), with a wide haze behind
+      const C = BossViews.geos.crescent, A = BossViews.add;
+      const haze = new THREE.Mesh(C, A(o.full ? '#ff5a2a' : '#ff2a48', { opacity: 0.25 })), outer = new THREE.Mesh(C, A('#ff2a48', { opacity: 0.9 }));
+      const mid = new THREE.Mesh(C, A(o.full ? '#ffd070' : '#ff8a9a', { opacity: 0.9 })), core = new THREE.Mesh(C, A(o.full ? '#fff6e0' : '#fff0f2', { opacity: 0.95 }));
+      haze.scale.set(1.08, 1.3, 1.6); haze.position.z = 0.35;
+      mid.scale.set(0.96, 0.7, 1); mid.position.z = -0.05;
+      core.scale.set(0.9, 0.38, 1); core.position.z = -0.1;
+      g.add(haze, outer, mid, core);
+      g.userData = { beam: { haze, outer, mid, core } };
     } else if (o.kind === 'rock') {
       g.add(new THREE.Mesh(G.rock, FX.gibMaterial(o.color, false)));
       g.scale.setScalar(o.size);
@@ -152,6 +163,16 @@ const Views = {
       band.scale.set(r, 0.65 * (1 - k * 0.6), r);
       band.material.opacity = 0.9 * (1 - k * k);
       band.material.color.set(((o.t * 24) | 0) % 2 ? '#ffd080' : '#ff7a2a');
+    } else if (o.kind === 'swordbeam') {
+      // turned to its band's frame (across, up, along its flight), deeper as it widens so it sweeps in an arc
+      const B = g.userData.beam, s = o.side, u = o.up, d = o.dir;
+      if (!this._bm) { this._bm = new THREE.Matrix4(); this._v3a = new THREE.Vector3(); this._v3b = new THREE.Vector3(); this._v3c = new THREE.Vector3(); }
+      this._v3a.set(s.x, s.y, s.z); this._v3b.set(u.x, u.y, u.z); this._v3c.set(-d.x, -d.y, -d.z);
+      this._bm.makeBasis(this._v3a, this._v3b, this._v3c);
+      g.quaternion.setFromRotationMatrix(this._bm);
+      g.scale.set(o.W, o.H, 1 + o.W * 0.18);
+      const f = clamp(o.life / 0.2, 0, 1) * clamp(o.t / 0.05, 0, 1), fl = ((t * 30) | 0) % 2;
+      B.outer.material.opacity = 0.9 * f; B.mid.material.opacity = 0.85 * f; B.core.material.opacity = (fl ? 1 : 0.8) * f; B.haze.material.opacity = (o.full ? 0.35 : 0.22) * f;
     } else if (o.kind === 'rock') {
       const k = 1.2 - o.life;
       g.rotation.set(o.spin.x * k, o.spin.y * k, o.spin.z * k);
@@ -171,6 +192,7 @@ const Views = {
     Gfx.scene.remove(v.group);
     if (v.group.userData.halo) v.group.userData.halo.material.dispose();
     if (v.group.userData.band) v.group.userData.band.material.dispose();
+    if (v.group.userData.beam) for (const m of v.group.children) m.material.dispose();
   },
   boltMat(o) { return !o.hostile ? this.mats.boltF : o.col && o.col.outer === '#ff3a52' ? this.mats.boltS : o.col && o.col.outer === '#2f6bff' ? this.mats.boltB : this.mats.boltH; },
 
@@ -341,9 +363,11 @@ const Views = {
     const drones = Game.enemies.filter((e) => e.type === 'drone' && !e.dead && !e.spawning).sort((a, b) => dist3(a.pos, cp) - dist3(b.pos, cp));
     for (const d of drones.slice(0, 2)) Gfx.light(d.pos.x, d.pos.y + 0.2, d.pos.z, d.state === 'tele' || d.state === 'dive' ? '#ff6040' : '#ffc070', 1.6, 5);
     let n = 0;
+    // sword beams first: they light the street as they cross it
+    for (const o of Game.projectiles) if (!o.dead && o.kind === 'swordbeam' && n < 2) { Gfx.light(o.pos.x, o.pos.y, o.pos.z, o.full ? '#ffa040' : '#ff3048', o.full ? 4 : 2, o.full ? 11 : 4.5); n++; }
     for (const o of Game.projectiles) {
       if (n >= 3) return;
-      if (o.dead) continue;
+      if (o.dead || o.kind === 'swordbeam') continue;
       if (o.kind === 'bolt') { Gfx.light(o.pos.x, o.pos.y, o.pos.z, o.hostile ? o.col.light : '#ff3048', 1.6, 2.6); n++; }
       else if (o.kind === 'grenade') { Gfx.light(o.pos.x, o.pos.y, o.pos.z, o.state === 'flying' ? '#4af0ff' : o.state === 'caught' ? '#ffd070' : '#ff3048', 2, 3.6); n++; }
     }

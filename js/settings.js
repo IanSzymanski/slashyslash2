@@ -15,7 +15,7 @@ const ACTIONS = [
   { id: 'dash', label: 'Dash' },
   { id: 'attack', label: 'Slash (tap) / Heavy (hold)' },
   { id: 'sheathe', label: 'Parry stance (costs shield)' },
-  { id: 'utility', label: 'Utility (cooldown)' },
+  { id: 'utility', label: 'Sword beam (tap / hold to charge)' },
   { id: 'tether', label: 'Tether (tap fling / hold zip / grab)' },
   { id: 'ultimate', label: 'Ultimate (hold)' },
   { id: 'pause', label: 'Pause' },
