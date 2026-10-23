@@ -563,7 +563,7 @@ const FX = {
     const P = mesh.geometry.attributes.position, C = mesh.geometry.attributes.color, out = [0, 0, 0];
     const cap = P.count / 2;
     for (let i = 0; i < cap; i++) {
-      const p = pts[Math.min(i, pts.length - 1)], q = pts[Math.min(i + 1, pts.length - 1)], o = pts[Math.max(0, i - 1)];
+      const n = pts.length - 1, p = pts[Math.min(i, n)], q = pts[Math.min(i + 1, n)], o = pts[Math.min(Math.max(0, i - 1), n)];
       const tx = q.x - o.x, ty = q.y - o.y, tz = q.z - o.z;
       const vx = cp.x - p.x, vy = cp.y - p.y, vz = cp.z - p.z;
       let nx = ty * vz - tz * vy, ny = tz * vx - tx * vz, nz = tx * vy - ty * vx;

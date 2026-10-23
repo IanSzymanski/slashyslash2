@@ -194,12 +194,12 @@ const Views = {
     for (const s of this.ghosts) if (!used.has(s)) { s.mesh.visible = false; s.fx = null; }
   },
 
-  // The tether: a crackling line from the right hand to the hook.
+  // The tether: a crackling line from the left hand (the one reaching along it) to the hook.
   syncTether() {
     const P = Game.player, T = P && P.tether, m = this.tetherMesh;
     m.visible = !!T && !P.dead;
     if (!m.visible) return;
-    const h = Rig.boneWorld(Render.playerRig, 'handR', this._h || (this._h = new THREE.Vector3()));
+    const h = Rig.boneWorld(Render.playerRig, 'handL', this._h || (this._h = new THREE.Vector3()));
     const n = 12, pts = [], a = h, b = T.pos, jag = T.phase === 'retract' ? 0.02 : 0.07;
     for (let i = 0; i < n; i++) {
       const k = i / (n - 1), j = i && i < n - 1 ? jag * Math.sin(k * Math.PI) : 0;
@@ -336,6 +336,10 @@ const Views = {
   },
   // lights from the brightest objects: bolts, grenades and lit barrels, up to three
   pushLights() {
+    // the two drones nearest the camera light themselves and what's below them
+    const cp = Gfx.camera.position;
+    const drones = Game.enemies.filter((e) => e.type === 'drone' && !e.dead && !e.spawning).sort((a, b) => dist3(a.pos, cp) - dist3(b.pos, cp));
+    for (const d of drones.slice(0, 2)) Gfx.light(d.pos.x, d.pos.y + 0.2, d.pos.z, d.state === 'tele' || d.state === 'dive' ? '#ff6040' : '#ffc070', 1.6, 5);
     let n = 0;
     for (const o of Game.projectiles) {
       if (n >= 3) return;

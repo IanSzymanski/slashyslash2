@@ -1,27 +1,29 @@
 'use strict';
 // First person's screen effects. Swings, dashes, hits and parries punch the field of view and roll the view
-// on springs; the screen's edges flare with energy as you attack and dash, darken red toward whatever hit
-// you, and pulse at low health; speed lines streak in from the edges at a dash, a zip or a sprint.
-// All of it is off in third person, in menus and in cutscenes. Camera.update steps it each frame. FOV punches and roll follow the
-// "widen the view" setting; energy flares follow the flashes setting.
+// on springs; the screen's edges flare gold on a parry or the counter and white on a dodge, darken red toward
+// whatever hit you, and pulse at low health; speed lines streak in from the edges at a dash, a zip or a
+// sprint. All of it is off in third person, in menus and in cutscenes. Camera.update steps it each frame.
+// FOV punches and roll follow the "widen the view" setting; edge flares follow the flashes setting.
 
 const FPFX = {
   BASE_FOV: 5,
   // springs: x is the offset, v its velocity; k the stiffness, z the damping ratio
   fovS: { x: 0, v: 0, k: 170, z: 0.5 }, rollS: { x: 0, v: 0, k: 260, z: 0.45 },
-  energy: 0, eCol: [255, 48, 72], hurt: 0, hurtX: 50, hurtY: 50, guard: 0, speed: 0, kickSpeed: 0,
+  energy: 0, eCol: [255, 214, 120], hurt: 0, hurtX: 50, hurtY: 50, guard: 0, speed: 0, kickSpeed: 0,
   lowT: 0, lines: [], lastImpact: 0, el: null, glow: null, live: false,
-  // per kind: degrees of FOV (negative narrows), roll in radians, edge energy and its colour, hurt, speed
+  // per kind: degrees of FOV (negative narrows), roll in radians, edge energy and its colour, hurt, speed.
+  // Your own swings, dashes and slams get no edge colour: red at the edges means you were hurt, and only that.
   KICKS: {
-    attack: { fov: 4, roll: 0.03, energy: 0.42 },
-    finisher: { fov: 6, roll: 0.045, energy: 0.55 },
-    heavy: { fov: 8, roll: 0.055, energy: 0.7 },
-    draw: { fov: 10, roll: 0.025, energy: 0.8, speed: 0.9 },
-    dash: { fov: 9, roll: 0.05, energy: 0.6, speed: 1 },
-    jump: { fov: 3, energy: 0.12, speed: 0.4 },
-    slam: { fov: -7, roll: 0.03, energy: 0.7 },
-    impact: { fov: 1.6, energy: 0.18 },
-    impactH: { fov: 3, roll: 0.012, energy: 0.3 },
+    attack: { fov: 4, roll: 0.03 },
+    finisher: { fov: 6, roll: 0.045 },
+    heavy: { fov: 8, roll: 0.055 },
+    draw: { fov: 10, roll: 0.025, speed: 0.9 },
+    counter: { fov: 12, roll: 0.04, energy: 1, col: [255, 214, 120] },
+    dash: { fov: 9, roll: 0.05, speed: 1 },
+    jump: { fov: 3, speed: 0.4 },
+    slam: { fov: -7, roll: 0.03 },
+    impact: { fov: 1.6 },
+    impactH: { fov: 3, roll: 0.012 },
     parry: { fov: -5, roll: 0.02, energy: 0.9, col: [255, 214, 120] },
     dodge: { fov: 7, energy: 0.7, col: [255, 255, 255], speed: 0.6 },
     hit: { fov: -8, roll: 0.075, hurt: 1 },
@@ -53,7 +55,7 @@ const FPFX = {
     if (K.roll) this.punch(this.rollS, (kind === 'hit' || kind === 'guard' ? hitSide : kind === 'dash' ? -side : side || (Math.random() < 0.5 ? -1 : 1)) * K.roll * s);
     if (K.energy) {
       this.energy = Math.min(1, Math.max(this.energy, K.energy * s));
-      this.eCol = o.col || K.col || [255, 48, 72];
+      this.eCol = o.col || K.col || [255, 214, 120];
     }
     if (K.hurt) this.hurt = Math.min(1, Math.max(this.hurt, K.hurt * s));
     if (K.guard) this.guard = Math.min(1, Math.max(this.guard, K.guard * s));
@@ -98,7 +100,7 @@ const FPFX = {
     // speed lines: dashes, drawn slashes, the tether's zip, a sprint, a long fall
     const hs = Controller.hspeed(p);
     let want = clamp((hs - PC.RUN) / (PC.SPRINT - PC.RUN), 0, 1) * 0.3;
-    if (p.dashT > 0 || p.iaido) want = 1;
+    if (p.dashT > 0 || (p.iaido && !p.iaido.still)) want = 1;
     else if (p.zipping && p.zipping()) want = Math.max(want, 0.85);
     else if (!p.onGround && p.vel.y < -18) want = Math.max(want, clamp((-p.vel.y - 18) / 20, 0, 0.6));
     this.speed = damp(this.speed, want, want > this.speed ? 30 : 6, realDt);

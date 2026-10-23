@@ -224,7 +224,10 @@ Enemy.prototype.sniper = function (dt) {
       if (this.st < dur - 0.25) { this.trackAim(); this.turnToward(p.pos.x, p.pos.z, 12, dt); }
       if (this.st >= dur) {
         const a = this.aimDir, m = this.muzzle();
-        Game.projectiles.push(new Bolt({ x: m.x + a.x * 0.36, y: m.y + a.y * 0.36, z: m.z + a.z * 0.36 }, a, 47.3 * S.enemies.speed, this.dmg(), SNIPER_BOLT));
+        const shot = new Bolt({ x: m.x + a.x * 0.36, y: m.y + a.y * 0.36, z: m.z + a.z * 0.36 }, a, 47.3 * S.enemies.speed, this.dmg(), SNIPER_BOLT);
+        // a sniper round is no small bullet: it still knocks you off the tether
+        shot.big = true;
+        Game.projectiles.push(shot);
         Sound.play('bossGun', {}, m); Sound.play('enemyShoot', {}, m);
         FX.sparks(m, 8, a, 0.5, 7.3, 20, { c0: '#ffffff', c1: '#ff5a6a', c2: '#5a0c1a' });
         FX.light(m, '#ff3048', 4, 4, 0.1);

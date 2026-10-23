@@ -216,13 +216,21 @@ function crawlerModel() {
   return { bones, scale: 1, parts };
 }
 
-// The drone: a small hull with a lens at the front, rotors on two arms and a thruster underneath.
+// The drone: a small hull with a lens at the front, rotors on two arms and a thruster underneath. It flies
+// against the night sky, so it's painted light and carries lights: an amber band round the hull, red and
+// green nav lights on the arm tips, and a white strobe on top (render.js lifts its shading and it lights
+// what's round it).
 function droneModel() {
   const bones = [['body', null, 0, 0.42, 0], ['rotL', 'body', -0.55, 0.13, 0], ['rotR', 'body', 0.55, 0.13, 0]];
+  const lit = (size, at, color, tag) => ({ bone: 'body', size, at, color, glow: true, plain: true, tag });
   const parts = [
-    { bone: 'body', size: [0.62, 0.3, 0.5], at: [0, 0, 0], color: '#5a5a66' },
-    { bone: 'body', size: [0.5, 0.06, 0.42], at: [0, 0.18, 0], color: '#8a8a96' },
-    { bone: 'body', size: [0.5, 0.06, 0.42], at: [0, -0.18, 0], color: '#3a3a44' },
+    { bone: 'body', size: [0.62, 0.3, 0.5], at: [0, 0, 0], color: '#8a8c98' },
+    { bone: 'body', size: [0.5, 0.06, 0.42], at: [0, 0.18, 0], color: '#b4b6c2' },
+    { bone: 'body', size: [0.5, 0.06, 0.42], at: [0, -0.18, 0], color: '#4a4a56' },
+    lit([0.64, 0.035, 0.52], [0, 0.05, 0], '#ffb040', 'band'),
+    lit([0.06, 0.04, 0.06], [-0.6, 0.12, 0], '#ff3040', 'navL'),
+    lit([0.06, 0.04, 0.06], [0.6, 0.12, 0], '#40ff70', 'navR'),
+    lit([0.06, 0.03, 0.06], [0, 0.225, 0], '#ffffff', 'strobe'),
     { bone: 'body', size: [0.2, 0.14, 0.04], at: [0, 0.0, -0.265], color: '#3a3a44' },
     { bone: 'body', size: [0.14, 0.09, 0.03], at: [0, 0.0, -0.285], color: '#ffd040', glow: true, plain: true, tag: 'eye' },
     { bone: 'body', size: [0.16, 0.04, 0.16], at: [0, -0.23, 0.08], color: '#ff9030', glow: true, plain: true, tag: 'jet' },
@@ -237,7 +245,7 @@ function droneModel() {
       { bone: 'rot' + s, size: [0.07, 0.015, 0.72], at: [0, 0.05, 0], color: '#9a9aa6', plain: true },
     );
   }
-  return { bones, scale: 1, parts };
+  return { bones, scale: 1.2, parts };
 }
 
 // The cyborg swordsman from the concept sheets: charcoal plate armour with a pixel-noise finish, a red
@@ -591,6 +599,9 @@ const Poses = {
     const blink = e.state === 'tele' && ((e.st * 16) | 0) % 2;
     Rig.tint(r, 'eye', e.state === 'tele' || e.state === 'dive' ? (blink ? '#ffffff' : '#ff3030') : '#ffd040');
     Rig.tint(r, 'jet', ((e.t * 20) | 0) % 2 ? '#ff9030' : '#ffd080');
+    // the strobe flashes twice a second; the band burns red with the lens through a wind-up
+    Rig.tint(r, 'strobe', (e.t * 2) % 1 < 0.08 ? '#ffffff' : '#3a3a44');
+    Rig.tint(r, 'band', e.state === 'tele' || e.state === 'dive' ? '#ff4030' : '#ffb040');
   },
 };
 

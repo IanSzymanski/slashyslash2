@@ -136,6 +136,8 @@ const Render = {
       R.mat.opacity = e.fade;
       R.mat.depthWrite = e.fade > 0.99;
       this.feet(R.feet, p);
+      // drones fly in the dark over the lamps: a floor under their shading keeps them readable against the sky
+      if (e.type === 'drone') { const f = R.feet.value; f.setRGB(Math.max(f.r, 0.32), Math.max(f.g, 0.32), Math.max(f.b, 0.38)); }
     }
     for (const [e, R] of this.models) {
       if (seen.has(e)) continue;

@@ -391,6 +391,14 @@ const Sound = (() => {
       noise({ dur: 0.18, vol: 0.32, f0: 500, f1: 3000, q: 0.9 });
       crackle(0.15, 0.18);
     },
+    // the machine gun's barrels spinning up: a whir that climbs, with clicks that run together
+    gunSpin(p) {
+      const d = p.dur || 0.55;
+      tone({ type: 'sawtooth', f0: 110, f1: 620, dur: d, vol: 0.05, a: d * 0.4, slide: d });
+      tone({ type: 'square', f0: 55, f1: 310, dur: d, vol: 0.03, a: d * 0.4, slide: d });
+      noise({ dur: d, vol: 0.1, f0: 800, f1: 4200, q: 2, a: d * 0.7 });
+      for (let i = 0; i < 9; i++) tone({ type: 'square', f0: 2400, dur: 0.012, vol: 0.035, delay: d * (1 - Math.pow(1 - i / 9, 1.8)) });
+    },
     bossGun() {
       tone({ type: 'square', f0: 900, f1: 220, dur: 0.05, vol: 0.06 });
       noise({ dur: 0.05, vol: 0.2, f0: 2600, f1: 900, q: 1.2 });

@@ -3,12 +3,12 @@
 // that runs, boosts on its back thrusters and hovers, so it moves in ways the 2D one couldn't:
 //   Stance. In phase 1 it always zones: it holds a band of range, strafes, boosts away and tether-zips to new
 //   vantages (roof edges, balconies, the far side of the street), and only fights up close to cut you off it.
-//   In phase 2 it is either zoning or charging (closing in): keep away and it charges; crowd it or hurt it
-//   badly and it backs off to zone. Its thrusters burn hotter while it charges.
+//   In phase 2 it always presses in, and only throws blade waves or leaps on you when you try to get away.
+//   Its thrusters burn hotter while it charges.
 //   Dash chains. Thruster dashes come in chains of legs taken relative to you at the moment each starts:
-//   charging, it zigzags in (side, other side, then the cut), swings round your flank, or feints back before
-//   it comes; zoning, it dashes across your front and throws a blade wave from each new angle. Only a leg or a
-//   blow that attacks glints first, so it can be parried or dodged; repositioning boosts never glint.
+//   it zigzags in (side, other side, then the cut), swings round your flank, or feints back before it comes,
+//   and from far off takes long chains that cross the street in boosts. Only a leg or a blow that attacks
+//   glints first, so it can be parried or dodged; repositioning boosts never glint.
 // Phase 1 (above half health): shielded. It zones with a forearm gun (slash the bolts back: eight cracks break
 // the shield) and a shoulder beam it fires hovering, lobs a pulse grenade (tether it and kick it back to break
 // the shield at once), and when you get in its face it cuts and boosts away. At half health it throws you
@@ -47,6 +47,11 @@ const AEGIS_G = 60;
 const DIVE = { CHARGE: 0.95, HIGH: 16, TRACK: 0.6, FLASH: 0.3, SPEED: 90 };
 // tether zips: the line's flight time, top reeling speed, and range from you of the vantages it zips to
 const ZIP = { FIRE: 0.14, SPEED: 34, NEAR: 9, FAR: 15 };
+// the machine gun: wind-up (s, scaled by the telegraph setting), bolts per burst, seconds between them, and the
+// reach of each pattern in radians (a sweep's half-width, how far short a walk starts, a scatter's half-width)
+const GUN = { WIND: 0.55, SHOTS: 12, GAP: 0.075, SWEEP: 0.26, WALK: 0.2, SCATTER: 0.16 };
+// blade waves: speed in m/s and the tilt (radians) of the crescent about its line of flight
+const BLADE_WAVE = { SPEED: 38, TILT: Math.PI / 4 };
 // the kinds of box whose tops it zips onto
 const VANTAGE_KINDS = new Set(['building', 'container', 'car', 'overpass', 'girder', 'scaffold', 'frame', 'plat', 'stack', 'pile', 'machine', 'site', 'roof', 'escape', 'balcony']);
 
@@ -83,11 +88,6 @@ const CHAINS = {
   blitz: [['fwd'], ['side', 1, 50], ['side', -1, 50], ['fwd'], ['cut']],
   longZigzag: [['side', 1, 45], ['side', -1, 45], ['side', 1, 45], ['side', -1, 45], ['cut']],
   sweep: [['side', 1, 75], ['side', 1, 40], ['fwd'], ['side', -1, 60], ['cut']],
-  // zoning, phase 2: across your front, a wave from each new angle
-  crossfire: [['side', 1, 100], ['wave'], ['side', -1, 100], ['wave']],
-  strafe: [['side', 1, 95], ['side', 1, 95], ['wave']],
-  longStrafe: [['side', 1, 95], ['side', 1, 95], ['side', 1, 95], ['wave'], ['side', -1, 100], ['wave']],
-  retreat: [['back'], ['side', 1, 90], ['waveAir']],
   // phase 1, with you in its face: a cut to drive you back, then a boost out of reach
   shove: [['slash'], ['back'], ['side', 1, 110]],
   shoveCleave: [['cleave'], ['back'], ['back']],
@@ -207,7 +207,7 @@ class Rival extends Enemy {
     P.core = C.glow;
     P.lens = p2 ? C.off : a && a.kind === 'beam' ? (a.phase === 'fire' ? '#e0ecff' : ((this.t * 20) | 0) % 2 ? '#ffffff' : C.glow) : C.glow;
     P.gun = p2 ? C.off : a && a.kind === 'gun' ? '#9cc4ff' : C.glow;
-    P.muzzle = p2 ? C.off : a && a.kind === 'gun' && a.t >= this.tele(0.45) ? '#ffffff' : C.glow;
+    P.muzzle = p2 ? C.off : a && a.kind === 'gun' && a.t >= this.tele(GUN.WIND) ? '#ffffff' : C.glow;
     P.jet = this.mode === 'charge' ? '#9cc4ff' : C.glow;
     P.wire = p2 ? C.hi : C.wire;
     for (let i = 0; i < 3; i++) P['lim' + i] = p2 || (a && a.kind === 'enrage' && a.done['pop' + i]) ? C.K : C.G;
@@ -216,7 +216,7 @@ class Rival extends Enemy {
   windingUp() {
     const a = this.act;
     if (!a) return false;
-    return (a.kind === 'gun' && a.t < this.tele(0.45)) || (a.kind === 'melee' && a.phase === 'wind') ||
+    return (a.kind === 'gun' && a.t < this.tele(GUN.WIND)) || (a.kind === 'melee' && a.phase === 'wind') ||
       (a.kind === 'beam' && a.phase !== 'fire') || a.kind === 'grenade' || (a.kind === 'dive' && (a.phase === 'crouch' || a.phase === 'hang')) ||
       (a.kind === 'chain' && a.pause && a.glinted);
   }
@@ -447,26 +447,10 @@ class Rival extends Enemy {
   }
   aimFrom(o, c) { const dx = c.x - o.x, dy = c.y - o.y, dz = c.z - o.z, l = Math.hypot(dx, dy, dz) || 1; return { x: dx / l, y: dy / l, z: dz / l }; }
 
-  // ---------- stance: zoning or charging ----------
-  pickMode(p, d) {
-    // phase 1 always zones
-    if (this.phase === 1) { this.mode = 'zone'; this.modeT = 99; return; }
-    // keep away and it comes for you; crowd it, or hurt it badly, and it backs off to zone
-    let zone = 0.35;
-    if (this.farT > 4) zone -= 0.3;
-    if (this.closeT > 3) zone += 0.25;
-    if (this.hurtRecent > 50) zone += 0.2;
-    if (this.mode === 'zone') zone -= 0.1; else zone += 0.1;
-    const was = this.mode;
-    this.mode = chance(clamp(zone, 0.1, 0.9)) ? 'zone' : 'charge';
-    this.modeT = this.mode === 'zone' ? rand(5, 8.5) : rand(4, 6.5);
-    if (this.mode !== was) {
-      // the tell: its jets flare (no glint: glints are kept for blows that are coming)
-      const back = this.local(0, 1.9, -0.5);
-      FX.sparks(back, this.mode === 'charge' ? 14 : 6, { x: -fwdX(this.yaw), y: -0.5, z: -fwdZ(this.yaw) }, 0.8, 5.5, 12.7, AEGIS_SPARK);
-      Sound.play('dash', {}, this.center());
-    }
-  }
+  // ---------- stance ----------
+  // Phase 1 always zones (holding its range, boosting and zipping away); phase 2 always presses in, and only
+  // throws blade waves or leaps on you when you try to get away.
+  pickMode() { this.mode = this.phase === 1 ? 'zone' : 'charge'; this.modeT = 99; }
 
   // ---------- choosing what to do ----------
   chooseAct(p) {
@@ -474,12 +458,6 @@ class Rival extends Enemy {
     const d = distXZ(p.pos, this.pos), dy = p.pos.y - this.pos.y, near = d < 4.2 && Math.abs(dy) < 2.4;
     if (this.modeT <= 0) this.pickMode(p, d);
     if (this.phase === 2) {
-      // zoning with you in its face: usually it boosts back out and throws from range instead of trading blows
-      if (this.mode === 'zone' && near && this.cds.chain <= 0 && chance(0.65)) {
-        this.startChain(pick(['retreat', 'backstep']));
-        this.cds.chain = rand(1.8, 2.8);
-        return;
-      }
       if (this.cds.combo <= 0 && near) {
         // sometimes it opens with a guard and waits for you to swing into it
         if (d < 3.6 && this.cds.guard <= 0 && chance(0.3)) { this.raiseGuard(rand(1.3, 1.8), 'stance'); this.cds.guard = rand(5, 8); return; }
@@ -491,17 +469,16 @@ class Rival extends Enemy {
       if (!near && this.cds.closer <= 0 && Math.abs(dy) < 3.5) {
         this.cds.closer = rand(0.4, 0.8);
         const rage = this.rageK();
-        if (this.mode === 'charge') {
-          // from far off, long chains that cover the ground in boosts; the dive bomb only now and then
-          if (this.cds.chain <= 0 && d < 34) {
-            this.startChain(pick(d > 12 ? ['blitz', 'longZigzag', 'sweep', 'zigzag3'] : rage > 0.5 ? ['zigzag', 'zigzag3', 'flank', 'feint', 'flank'] : ['zigzag', 'flank', 'feint', 'straight']));
-            this.cds.chain = rand(2.4, 3.6) * this.rageGap();
-            return;
-          }
-          if (this.cds.dive <= 0 && d > 6 && chance(0.2)) { this.startDive(p); this.cds.dive = rand(7, 10); return; }
-        } else {
-          if (this.cds.wave <= 0 && d > 6) { this.startChain(pick(d < 9 ? ['retreat', 'crossfire'] : d > 14 ? ['longStrafe', 'crossfire', 'strafe'] : ['crossfire', 'strafe', 'retreat'])); this.cds.wave = rand(3.4, 5.2) * this.rageGap(); return; }
-          if (this.cds.dive <= 0 && d > 7 && chance(0.2)) { this.startDive(p); this.cds.dive = rand(7, 10); return; }
+        // you're getting away: it throws a blade wave after you or leaps on you with the dive bomb
+        if (this.escaping(p, d)) {
+          if (this.cds.wave <= 0 && d > 6) { this.startMove(!this.onGround || chance(0.3) ? 'waveAir' : 'wave', null); this.cds.wave = rand(2.2, 3.4) * this.rageGap(); return; }
+          if (this.cds.dive <= 0 && d > 8 && chance(0.5)) { this.startDive(p); this.cds.dive = rand(6, 9); return; }
+        }
+        // otherwise it comes for you: long chains that cover the ground in boosts from far off, short ones near
+        if (this.cds.chain <= 0 && d < 34) {
+          this.startChain(pick(d > 12 ? ['blitz', 'longZigzag', 'sweep', 'zigzag3'] : rage > 0.5 ? ['zigzag', 'zigzag3', 'flank', 'feint', 'flank'] : ['zigzag', 'flank', 'feint', 'straight']));
+          this.cds.chain = rand(2.4, 3.6) * this.rageGap();
+          return;
         }
       }
       return;
@@ -525,6 +502,12 @@ class Rival extends Enemy {
     if (this.cds.gun <= 0 && this.blindT <= 0 && d < 30) { this.startGun(); return; }
     // nothing ready: it moves to another vantage now and then
     if (this.cds.zip <= 0 && this.startZip(p)) return;
+  }
+  // you're trying to get away: running off from it, or kept out at range for a while
+  escaping(p, d) {
+    if (d < 8) return false;
+    const ux = (p.pos.x - this.pos.x) / d, uz = (p.pos.z - this.pos.z) / d;
+    return p.vel.x * ux + p.vel.z * uz > 4.5 || this.farT > 0.8;
   }
   clearShot(from) {
     const c = Game.player.chest(), dx = c.x - from.x, dy = c.y - from.y, dz = c.z - from.z, d = Math.hypot(dx, dy, dz) || 1;
@@ -766,8 +749,10 @@ class Rival extends Enemy {
     const wasGround = this.onGround, vy0 = v.y;
     World.moveBody(this, dt, { step: this.dash || this.onGround ? 1.0 : 0 });
     if (this.onGround && !wasGround && vy0 < -14 && !this.leap) this.landingBurst(0.25);
-    // it never stands inside you: it gives way round you (a dash or a cut passes through)
-    if (!this.dash && !p.dead && p.pos.y < this.pos.y + this.h && p.pos.y + p.h > this.pos.y) {
+    // it never stands inside you: it gives way round you. Your dashes and drawn cuts pass straight through it
+    // (and so does its own dash or cut through you), so it holds its ground while you go by.
+    const passing = p.dashT > 0 || p.dashEndT > 0 || !!p.iaido;
+    if (!this.dash && !passing && !p.dead && p.pos.y < this.pos.y + this.h && p.pos.y + p.h > this.pos.y) {
       const dx = this.pos.x - p.pos.x, dz = this.pos.z - p.pos.z, d = Math.hypot(dx, dz), R = this.r + p.r + 0.05;
       if (d < R) {
         const ux = d > 1e-3 ? dx / d : -fwdX(this.yaw), uz = d > 1e-3 ? dz / d : -fwdZ(this.yaw);
@@ -1017,11 +1002,19 @@ class Rival extends Enemy {
   }
   // A wide crescent of energy thrown off the swing along the ground at where you stand; the air version flies
   // at head height.
+  // A crescent of energy thrown off the swing, tilted 45 degrees one way or the other, at where you'll be when it
+  // gets there (it leads your run); the air version flies at head height.
   fireWave(m) {
-    const p = Game.player, c = this.chest(), u = flat(p.pos.x - this.pos.x, p.pos.z - this.pos.z);
-    const base = m.air ? Math.max(this.pos.y, p.pos.y) + 1.9 : this.pos.y + 0.7;
+    const p = Game.player, c = this.chest(), V = BLADE_WAVE.SPEED * Math.sqrt(S.enemies.speed);
+    let tx = p.pos.x, tz = p.pos.z;
+    for (let i = 0; i < 2; i++) {
+      const t = Math.min(0.9, distXZ({ x: tx, z: tz }, this.pos) / V);
+      tx = p.pos.x + p.vel.x * t; tz = p.pos.z + p.vel.z * t;
+    }
+    const u = flat(tx - this.pos.x, tz - this.pos.z);
+    const base = m.air ? Math.max(this.pos.y, p.pos.y) + 1.9 : this.pos.y + 1.0;
     const at = { x: this.pos.x + u.x * 1.2, y: base, z: this.pos.z + u.z * 1.2 };
-    Game.projectiles.push(new BladeWave(at, u, 12 * this.dmgMul, this, !!m.air));
+    Game.projectiles.push(new BladeWave(at, u, 12 * this.dmgMul, this, !!m.air, (chance(0.5) ? 1 : -1) * BLADE_WAVE.TILT));
     FX.light(at, '#4a8aff', 5, 8, 0.2);
     Sound.play('heavySwing', {}, c);
   }
@@ -1286,28 +1279,54 @@ class Rival extends Enemy {
   }
 
   // ---------- phase 1: gun, beam, grenade ----------
+  // The forearm machine gun: its barrels spin up, a fan of tracer light opens over the area it will spray,
+  // then a burst of GUN.SHOTS bolts that follows a pattern round you rather than a straight line at you:
+  //   sweep: across you from one side to the other; walk: in from the street in front of you and up onto you;
+  //   scatter: a wide cone of loose fire.
   startGun() {
-    this.act = { kind: 'gun', t: 0, shots: 0, next: 0, aimDir: { x: this.aimDir.x, y: this.aimDir.y, z: this.aimDir.z } };
+    const pattern = pick(['sweep', 'sweep', 'walk', 'scatter']);
+    this.act = { kind: 'gun', t: 0, shots: 0, next: 0, aimDir: { x: this.aimDir.x, y: this.aimDir.y, z: this.aimDir.z }, pattern, side: chance(0.5) ? 1 : -1, spin: 0 };
     this.bladeWant = false;
-    Sound.play('enemyWindup', { pm: 0.9 }, this.center());
+    Sound.play('gunSpin', { dur: this.tele(GUN.WIND) }, this.muzzle());
+  }
+  // where in its pattern shot i of the burst goes, as yaw and pitch offsets (radians) from the aim at you
+  gunOffset(a, i) {
+    const k = i / Math.max(1, GUN.SHOTS - 1);
+    if (a.pattern === 'sweep') return { yaw: a.side * lerp(-GUN.SWEEP, GUN.SWEEP, k) + rand(-0.03, 0.03), pitch: rand(-0.04, 0.04) + Math.sin(k * 9) * 0.02 };
+    if (a.pattern === 'walk') return { yaw: rand(-0.06, 0.06) + Math.sin(k * 7) * 0.05 * a.side, pitch: lerp(-GUN.WALK, 0.03, Math.min(1, k * 1.4)) };
+    return { yaw: rand(-GUN.SCATTER, GUN.SCATTER), pitch: rand(-0.08, 0.1) };
+  }
+  // the extent of the pattern, for the fan the views draw: [yaw0, yaw1, pitch0, pitch1]
+  gunFan(a) {
+    if (a.pattern === 'sweep') return [-GUN.SWEEP, GUN.SWEEP, -0.05, 0.05];
+    if (a.pattern === 'walk') return [-0.1, 0.1, -GUN.WALK, 0.04];
+    return [-GUN.SCATTER, GUN.SCATTER, -0.08, 0.1];
   }
   runGun(dt, a, p) {
-    const tele = this.tele(0.45), want = this.aimFrom(this.shoulderR(), p.chest());
-    if (a.t < tele) a.aimDir = want;
-    else {
+    const tele = this.tele(GUN.WIND), want = this.aimFrom(this.shoulderR(), p.chest());
+    a.spin = Math.min(1, a.t / tele);
+    if (a.t < tele) {
+      a.aimDir = want;
+      // the barrels spinning up: sparks flung round the muzzle, faster as it nears
+      if (Math.random() < 0.3 + 0.6 * a.spin) {
+        const m = this.muzzle(), ang = rand(0, TAU), f = a.aimDir, rx = -f.z, rz = f.x, rl = Math.hypot(rx, rz) || 1;
+        const t = { x: (rx / rl) * Math.cos(ang), y: Math.sin(ang), z: (rz / rl) * Math.cos(ang) };
+        FX.sparks(m, 1, t, 0.3, 3 + 6 * a.spin, 6 + 8 * a.spin, Object.assign({ g: 0, life: 0.5 }, AEGIS_SPARK));
+      }
+    } else {
       a.aimDir = turnDir(a.aimDir, want, 2.4 * dt);
       a.next -= dt;
-      if (a.next <= 0 && a.shots < 8) {
-        a.next = 0.09; a.shots++;
-        const m = this.muzzle(), s = 0.035, d = a.aimDir;
-        const dir = { x: d.x + rand(-s, s), y: d.y + rand(-s, s), z: d.z + rand(-s, s) }, l = Math.hypot(dir.x, dir.y, dir.z);
-        dir.x /= l; dir.y /= l; dir.z /= l;
+      if (a.next <= 0 && a.shots < GUN.SHOTS) {
+        a.next = GUN.GAP; a.shots++;
+        const m = this.muzzle(), o = this.gunOffset(a, a.shots - 1), d = a.aimDir;
+        const yaw = yawOf(d.x, d.z) + o.yaw, pitch = clamp(Math.asin(clamp(d.y, -1, 1)) + o.pitch, -1.2, 1.2);
+        const dir = { x: fwdX(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: fwdZ(yaw) * Math.cos(pitch) };
         Game.projectiles.push(new Bolt({ x: m.x + dir.x * 0.3, y: m.y + dir.y * 0.3, z: m.z + dir.z * 0.3 }, dir, 26 * S.enemies.speed, this.def.dmg * this.dmgMul, AEGIS_BOLT));
         Sound.play('bossGun', {}, m);
         FX.sparks(m, 3, dir, 0.5, 5.5, 14.5, AEGIS_SPARK);
         FX.light(m, '#4a8aff', 2.5, 4, 0.06);
       }
-      if (a.shots >= 8 && a.next <= -0.15) { this.act = null; this.cds.gun = rand(2.2, 3.4); }
+      if (a.shots >= GUN.SHOTS && a.next <= -0.15) { this.act = null; this.cds.gun = rand(2.4, 3.6); }
     }
     this.aimDir = a.aimDir;
     this.faceYaw = yawOf(a.aimDir.x, a.aimDir.z) + 0.25; this.turnRate = 10;
@@ -1754,15 +1773,30 @@ class Rival extends Enemy {
 // the air). Jump it, slide under the high one, or dash through it; a parry breaks it (it is never sent back) and a
 // slash passes through.
 class BladeWave {
-  constructor(pos, dir, dmg, owner, air) {
+  // roll: its tilt about its line of flight (radians, positive raises its right end)
+  constructor(pos, dir, dmg, owner, air, roll = 0) {
     this.kind = 'bladewave';
-    this.pos = { x: pos.x, y: pos.y, z: pos.z }; this.dir = { x: dir.x, z: dir.z };
-    this.speed = 24 * Math.sqrt(S.enemies.speed); this.dmg = dmg; this.owner = owner; this.air = air;
+    this.pos = { x: pos.x, y: pos.y, z: pos.z }; this.dir = { x: dir.x, z: dir.z }; this.roll = roll;
+    this.speed = BLADE_WAVE.SPEED * Math.sqrt(S.enemies.speed); this.dmg = dmg; this.owner = owner; this.air = air;
     // half its width across its path (wide, so jumping, dashing through or parrying stay the answers rather than
     // a step to the side), and half its height
     this.W = 4.5; this.H = air ? 0.55 : 0.65;
     this.hostile = true; this.life = 1.4; this.dead = false; this.parryOnly = true; this.t = 0;
     this.vel = { x: this.dir.x * this.speed, y: 0, z: this.dir.z * this.speed };
+  }
+  // a point on its band: u metres along it from the middle, v across it
+  pointOn(u, v) {
+    const c = Math.cos(this.roll), s = Math.sin(this.roll), side = u * c - v * s, up = u * s + v * c;
+    return { x: this.pos.x - this.dir.z * side, y: this.pos.y + up, z: this.pos.z + this.dir.x * side };
+  }
+  // whether its band, tilted by roll, crosses a body side metres to the side of its middle
+  crosses(side, P) {
+    const c = Math.cos(this.roll), s = Math.sin(this.roll);
+    for (const k of [0.05, 0.35, 0.65, 0.95]) {
+      const h = P.pos.y + P.h * k - this.pos.y, u = side * c + h * s, v = -side * s + h * c;
+      if (Math.abs(u) < this.W + P.r * 0.5 && Math.abs(v) < this.H + P.r * 0.5) return true;
+    }
+    return false;
   }
   // a parry breaks it on the blade; it can't be sent back
   reflect() {
@@ -1773,7 +1807,7 @@ class BladeWave {
   fizzle() {
     this.dead = true;
     for (let i = 0; i < 8; i++) {
-      const s = rand(-this.W, this.W), q = { x: this.pos.x - this.dir.z * s, y: this.pos.y + rand(-this.H, this.H), z: this.pos.z + this.dir.x * s };
+      const q = this.pointOn(rand(-this.W, this.W), rand(-this.H, this.H));
       FX.sparks(q, 1, null, TAU, 2.7, 11, AEGIS_SPARK);
     }
   }
@@ -1788,15 +1822,12 @@ class BladeWave {
       const P = Game.player;
       if (P.dead) continue;
       const rx = P.pos.x - this.pos.x, rz = P.pos.z - this.pos.z, along = rx * d.x + rz * d.z, side = rx * px + rz * pz;
-      if (Math.abs(along) < 0.45 + P.r && Math.abs(side) < this.W + P.r * 0.5 && P.pos.y < this.pos.y + this.H && P.pos.y + P.h > this.pos.y - this.H) {
+      if (Math.abs(along) < 0.45 + P.r && this.crosses(side, P)) {
         const r = P.takeHit({ dmg: this.dmg, from: { x: this.pos.x - d.x, y: this.pos.y, z: this.pos.z - d.z }, kind: 'projectile', proj: this, knock: 18 });
         if (r === 'hit' || r === 'immune' || r === 'parried') { if (!this.dead) this.fizzle(); return; }
       }
     }
-    if (Math.random() < 0.6) {
-      const s = rand(-this.W, this.W);
-      FX.sparks({ x: this.pos.x - d.z * s, y: this.pos.y + rand(-this.H, this.H), z: this.pos.z + d.x * s }, 1, { x: -d.x, y: 0, z: -d.z }, 0.4, 1.8, 5.5, Object.assign({ g: 0 }, AEGIS_SPARK));
-    }
+    if (Math.random() < 0.6) FX.sparks(this.pointOn(rand(-this.W, this.W), rand(-this.H, this.H)), 1, { x: -d.x, y: 0, z: -d.z }, 0.4, 1.8, 5.5, Object.assign({ g: 0 }, AEGIS_SPARK));
   }
 }
 
