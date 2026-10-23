@@ -14,7 +14,7 @@ const Input = {
   // cutscenes lock every game action except pause
   locked: false,
   // mouse look: deltas pile up while the pointer is locked and main.js takes them once per rendered frame
-  lockRequired: false, pointerLocked: false, lookDX: 0, lookDY: 0, onLockChange: null,
+  lockRequired: false, pointerLocked: false, lockPending: false, lookDX: 0, lookDY: 0, onLockChange: null,
   // rawMovement: false once raw input was refused, so later locks skip asking; recent: average event size
   rawMovement: null, recentX: 0, recentY: 0,
   // scroll wheel notches (positive away from you), taken once per rendered frame
@@ -56,12 +56,7 @@ const Input = {
       else updatePos(e);
     });
     this.lockRequired = typeof canvas.requestPointerLock === 'function';
-    document.addEventListener('pointerlockchange', () => {
-      const was = this.pointerLocked;
-      this.pointerLocked = document.pointerLockElement === canvas;
-      if (!this.pointerLocked) this.lookDX = this.lookDY = 0;
-      if (was !== this.pointerLocked && this.onLockChange) this.onLockChange(this.pointerLocked);
-    });
+    document.addEventListener('pointerlockchange', () => this.syncLock());
     canvas.addEventListener('mouseenter', () => (this.onCanvas = true));
     canvas.addEventListener('mouseleave', () => (this.onCanvas = false));
     window.addEventListener('mousedown', (e) => {
@@ -119,12 +114,14 @@ const Input = {
   // re-lock for about a second after Esc, so callers must handle false. Asks for raw input first and
   // falls back to a plain lock where it isn't supported.
   requestLock() {
+    this.syncLock(true);
     if (!this.lockRequired || this.pointerLocked) return Promise.resolve(true);
     return new Promise((resolve) => {
       let done = false, timer = 0;
+      this.lockPending = true;
       const finish = (ok) => {
         if (done) return;
-        done = true; clearTimeout(timer);
+        done = true; clearTimeout(timer); this.lockPending = false;
         document.removeEventListener('pointerlockchange', onChange);
         document.removeEventListener('pointerlockerror', onError);
         resolve(ok);
@@ -151,6 +148,17 @@ const Input = {
     });
   },
   releaseLock() { if (this.canvas && document.pointerLockElement === this.canvas) document.exitPointerLock(); },
+  // The lock as the browser has it, checked every frame as well as on its events: a browser or system hotkey
+  // can take the lock without the event reaching the page, which used to leave the game thinking it still
+  // had the mouse (cursor showing, clicks never asking for the lock again).
+  // quiet: bring the flag up to date without the change callback (a lock request is about to settle it anyway)
+  syncLock(quiet = false) {
+    const locked = !!this.canvas && document.pointerLockElement === this.canvas;
+    if (locked === this.pointerLocked) return;
+    this.pointerLocked = locked;
+    if (!locked) this.lookDX = this.lookDY = 0;
+    if (!quiet && this.onLockChange) this.onLockChange(locked);
+  },
   takeWheel() { const w = this.wheel; this.wheel = 0; return w; },
   takeLook() {
     const d = { x: this.lookDX, y: this.lookDY };

@@ -121,6 +121,24 @@ async function run(browser, file, errors) {
     await UI.startRun('test');
     ok(Game.state === 'paused' && !document.getElementById('lock-hint').hidden, 'refused pointer lock pauses with a hint');
     delete Input.canvas.requestPointerLock;
+    // a lock lost without the browser telling the page (a hotkey can do that) is still noticed: the run pauses
+    // within a moment, and Resume takes the lock back
+    {
+      let fake = null;
+      Object.defineProperty(document, 'pointerLockElement', { get: () => fake, configurable: true });
+      Input.canvas.requestPointerLock = () => { fake = Input.canvas; setTimeout(() => document.dispatchEvent(new Event('pointerlockchange')), 0); return Promise.resolve(); };
+      Game.toMenu();
+      await UI.startRun('test');
+      const ran = Game.state === 'playing' && Input.pointerLocked;
+      fake = null;
+      await new Promise((r) => setTimeout(r, 800));
+      const paused = Game.state === 'paused' && !!UI.openPanel();
+      await UI.resumeGame();
+      ok(ran && paused && Game.state === 'playing' && Input.pointerLocked, `a lock lost without its event pauses the run, and Resume locks again (${ran ? 'ran' : 'did not run'}, ${paused ? 'paused' : 'kept playing'})`);
+      delete Input.canvas.requestPointerLock;
+      delete document.pointerLockElement;
+      Game.toMenu(); Input.syncLock(true);
+    }
     Input.lockRequired = false;
 
     // mouse look drops a lone recentring jump mid-turn but keeps a fast flick whole
