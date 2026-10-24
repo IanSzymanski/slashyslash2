@@ -672,19 +672,28 @@ const Sound = (() => {
       noise({ dur: 0.04, vol: 0.12, f0: 3000, q: 2, delay: 0.16 });
     },
     dryFire() { tone({ type: 'square', f0: 900, dur: 0.02, vol: 0.04 }); },
-    // the housing starts to reconfigure, and locks into its new shape
+    // the housing starts to reconfigure
     modeCharge() { tone({ type: 'sawtooth', f0: 90, f1: 240, dur: 0.3, vol: 0.05 }); crackle(0.25, 0.12); },
-    modeSwitch(p) {
-      if (p.blade) {
-        tone({ type: 'sawtooth', f0: 180, f1: 1100, dur: 0.22, vol: 0.07, rev: 0.4 });
-        noise({ dur: 0.2, vol: 0.2, f0: 1200, f1: 5200, q: 1.5 });
-        tone({ type: 'sine', f0: 2200, f1: 2600, dur: 0.3, vol: 0.05, delay: 0.12, rev: 0.4 });
-      } else {
-        tone({ type: 'sawtooth', f0: 900, f1: 160, dur: 0.2, vol: 0.06 });
-        for (let i = 0; i < 5; i++) tone({ type: 'square', f0: 1600 + i * 150, dur: 0.015, vol: 0.04, delay: 0.04 * i });
-      }
+    // back into gunner mode (melee's is bladeIgnite)
+    modeSwitch() {
+      tone({ type: 'sawtooth', f0: 900, f1: 160, dur: 0.2, vol: 0.06 });
+      for (let i = 0; i < 5; i++) tone({ type: 'square', f0: 1600 + i * 150, dur: 0.015, vol: 0.04, delay: 0.04 * i });
       tone({ type: 'sine', f0: 120, f1: 50, dur: 0.18, vol: 0.4, delay: 0.05 });
       noise({ dur: 0.05, vol: 0.2, type: 'highpass', f0: 3000, delay: 0.05 });
+    },
+    // into melee: the housing locks with a clank, a sub drop, a tearing rush up into the blade's hum, crackle,
+    // and a bright chord ringing out over it
+    bladeIgnite() {
+      tone({ type: 'sine', f0: 180, f1: 28, dur: 0.8, vol: 1.0 });
+      tone({ type: 'square', f0: 140, f1: 60, dur: 0.1, vol: 0.12 });
+      noise({ dur: 0.08, vol: 0.4, type: 'highpass', f0: 2500 });
+      noise({ dur: 0.55, vol: 0.6, f0: 500, f1: 7000, q: 0.8, rev: 0.5 });
+      noise({ dur: 0.7, vol: 0.5, type: 'lowpass', f0: 4000, f1: 100, delay: 0.04, rev: 0.4 });
+      tone({ type: 'sawtooth', f0: 90, f1: 1200, dur: 0.3, vol: 0.1, rev: 0.5 });
+      tone({ type: 'sawtooth', f0: 92, f1: 1180, dur: 0.3, vol: 0.06, detune: 15 });
+      for (const [f, d] of [[1318, 0.1], [1976, 0.13], [2637, 0.16]]) tone({ type: 'triangle', f0: f, f1: f * 1.01, dur: 1.1, vol: 0.05, delay: d, rev: 0.7 });
+      tone({ type: 'sawtooth', f0: 110, f1: 116, dur: 0.9, vol: 0.05, a: 0.06, delay: 0.12, rev: 0.4 });
+      crackle(0.6, 0.45, { f: 700 });
     },
     // the back jets firing
     jetBurst(p) {

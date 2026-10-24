@@ -56,6 +56,8 @@ const COUNTER = { CHARGE: 0.9, HOLD: 0.55, TIERS: 3 };
 const RONIN_COL = {
   main: '#ff3048', ring: '#ff3a52', hot: '#ff7a3a', ghost: '#ff2a48', elec: { outer: '#ff2a44', core: '#ffffff' },
   spark: { c0: '#ffffff', c1: '#ff8a9a', c2: '#a01828' }, stance: 'sheathe', lower: 'unsheathe',
+  // the tether: its line, the zip's afterimages, the hook's light, and the zip strike's trail (elec and spark unset: FX defaults)
+  tether: { line: '#ff2a44', core: '#ffe8ee', ghost: '#ff2a48', light: '#ff3048', pal: 'red' },
 };
 
 class Player {
@@ -1263,7 +1265,7 @@ class Player {
     this.yaw = yawOf(dx, dz);
     this.aimHold = PC.FACE_AIM;
     Sound.play('tetherFire');
-    FX.sparks(hand, 4, { x: dx / l, y: dy / l, z: dz / l }, 0.8, 5.5, 16.4);
+    FX.sparks(hand, 4, { x: dx / l, y: dy / l, z: dz / l }, 0.8, 5.5, 16.4, this.fxCol.tether.spark);
   }
   releaseTether() {
     const T = this.tether;
@@ -1280,10 +1282,11 @@ class Player {
     const T = this.tether;
     T.phase = 'attached'; T.t = 0; T.target = target; T.kind = kind;
     if (target) { T.off = { x: T.pos.x - target.pos.x, y: T.pos.y - target.pos.y, z: T.pos.z - target.pos.z }; target.tethered = true; }
+    const C = this.fxCol.tether;
     Sound.play('tetherAttach', {}, T.pos);
-    FX.sparks(T.pos, 8, null, TAU, 3.6, 13.6);
-    FX.elec(T.pos, 0.9, 3);
-    FX.light(T.pos, '#ff3048', 3, 3, 0.2);
+    FX.sparks(T.pos, 8, null, TAU, 3.6, 13.6, C.spark);
+    FX.elec(T.pos, 0.9, 3, C.elec);
+    FX.light(T.pos, C.light, 3, 3, 0.2);
     if (kind === 'grenade') { this.beginRebound(target); return; }
     if (kind === 'object') {
       T.mode = 'tow';
@@ -1336,7 +1339,7 @@ class Player {
         if (T.target.dead) { this.releaseTether(); return; }
         if (T.kind === 'object' || T.kind === 'grenade') { const c = T.target.center(); T.pos = { x: c.x, y: c.y, z: c.z }; }
         else T.pos = { x: T.target.pos.x + T.off.x, y: T.target.pos.y + T.off.y, z: T.target.pos.z + T.off.z };
-        if (T.target.isEnemy && Math.random() < 0.35) FX.elec(T.pos, 0.8, 1);
+        if (T.target.isEnemy && Math.random() < 0.35) FX.elec(T.pos, 0.8, 1, this.fxCol.tether.elec);
       }
       if (T.mode === 'tow') {
         T.target.towTo(hand, dt, this);
@@ -1370,7 +1373,7 @@ class Player {
       o.throwAt({ x: dx / l, y: dy / l, z: dz / l }, this);
     }
     Sound.play('throw');
-    FX.ring(this.hand(), 0.15, 1.3, 0.18, { flat: false });
+    FX.ring(this.hand(), 0.15, 1.3, 0.18, { flat: false, c: this.fxCol.ring });
     Game.shake(0.1);
     this.releaseTether();
   }
@@ -1430,12 +1433,12 @@ class Player {
     T.spd = Math.min(this.ult ? 89 : PC.ZIP_SPEED, T.spd + PC.ZIP_ACCEL * dt);
     this.vel.x = (dx / d) * T.spd; this.vel.y = (dy / d) * T.spd; this.vel.z = (dz / d) * T.spd;
     this.ghostT -= dt;
-    if (this.ghostT <= 0) { this.ghostT = 0.03; this.makeGhost('#ff2a48', 0.2, 0.4); }
+    if (this.ghostT <= 0) { this.ghostT = 0.03; this.makeGhost(this.fxCol.tether.ghost, 0.2, 0.4); }
     if (!Input.isDown('tether')) { this.releaseTether(); this.vel.x *= 1.05; this.vel.y *= 1.05; this.vel.z *= 1.05; return; }
     if (d < (T.kind === 'enemy' ? 1.36 : 0.9)) this.arriveZip();
   }
   arriveZip() {
-    const T = this.tether;
+    const T = this.tether, C = this.fxCol.tether;
     if (T.kind === 'enemy' && T.target && !T.target.dead) {
       const e = T.target, ec = e.center(), c = this.chest();
       const hx = ec.x - c.x, hz = ec.z - c.z, hl = Math.hypot(hx, hz) || 1, ux = hx / hl, uz = hz / hl;
@@ -1448,15 +1451,15 @@ class Player {
           hurtEnemy(o, 30, { kv: { x: (u.x / l) * 18.2, y: 13.6, z: (u.z / l) * 18.2 }, dir: { x: u.x / l, y: 0.4, z: u.z / l }, cause: 'tether', stagger: 0.6 });
         }
         if (!e.dead) hurtEnemy(e, 30, { cause: 'tether', noKnock: true, dir: { x: 0, y: 1, z: 0 } });
-        FX.ring(ec, 0.3, 3.6, 0.3, { c: '#ff3048', flat: false });
-        FX.elec(ec, 2.7, 8);
+        FX.ring(ec, 0.3, 3.6, 0.3, { c: C.light, flat: false });
+        FX.elec(ec, 2.7, 8, C.elec);
         Sound.play('pulse', {}, ec);
       } else if (dealt > 0 && T.paid && this.shieldOffT <= 0) {
         this.shield = Math.min(PC.MAX_SHIELD, this.shield + PC.TETHER_COST);
         FX.text('+' + PC.TETHER_COST, { x: this.pos.x, y: this.pos.y + 3.2, z: this.pos.z }, { c: '#5ad8ff', dur: 0.7, vy: 1.6 });
       }
       this.yaw = yawOf(ux, uz);
-      FX.swoosh({ follow: this, oy: this.chestH(), yaw: this.yaw, tilt: 0.3, r: 2.7, span: 3.2, dir: 1, sweep: 0.06, dur: 0.2, thick: 0.35 });
+      FX.swoosh({ follow: this, oy: this.chestH(), yaw: this.yaw, tilt: 0.3, r: 2.7, span: 3.2, dir: 1, sweep: 0.06, dur: 0.2, thick: 0.35, pal: C.pal });
       Sound.play('swing', { stage: 1 });
       this.vel.y = 20.9; this.vel.x *= 0.25; this.vel.z *= 0.25;
     } else if (T.kind === 'anchor' && T.anchor) {
