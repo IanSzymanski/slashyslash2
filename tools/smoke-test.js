@@ -945,6 +945,17 @@ async function run(browser, file, errors) {
       p.shield = PC.MAX_SHIELD; T.press('Space'); T.frame(14); T.release('Space');
       T.press('KeyE'); const y0 = p.pos.y; T.frame(60); const y1 = p.pos.y; T.release('KeyE'); T.frame(10);
       ok(y0 > 1 && y1 > y0 - 0.5, `firing the beam in the air hovers (${y0.toFixed(1)} m to ${y1.toFixed(1)} m)`);
+      // hanging on it, a strafe drifts it a little across the beam, and the beam pushes it back
+      p = aegis(); T.frame(5);
+      T.aimAt({ x: p.pos.x + 25, y: p.pos.y + 4, z: p.pos.z });
+      T.press('Space'); T.frame(14); T.release('Space');
+      T.press('KeyE'); T.frame(Math.ceil(AP.BEAM_CHARGE * 60) + 3);
+      const a = { x: p.pos.x, z: p.pos.z }, d = p.beamAct && p.beamAct.dir, dh = d ? Math.hypot(d.x, d.z) || 1 : 1;
+      T.press('KeyD'); T.frame(60); T.release('KeyD');
+      const air = !p.onGround, b = { x: p.pos.x - a.x, z: p.pos.z - a.z };
+      T.release('KeyE'); T.frame(10);
+      const along = d ? (b.x * d.x + b.z * d.z) / dh : 0, side = d ? Math.abs(b.x * -d.z + b.z * d.x) / dh : 0;
+      ok(d && air && side > 1.5 && side < 4 && along < -0.6 && along > -3, `hovering on the beam, a strafe drifts it across the beam (${side.toFixed(2)} m in a second) while the beam pushes it back (${(-along).toFixed(2)} m)`);
     }
     // F held a full second switches modes; letting go early or taking a hit cancels it
     {
@@ -954,8 +965,17 @@ async function run(browser, file, errors) {
       T.press('KeyF'); T.frame(20); p.iframes = 0; p.takeHit({ dmg: 5, from: { x: p.pos.x + 2, y: p.pos.y + 1, z: p.pos.z } }); T.frame(60); T.release('KeyF');
       const hit = p.mode;
       T.frame(60);
-      T.press('KeyF'); T.frame(64); T.release('KeyF'); T.frame(2);
-      ok(early === 'gun' && hit === 'gun' && p.mode === 'blade', `holding F for a second switches to melee; half a second (${early}) or a hit in the middle (${hit}) doesn't`);
+      // (the HUD fades a flash every drawn frame, so the request is what's checked)
+      const flash0 = FX.flash;
+      let flashed = 0;
+      FX.flash = (c, a) => { flashed = Math.max(flashed, a); flash0.call(FX, c, a); };
+      FX.ghosts.length = 0;
+      T.press('KeyF');
+      for (let i = 0; i < 70 && p.mode !== 'blade'; i++) T.frame(1);
+      FX.flash = flash0;
+      const ignite = flashed >= 0.3 && p.bladeOut > 0.9 && FX.ghosts.length > 0;
+      T.frame(4); T.release('KeyF'); T.frame(2);
+      ok(early === 'gun' && hit === 'gun' && p.mode === 'blade' && ignite, `holding F for a second switches to melee with the blade igniting in a flash (${ignite}); half a second (${early}) or a hit in the middle (${hit}) doesn't`);
     }
     // melee: a swipe, a backhand and a thrust, each stepping in
     {
@@ -996,13 +1016,42 @@ async function run(browser, file, errors) {
       ok(Game.stats.parries === parries && p.shield < PC.MAX_SHIELD - AP.BEAM_COST, 'in gunner mode E is the beam, not a parry: the blow lands');
       Game.enemies = []; Game.hazards = []; Game.projectiles = [];
     }
-    // a double jump lights the jets and they hold it near the top for over a second
+    // holding jump in the air lights the jets and holds it near the top, off a double jump or a single jump; a
+    // tapped double jump doesn't hover
     {
-      p = aegis(); T.frame(5);
-      T.press('Space'); T.frame(16); T.release('Space'); T.frame(3); T.press('Space'); T.frame(12); T.release('Space');
-      let top = 0, held = 0;
-      for (let i = 0; i < 200; i++) { T.frame(1); top = Math.max(top, p.pos.y); if (p.hover && p.pos.y > top - 1) held++; }
-      ok(held > 72, `after a double jump it hovers on its jets (${(held / 60).toFixed(2)} s within a metre of the top)`);
+      const hoverTime = (go) => {
+        p = aegis(); T.frame(5);
+        go();
+        let top = 0, held = 0;
+        for (let i = 0; i < 260; i++) { T.frame(1); top = Math.max(top, p.pos.y); if (p.hover && p.pos.y > top - 1.6) held++; }
+        T.release('Space'); T.frame(90);
+        return held / 60;
+      };
+      const dbl = hoverTime(() => { T.press('Space'); T.frame(16); T.release('Space'); T.frame(3); T.press('Space'); });
+      const single = hoverTime(() => T.press('Space'));
+      const tapped = hoverTime(() => { T.press('Space'); T.frame(16); T.release('Space'); T.frame(3); T.press('Space'); T.frame(12); T.release('Space'); });
+      ok(dbl > 2.2 && single > 2.2 && tapped === 0, `holding jump hovers it on its jets near the top, off a double jump (${dbl.toFixed(2)} s) or a single jump (${single.toFixed(2)} s); a tapped double jump doesn't (${tapped.toFixed(2)} s)`);
+    }
+    // its tether is its own blue: the line, and the zip's afterimages
+    {
+      p = aegis();
+      const z = T.enemy('scrapper', 9, 0, { hp: 500, frozen: true }); T.frame(3); T.aimAt(z.center());
+      FX.ghosts.length = 0;
+      const want = hexLinear(AEGIS_P.glow), cols = new Set();
+      let line = null;
+      T.press('Mouse2');
+      for (let i = 0; i < 60; i++) {
+        T.frame(1);
+        for (const g of FX.ghosts) cols.add(g.color);
+        if (line === null && p.tether && p.tether.phase === 'attached') {
+          Render.draw(1 / 60);
+          const C = Views.tetherMesh.geometry.attributes.color;
+          line = [C.getX(0), C.getY(0), C.getZ(0)].every((v, j) => Math.abs(v - want[j]) < 1e-3);
+        }
+      }
+      T.release('Mouse2'); T.frame(10);
+      ok(line && cols.has(AEGIS_P.glow) && !cols.has(RONIN_COL.tether.ghost), `AEGIS-07's tether line and zip afterimages are its blue (line ${line}, afterimages ${[...cols].join(' ')})`);
+      Game.enemies = [];
     }
     // the orbital strike: hold Q into bullet time with the arc shown, press again to fire the probe, and the
     // eruption burns down a brute standing in its ring; with no charge, Q does nothing
@@ -1019,6 +1068,15 @@ async function run(browser, file, errors) {
       let erupted = false;
       for (let i = 0; i < 60 * 7 && !br.dead; i++) { T.frame(1); erupted = erupted || Game.hazards.some((h) => h.kind === 'strike' && h.phase === 'erupt'); }
       ok(denied && aiming && fired && erupted && br.dead, `the orbital strike: no charge, no strike; held Q aims in bullet time, a press fires the probe, and the eruption kills a brute in its ring (${br.dead ? 'dead' : br.hp + ' hp left'})`);
+      Game.enemies = []; Game.hazards = []; Game.projectiles = [];
+      // a left click fires the aimed strike too, and holding that click doesn't run on into the gun
+      p = aegis(); T.frame(5);
+      p.ultCharge = 1; T.press('KeyQ'); T.frame(36); T.release('KeyQ'); T.frame(2);
+      const aimed = !!p.ultAim, a0 = p.gun.ammo;
+      T.press('Mouse0'); T.frame(20);
+      const clicked = !p.ultAim && Game.projectiles.some((b) => b.kind === 'probe'), quiet = p.gun.ammo === a0;
+      T.release('Mouse0'); T.frame(2); T.press('Mouse0'); T.frame(10); T.release('Mouse0');
+      ok(aimed && clicked && quiet && p.gun.ammo < a0, `a left click fires the aimed strike (${clicked}) without the held click firing the gun (${quiet}); the next click does`);
       Game.enemies = []; Game.hazards = []; Game.projectiles = [];
     }
     // a hit while the arm is drawn back after a block breaks the charge: no burst

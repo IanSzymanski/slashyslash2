@@ -3,12 +3,13 @@
 // switches between by holding F for a second (letting go, dashing, attacking or a hit cancels the switch).
 //   Gunner (the default) zones: holding attack fires the forearm machine gun (single-target rounds from a
 //   magazine, R or an empty magazine reloads); E fires the shoulder cannon's beam, which pierces everything on
-//   its line and drains shield for as long as it's held, rooting you (hovering in the air). No heavy, no parry.
+//   its line and drains shield for as long as it's held, rooting you (in the air it hovers, drifting a little
+//   side to side as the beam pushes it back). No heavy, no parry.
 //   Melee gets enemies off you: a brutish string of lunging swipes from the wrist blade ending in a thrust, a
 //   held overhead cleave, a slide attack and a jet plunge; E is a block on the raised blade that parries, and
 //   holding it after a block draws the arm back to drive a focused pulse burst out of the blade on release.
-// Either mode: jet dashes, a hover at the top of the double jump, the shared tether, and Q's orbital strike
-// (hold to charge the shoulder cannon into bullet time with the arc shown, press again to fire the probe).
+// Either mode: jet dashes, a hover while jump is held in the air, the shared tether, and Q's orbital strike
+// (hold to charge the shoulder cannon into bullet time with the arc shown, then Q or attack fires the probe).
 // Its light is cyan, apart from the rival's blue and RONIN's red.
 
 // a taller, broader body than RONIN's on the same move rules; its run is a touch slower and its dash a jet boost
@@ -22,19 +23,20 @@ const AEGIS_PELEC = { outer: '#21b8ff', core: '#ffffff' };
 PALETTES.aegis = [[240, 252, 255], [140, 232, 255], [33, 184, 255], [8, 50, 90]];
 PAL_LIN.aegis = PALETTES.aegis.map((c) => c.map(_lin));
 
-// SWITCH: seconds F is held to change mode. HOVER: seconds of hover after a double jump, sinking HOVER_SINK m/s,
+// SWITCH: seconds F is held to change mode. HOVER: seconds of hover per airtime (jump held), sinking HOVER_SINK m/s,
 // moving at HOVER_SPEED of a run. The gun: MAG rounds at RATE a second, RELOAD seconds to refill, ROUND_DMG each,
 // spread from SPREAD0 to SPREAD1 radians as it heats by HEAT a shot, drawn onto an enemy within ASSIST radians of the
 // crosshair. The beam: COST shield to fire, DRAIN a second
 // while held, CHARGE seconds of startup, at least MIN seconds once firing, DMG every TICK to everything within
-// BEAM_R of its line, turning after the crosshair at BEAM_TURN rad/s. The pulse burst: BURST_LEN m long, from
+// BEAM_R of its line, turning after the crosshair at BEAM_TURN rad/s; in the air it strafes at up to BEAM_STRAFE
+// m/s and is pushed back off the beam at BEAM_PUSH m/s. The pulse burst: BURST_LEN m long, from
 // BURST_MIN damage on a quick release to BURST_MAX after BURST_FULL seconds held. The ultimate: ULT_HOLD seconds
 // on Q to charge, ULT_AIM seconds of aiming at most (time runs at ULT_SLOW), landing up to ULT_RANGE m away.
 const AP = {
   SWITCH: 1.0,
-  HOVER: 1.4, HOVER_SINK: 0.5, HOVER_SPEED: 0.85,
+  HOVER: 2.6, HOVER_SINK: 0.5, HOVER_SPEED: 0.85,
   MAG: 40, RATE: 13, RELOAD: 1.5, ROUND_DMG: 7, ROUND_SPEED: 150, SPREAD0: 0.006, SPREAD1: 0.035, HEAT: 0.06, ASSIST: 0.055,
-  BEAM_COST: 20, BEAM_DRAIN: 26, BEAM_CHARGE: 0.42, BEAM_MIN: 0.3, BEAM_TICK: 0.12, BEAM_DMG: 11, BEAM_R: 0.55, BEAM_TURN: 5, BEAM_RANGE: 70,
+  BEAM_COST: 20, BEAM_DRAIN: 26, BEAM_CHARGE: 0.42, BEAM_MIN: 0.3, BEAM_TICK: 0.12, BEAM_DMG: 11, BEAM_R: 0.55, BEAM_TURN: 5, BEAM_RANGE: 70, BEAM_STRAFE: 3, BEAM_PUSH: 1.4,
   BURST_LEN: 14, BURST_FULL: 0.55, BURST_MIN: 85, BURST_MAX: 160,
   ULT_HOLD: 0.45, ULT_AIM: 4, ULT_RANGE: 45, ULT_SLOW: 0.3,
 };
@@ -102,8 +104,8 @@ class AegisPlayer extends Player {
     super(pos, AEGIS_MOVE);
     this.charId = 'aegis';
     this.mode = 'gun'; this.swap = null;
-    this.gun = { ammo: AP.MAG, reload: 0, cool: 0, heat: 0, flash: 0, firing: false };
-    this.beamAct = null; this.hover = null; this.hoverArm = false;
+    this.gun = { ammo: AP.MAG, reload: 0, cool: 0, heat: 0, flash: 0, firing: false, hold: false };
+    this.beamAct = null; this.hover = null; this.hoverArm = false; this.hoverFuel = AP.HOVER;
     this.ultAim = null; this.ultCharging = 0; this.ultFlash = 0; this.probeT = 0;
     this.bladeOut = 0; this.burstT = 0; this.burstDir = null; this.thrust = 0; this.jetT = 0; this.t = 0; this.swapFlash = 0;
   }
@@ -163,10 +165,21 @@ class AegisPlayer extends Player {
     this.updateHover(dt, I);
     if (this.beamAct) { this.canJump = false; this.canSlide = false; this.canCling = false; }
   }
-  // The beam roots it where it stands (hanging in the air on its jets if it fired there).
-  moveSpecial(dt) {
-    if (!this.beamAct) return false;
-    const [nx, nz] = approach2(this.vel.x, this.vel.z, 0, 0, 70 * dt);
+  // The beam roots it where it stands. Hanging in the air on its jets, it can drift a little side to side
+  // across the beam, and once firing the beam always pushes it slowly back.
+  moveSpecial(dt, I) {
+    const B = this.beamAct;
+    if (!B) return false;
+    let tx = 0, tz = 0;
+    if (!this.onGround) {
+      const hx = B.dir.x, hz = B.dir.z, hl = Math.hypot(hx, hz);
+      if (hl > 0.05) {
+        const rx = -hz / hl, rz = hx / hl, side = I ? I.mx * rx + I.mz * rz : 0;
+        tx = rx * side * AP.BEAM_STRAFE; tz = rz * side * AP.BEAM_STRAFE;
+        if (B.phase === 'fire') { tx -= hx * AP.BEAM_PUSH; tz -= hz * AP.BEAM_PUSH; }
+      }
+    }
+    const [nx, nz] = approach2(this.vel.x, this.vel.z, tx, tz, (this.onGround ? 70 : 40) * dt);
     this.vel.x = nx; this.vel.z = nz;
     this.vel.y = this.onGround ? 0 : approach(this.vel.y, 0, 45 * dt);
     return true;
@@ -181,24 +194,35 @@ class AegisPlayer extends Player {
     super.updateFacing(dt);
   }
 
-  // ---------- the hover: the jets hold it at the top of a double jump ----------
+  // ---------- the hover: the jets hold it up while jump is held ----------
+  // A jump pressed this airtime (off the ground, the double jump, or a press with no jumps left) and held past
+  // the top of its rise lights the jets; letting go or crouching drops out. HOVER seconds of it per airtime,
+  // refilled on the ground or a wall, so a tapped double jump never hovers and a held single jump does.
   updateHover(dt, I) {
     const T = this.tether;
-    if (this.onGround || this.dashT > 0 || this.cling || this.mantle || this.vault || this.plunge || this.beamAct || (T && T.phase === 'attached')) {
-      this.endHover();
-      if (this.onGround) this.hoverArm = false;
-    }
-    if (this.hoverArm && !this.hover && !this.onGround && this.vel.y <= 1.5 && !this.beamAct) {
-      this.hoverArm = false;
+    if (this.onGround || this.cling) this.hoverFuel = AP.HOVER;
+    if (this.onGround) this.hoverArm = false;
+    if (I.jump) this.hoverArm = true;
+    if (I.crouchPressed) this.hoverArm = false;
+    const blocked = this.onGround || this.dashT > 0 || this.cling || this.mantle || this.vault || this.plunge || this.beamAct || (T && T.phase === 'attached');
+    if (blocked || !this.hoverArm || !I.jumpHeld || this.hoverFuel <= 0) { this.endHover(); return; }
+    if (!this.hover) {
+      if (this.vel.y > 1.5) return;
       this.hover = { t: 0 };
       this.loops.jets = Sound.loop('jets');
       Sound.play('jetBurst', { soft: true });
       FX.ring(this.local(0, 1.2, -0.3), 0.2, 1.4, 0.22, { c: AEGIS_P.hi });
     }
     const H = this.hover;
-    if (!H) return;
     H.t += dt;
-    if (I.crouchPressed || H.t >= AP.HOVER) { this.endHover(); return; }
+    this.hoverFuel -= dt;
+    if (this.hoverFuel <= 0) {
+      // out of fuel: the jets sputter out
+      this.hoverFuel = 0;
+      FX.sparks(this.local(0, 1.0, -0.35), 6, { x: 0, y: -1, z: 0 }, 0.9, 3, 8, AEGIS_PSPARK);
+      this.endHover();
+      return;
+    }
     this.gravK = 0;
     this.vel.y = damp(this.vel.y, -AP.HOVER_SINK, 8, dt);
     this.speedMul *= AP.HOVER_SPEED;
@@ -224,7 +248,7 @@ class AegisPlayer extends Player {
   moveEvent(ev, d) {
     const p = this.pos;
     if (ev === 'djump') {
-      // the second jump lights the jets, and they hold it at the top
+      // the second jump lights the jets (held, they hover it at the top)
       this.hoverArm = true; this.jetT = 0.3;
       Sound.play('djump'); Sound.play('jetBurst');
       FX.ring({ x: p.x, y: p.y + 0.05, z: p.z }, 0.2, 1.6, 0.25, { c: AEGIS_P.hi });
@@ -293,9 +317,11 @@ class AegisPlayer extends Player {
     if (!W) {
       if (!Input.wasPressed('utility')) return;
       if (this.swapBlocked()) { Sound.play('denied'); this.utilFlash = 0.35; return; }
-      this.swap = { t: 0, to: this.mode === 'gun' ? 'blade' : 'gun' };
+      this.swap = { t: 0, to: this.mode === 'gun' ? 'blade' : 'gun', ring: 0 };
       this.loops.swap = Sound.loop('charge');
       this.loops.swap.set(0);
+      // into melee, the blade's light gathers over the housing's whine
+      if (this.swap.to === 'blade') { this.loops.swapHum = Sound.loop('beamHold'); this.loops.swapHum.set(0); }
       Sound.play('modeCharge');
       return;
     }
@@ -306,29 +332,97 @@ class AegisPlayer extends Player {
     // the forearm housing opens up: sparks and arcs off it, faster as it nears
     if (Math.random() < 0.3 + 0.6 * k) FX.sparks(this.emitter(), 1, null, TAU, 1.5, 4 + 6 * k, Object.assign({ g: 0, life: 0.5 }, AEGIS_PSPARK));
     if (Math.random() < 0.15 + 0.4 * k) FX.elec(this.emitter(), 0.3 + 0.4 * k, 1, AEGIS_PELEC);
+    if (W.to === 'blade') this.bladeGather(W, k, dt);
     if (W.t >= AP.SWITCH) this.finishSwap();
+  }
+  // Building to the blade: light streams into the emitter from all round it, rings close in on its feet
+  // faster and faster, arcs jump off the housing and the street starts to shake.
+  bladeGather(W, k, dt) {
+    const e = this.emitter(), p = this.pos;
+    if (this.loops.swapHum) this.loops.swapHum.set(k, k > 0.92);
+    for (let i = 0; i < 1 + Math.round(k * 3); i++) {
+      if (Math.random() > 0.35 + 0.5 * k) continue;
+      const u = coneDir(null, TAU), R = lerp(3, 0.9, k), q = { x: e.x + u.x * R, y: e.y + u.y * R, z: e.z + u.z * R };
+      FX.sparks(q, 1, { x: -u.x, y: -u.y, z: -u.z }, 0.05, R * 3.4, R * 4, Object.assign({ g: 0, life: 0.6 }, AEGIS_PSPARK));
+    }
+    if ((W.ring -= dt) <= 0) {
+      W.ring = lerp(0.32, 0.1, k);
+      FX.ring({ x: p.x, y: p.y + 0.06, z: p.z }, lerp(3.2, 2, k), 0.5, 0.26, { c: AEGIS_P.hi });
+    }
+    if (k > 0.4 && Math.random() < 0.12 * k) {
+      const a = rand(0, TAU), r = rand(0.8, 1.8);
+      FX.bolt(e, { x: e.x + Math.cos(a) * r, y: e.y + rand(-0.6, 0.9), z: e.z + Math.sin(a) * r }, rand(0.06, 0.12), { outer: AEGIS_P.glow, core: '#ffffff', jag: 0.3, w: 0.04 });
+    }
+    if (Math.random() < 0.25 * k) FX.light(e, AEGIS_P.glow, 2 + 4 * k, 5, 0.08);
+    Game.shake(dt * 3 * k);
   }
   cancelSwap() {
     if (!this.swap) return;
     this.swap = null;
-    this.stopLoop('swap');
+    this.stopLoop('swap'); this.stopLoop('swapHum');
     FX.sparks(this.emitter(), 4, null, TAU, 1.5, 5, AEGIS_PSPARK);
   }
   finishSwap() {
     const to = this.swap.to;
     this.swap = null;
-    this.stopLoop('swap');
+    this.stopLoop('swap'); this.stopLoop('swapHum');
     this.mode = to;
     this.atkPend = null; this.attackQueued = null; this.attack = null; this.strN = 0; this.strLights = 0; this.comboTimer = 0;
     this.gun.firing = false;
     this.utilT = 0.3; this.swapFlash = 0.3;
+    if (to === 'blade') { this.igniteBlade(); return; }
     const e = this.emitter(), c = this.chest();
     FX.ring(c, 0.3, 2.2, 0.28, { c: AEGIS_P.hi, flat: false });
     FX.sparks(e, 18, this.aimDir, 1.6, 4, 14, AEGIS_PSPARK);
     FX.elec(e, 0.9, 4, AEGIS_PELEC);
     FX.light(e, AEGIS_P.glow, 4, 5, 0.25);
-    Sound.play('modeSwitch', { blade: to === 'blade' });
+    Sound.play('modeSwitch');
     Game.shake(0.08);
+  }
+  // Into melee: the blade tears out of the housing in a blast of light. A flash, the blade's line struck out
+  // with lightning down it, arcs off the body into the street, shockwaves out along the ground and round the
+  // body, and a scorch under its feet.
+  igniteBlade() {
+    const e = this.emitter(), c = this.chest(), p = this.pos, R = this.right(), f = this.fwd();
+    // along the arm thrown out to its side (AegisPose's pose for utilT)
+    const dx = R.x * 0.8 + f.x * 0.4, dy = -0.2, dz = R.z * 0.8 + f.z * 0.4, dl = Math.hypot(dx, dy, dz), L = AEGIS_BLADE * AEGIS_SCALE * 1.4;
+    const tip = { x: e.x + (dx / dl) * L, y: e.y + (dy / dl) * L, z: e.z + (dz / dl) * L };
+    this.bladeOut = 1;
+    FX.slashLine(e, tip, { w: 0.55, dur: 0.32, pal: 'aegis', grow: 0.04 });
+    for (let i = 0; i < 3; i++) FX.bolt(e, tip, 0.28, { outer: AEGIS_P.glow, core: '#ffffff', jag: 0.2 + 0.12 * i, w: 0.07, forks: 2 });
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU + rand(-0.4, 0.4), r = rand(1.8, 3.4);
+      FX.bolt(c, { x: p.x + Math.cos(a) * r, y: p.y + 0.05, z: p.z + Math.sin(a) * r }, rand(0.16, 0.3), { outer: AEGIS_P.glow, core: '#ffffff', jag: 0.5, w: 0.05, forks: 1 });
+    }
+    FX.elec(e, 1.6, 6, AEGIS_PELEC);
+    FX.elec(c, 2.2, 5, AEGIS_PELEC);
+    FX.sparks(e, 40, null, TAU, 6, 24, AEGIS_PSPARK);
+    FX.sparks(c, 20, { x: 0, y: 1, z: 0 }, 0.9, 6, 18, Object.assign({ life: 1.2 }, AEGIS_PSPARK));
+    FX.ring(c, 0.3, 3.8, 0.32, { c: '#ffffff', flat: false });
+    FX.ring(e, 0.2, 2.4, 0.24, { c: AEGIS_P.hi, flat: false });
+    if (this.onGround) {
+      const g = { x: p.x, y: p.y + 0.06, z: p.z };
+      FX.ring(g, 0.4, 7.5, 0.42, { c: AEGIS_P.hi });
+      FX.dust(p, 14, { smax: 7, rise: 0.8 });
+      FX.decal('scorch', p, { r: 1.6, dur: 4 });
+    }
+    // the second wave a beat later
+    Game.queueCut(0.09, () => {
+      if (this.dead || this.mode !== 'blade') return;
+      const c2 = this.chest(), q = this.pos;
+      FX.ring(c2, 0.5, 5.5, 0.42, { c: AEGIS_P.hi, flat: false });
+      if (this.onGround) FX.ring({ x: q.x, y: q.y + 0.06, z: q.z }, 0.6, 11, 0.55, { c: AEGIS_P.glow });
+      FX.elec(this.emitter(), 1.3, 4, AEGIS_PELEC);
+      FX.sparks(c2, 16, null, TAU, 4, 14, AEGIS_PSPARK);
+    });
+    FX.light(e, '#e0f8ff', 9, 14, 0.4);
+    FX.light(c, AEGIS_P.glow, 5, 10, 0.55);
+    FX.flash('#e0f8ff', 0.35);
+    this.makeGhost(AEGIS_P.hi, 0.45, 0.7);
+    Sound.play('bladeIgnite');
+    Game.shake(0.35);
+    Game.hitstop(0.05);
+    FPFX.kick('counter', { scale: 0.8, col: [140, 232, 255] });
   }
 
   // ---------- gunner: the machine gun ----------
@@ -352,7 +446,9 @@ class AegisPlayer extends Player {
       if (G.reload <= 0) { G.reload = 0; G.ammo = AP.MAG; Sound.play('reloadDone'); }
     }
     if (Input.wasPressed('reload') && this.mode === 'gun') this.startReload();
-    const want = Input.isDown('attack') && this.canFire();
+    // the click that fired the strike doesn't carry on into the gun
+    if (G.hold && !Input.isDown('attack')) G.hold = false;
+    const want = Input.isDown('attack') && this.canFire() && !G.hold;
     if (want && Input.wasPressed('attack') && G.reload > 0) Sound.play('dryFire');
     G.firing = want && G.reload <= 0 && G.ammo > 0;
     if (want && G.reload <= 0 && G.ammo <= 0) this.startReload();
@@ -723,7 +819,8 @@ class AegisPlayer extends Player {
     }
     if (this.ultCharging >= AP.ULT_HOLD) this.beginAim();
   }
-  // Bullet time and the arc: it can't be backed out of, only fired (or it fires itself after ULT_AIM seconds).
+  // Bullet time and the arc: it can't be backed out of, only fired with Q or attack (or it fires itself after
+  // ULT_AIM seconds).
   beginAim() {
     this.ultCharging = 0; this.stopLoop('ult');
     this.ultAim = { real: 0, plan: null };
@@ -741,7 +838,7 @@ class AegisPlayer extends Player {
     this.aimHold = PC.FACE_AIM;
     this.ultAim.real += this.realStep();
     this.planStrike();
-    if (Input.wasPressed('ultimate') || this.ultAim.real >= AP.ULT_AIM) this.fireProbe();
+    if (Input.wasPressed('ultimate') || Input.wasPressed('attack') || this.ultAim.real >= AP.ULT_AIM) this.fireProbe();
   }
   // where the probe lands: the crosshair's spot (within reach), on the arc the cannon throws it on, or the first
   // thing that arc runs into
@@ -782,6 +879,7 @@ class AegisPlayer extends Player {
     if (Game.btOwner === this) Game.endBulletTime();
     if (!A || !A.plan) return;
     this.ultCharge = 0; this.ultReadyPlayed = false;
+    this.gun.hold = Input.isDown('attack');
     Game.stats.ults++;
     const o = this.lens(), v = A.plan.v;
     Game.projectiles.push(new StrikeProbe(o, v, { owner: this, cfg: STRIKE.ult }));
@@ -822,13 +920,17 @@ class AegisPlayer extends Player {
   }
   onPause() {
     super.onPause();
-    for (const k of ['beam', 'jets', 'swap']) this.stopLoop(k);
+    for (const k of ['beam', 'jets', 'swap', 'swapHum']) this.stopLoop(k);
   }
   onResume() {
     super.onResume();
     if (this.beamAct && this.beamAct.phase === 'fire') this.loops.beam = Sound.loop('beam');
     if (this.hover) this.loops.jets = Sound.loop('jets');
-    if (this.swap) { this.loops.swap = Sound.loop('charge'); this.loops.swap.set(this.swap.t / AP.SWITCH); }
+    if (this.swap) {
+      const k = this.swap.t / AP.SWITCH;
+      this.loops.swap = Sound.loop('charge'); this.loops.swap.set(k);
+      if (this.swap.to === 'blade') { this.loops.swapHum = Sound.loop('beamHold'); this.loops.swapHum.set(k); }
+    }
   }
 
   // ---------- the model's lights (AegisPose reads these) ----------
@@ -857,4 +959,5 @@ AegisPlayer.TIMERS = Player.TIMERS.concat(['burstT', 'swapFlash']);
 AegisPlayer.prototype.camScale = 1.22;
 AegisPlayer.prototype.fxCol = {
   main: AEGIS_P.glow, ring: AEGIS_P.hi, hot: '#e0fbff', ghost: AEGIS_P.glow, elec: AEGIS_PELEC, spark: AEGIS_PSPARK, stance: 'blockUp', lower: 'blockDown',
+  tether: { line: AEGIS_P.glow, core: '#e8fbff', ghost: AEGIS_P.glow, light: AEGIS_P.glow, elec: AEGIS_PELEC, spark: AEGIS_PSPARK, pal: 'aegis' },
 };

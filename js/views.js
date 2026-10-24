@@ -279,7 +279,7 @@ const Views = {
       const k = i / (n - 1), j = i && i < n - 1 ? jag * Math.sin(k * Math.PI) : 0;
       pts.push({ x: lerp(a.x, b.x, k) + rand(-j, j), y: lerp(a.y, b.y, k) + rand(-j, j), z: lerp(a.z, b.z, k) + rand(-j, j) });
     }
-    const outer = hexLinear(T.mode === 'rebound' ? '#ffb040' : '#ff2a44'), core = hexLinear('#ffe8ee');
+    const C = P.fxCol.tether, outer = hexLinear(T.mode === 'rebound' ? '#ffb040' : C.line), core = hexLinear(C.core);
     FX.writeStrip(m, pts.concat(pts.slice().reverse()), 0.06, Gfx.camera.position, (i, out) => {
       const c = i < n ? outer : core;
       out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
