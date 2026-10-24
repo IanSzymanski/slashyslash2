@@ -1009,13 +1009,15 @@ class Rival extends Enemy {
     }
     Sound.play('swing', { stage: m.r > 3 || m.spin ? 3 : 1 }, c);
   }
-  // its body is a wall through the red flash: only a dash carries you past it to its back
+  // its body is a wall through the red flash: only a dash carries you past it to its back. It never shoves you
+  // into a wall (a body inside one gets snapped out its far side, out of the arena): pinned, you stay put.
   blockPassage(p) {
     if (p.dead || p.dashT > 0 || p.iaido) return;
     const dx = p.pos.x - this.pos.x, dz = p.pos.z - this.pos.z, d = Math.hypot(dx, dz), R = this.r + p.r + 0.1;
     if (d >= R || p.pos.y > this.pos.y + this.h || p.pos.y + p.h < this.pos.y) return;
-    const f = this.fwd();
-    p.pos.x = this.pos.x + f.x * R; p.pos.z = this.pos.z + f.z * R;
+    const f = this.fwd(), tx = this.pos.x + f.x * R, tz = this.pos.z + f.z * R;
+    if (World.overlap(tx, p.pos.y + 0.02, tz, p.r, p.h - 0.05)) return;
+    p.pos.x = tx; p.pos.z = tz;
     const vn = p.vel.x * f.x + p.vel.z * f.z;
     if (vn < 0) { p.vel.x -= vn * f.x; p.vel.z -= vn * f.z; }
   }

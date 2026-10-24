@@ -800,6 +800,29 @@ async function run(browser, file, errors) {
     T.release('KeyW');
     ok(p.hp === PC.MAX_HP && R.stunT > 0, `dashing straight through its body beats the red flash (ended ${distXZ(p.pos, R.pos).toFixed(1)} m behind it)`);
     S.gameplay.invincible = true;
+    // its body never shoves you into a wall: AEGIS-07 against the arena's south wall with the rival pressed up to
+    // it, facing the wall through the red flash, isn't put into the wall, and moving off stays in the arena
+    {
+      const char0 = SaveData.character;
+      SaveData.character = 'aegis';
+      R = rival(0, -3, { phase2: true });
+      const B = World.def.bounds, wz = B.minZ + p.r + 0.02;
+      let sx = null, sy = 0;
+      for (let x = -30; x <= 30 && sx === null; x += 0.5) { const g = World.groundAt(x, wz, 1), g2 = World.groundAt(x, wz + 1.2, 1); if (g > -1 && Math.abs(g - g2) < 0.01 && World.boxFree(x, g + 0.02, wz, p.r, p.h) && World.boxFree(x, g + 0.02, wz + 1.12, R.r, R.h)) { sx = x; sy = g; } }
+      p.pos.x = p.prev.x = sx; p.pos.z = p.prev.z = wz; p.pos.y = p.prev.y = sy; p.vel.x = p.vel.y = p.vel.z = 0;
+      R.pos.x = R.prev.x = sx; R.pos.z = R.prev.z = wz + p.r + R.r + 0.02; R.pos.y = R.prev.y = sy;
+      R.yaw = R.faceYaw = yawOf(0, -1);
+      R.blockPassage(p);
+      const shoved = World.overlap(p.pos.x, p.pos.y + 0.02, p.pos.z, p.r, p.h - 0.05);
+      let out = '';
+      for (const k of ['KeyA', 'KeyD', 'KeyW', 'KeyS']) {
+        T.press(k); T.frame(4); T.release(k);
+        const q = p.pos;
+        if (!out && (q.x < B.minX || q.x > B.maxX || q.z < B.minZ || q.z > B.maxZ)) out = `${q.x.toFixed(2)}, ${q.y.toFixed(2)}, ${q.z.toFixed(2)}`;
+      }
+      SaveData.character = char0;
+      ok(sx !== null && !shoved && !out, `its body never shoves you into a wall, so you can't be squeezed out of the arena${shoved ? ' (shoved into a wall)' : ''}${out ? ' (out at ' + out + ')' : ''}`);
+    }
     // once it flares red it holds its line: you circle to its side and it neither turns nor steps after you
     R = rival(0, -3, { phase2: true });
     R.yaw = R.faceYaw = R.yawTo(p.pos) + 0.5; R.startPeril();
