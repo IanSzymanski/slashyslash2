@@ -4,7 +4,7 @@
 
 // Style: hits build a meter that ranks you C to SSS. Repeating the same move earns less,
 // and the rank multiplies score and ultimate charge.
-const STYLE_GAIN = { lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, overload: 5, round: 1.2, beam: 1.5, burst: 14, strike: 3 };
+const STYLE_GAIN = { lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, beam: 4, beamFull: 9, round: 1.2, laser: 1.5, burst: 14, strike: 3 };
 const STYLE_RANKS = [
   { th: 380, r: 'SSS', c: '#ffffff', mul: 2.5 }, { th: 260, r: 'SS', c: '#ffd070', mul: 2 }, { th: 170, r: 'S', c: '#ffb040', mul: 1.75 },
   { th: 100, r: 'A', c: '#ff5a6a', mul: 1.5 }, { th: 50, r: 'B', c: '#d0a0ff', mul: 1.25 }, { th: 20, r: 'C', c: '#9ab0d0', mul: 1.1 },
@@ -36,6 +36,7 @@ const Game = {
     Sound.setSlow(false);
     Sound.setIntensity(0);
     this.announcements = [];
+    Tutorial.active = false; Tutorial.show(null);
     UI.refreshBest();
     UI.show('menu');
   },
@@ -47,8 +48,9 @@ const Game = {
     Sound.stopAll();
     this.mode = mode;
     this.runs[mode] = (this.runs[mode] || 0) + 1;
-    // every mode plays in the crossroads except the 2D street's free roam
-    if (!Arena.load(mode === 'street' ? 'street' : 'crossroads')) Props.reset();
+    // every mode plays in the crossroads except the 2D street's free roam and Training, in its own hall
+    if (!Arena.load(mode === 'street' ? 'street' : mode === 'training' ? 'training' : 'crossroads')) Props.reset();
+    Tutorial.active = false; Tutorial.show(null);
     Arena.setBlackout(false);
     this.state = 'playing';
     FX.clear();
@@ -139,6 +141,7 @@ const Game = {
     const p = this.player;
     if (p.sheathe) p.cancelSheathe();
     if (p.tether) p.releaseTether();
+    p.cancelCharge();
     p.attackQueued = null; p.atkPend = null; p.ultHold = 0; p.stopLoop('ult');
     p.cancelActions();
     this.endBulletTime();
@@ -196,7 +199,7 @@ const Game = {
     UI.hideAll();
     this.announce(UPGRADES[id].name.toUpperCase(), null, '#ffd070', 2.2, true);
     // the pick was a click or a key press, so the mouse can be locked again straight away
-    if (Input.lockRequired) Input.requestLock().then((ok) => { if (!ok && this.state === 'playing') { this.pause(); UI.lockHint(true); } });
+    if (Input.lockRequired && !Touch.on()) Input.requestLock().then((ok) => { if (!ok && this.state === 'playing') { this.pause(); UI.lockHint(true); } });
   },
   rankMul() { const r = this.rank(); return r ? r.mul : 1; },
   // getting hit costs most of your style
@@ -287,6 +290,7 @@ const Game = {
     World.dyn.length = 0;
     for (const p of this.props) if (!p.dead && p.q && p.q.on) World.dyn.push(p.q);
     this.player.update(dt);
+    if (this.mode === 'training') Training.update(dt);
     Nav.update(this.player.pos, this.time);
     const cine = this.cineActive() ? this.cine : null;
     for (const e of this.enemies) if (!e.dead && (!cine || e === cine.owner)) e.update(dt);

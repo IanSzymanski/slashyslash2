@@ -218,7 +218,8 @@ const Controller = {
     let best = null, bestK = -Infinity;
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const b = this.wallAt(c, -dx, -dz);
-      if (!b || b.max.y < top) continue;
+      // (a slick wall gives no grip: the training course keeps wall kicks to their station)
+      if (!b || b.max.y < top || b.slick) continue;
       const k = I ? I.mx * dx + I.mz * dz : 0;
       if (k > bestK) { bestK = k; best = { x: -dx, z: -dz, box: b, top: b.max.y }; }
     }
@@ -394,7 +395,8 @@ const Controller = {
   // where a climb onto b would put you: the spot on its top and the height there's room for, or null
   ledgeSpot(c, b, nx, nz, reach, min = 0.02) {
     const M = c.M;
-    if (b.max.y - c.pos.y > reach) return null;
+    // (a vault-only barrier can't be climbed onto, only vaulted)
+    if (b.max.y - c.pos.y > reach || b.vaultOnly) return null;
     const x1 = c.pos.x - nx * (c.r * 2 + 0.1), z1 = c.pos.z - nz * (c.r * 2 + 0.1);
     const top = this.highestTop(x1, z1, c.r, c.pos.y + reach), rise = top - c.pos.y;
     if (rise < min || top < b.max.y - 1e-6) return null;
@@ -434,6 +436,8 @@ const Controller = {
     // room to rise where you stand, and at least a crouch's room on top
     if (!World.boxFree(c.pos.x, c.pos.y + 0.02, c.pos.z, c.r, y1 - c.pos.y + c.h)) return false;
     if (!World.boxFree(lx, y1, lz, c.r, M.CROUCH_H)) return false;
+    // a gap too low to stand in is vaulted ducked, and you stay ducked until there's room
+    const low = !World.boxFree(lx, y1, lz, c.r, M.H);
     // keep the run's heading, turned at least partly into the obstacle
     let dx = pvx / hs, dz = pvz / hs;
     if (dx * -nx + dz * -nz < 0.4) { dx -= nx; dz -= nz; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; }
@@ -443,7 +447,8 @@ const Controller = {
       t: 0, dur: clamp(2.2 / hs, 0.2, 0.34), y0: c.pos.y, y1, top, dx, dz, spd: Math.max(hs * 0.95, 4.5),
       plant: { x: px, y: World.groundAt(px, pz, top + 0.01), z: pz },
     };
-    c.sliding = false; c.crouching = false;
+    c.sliding = false; c.crouching = low;
+    if (low) c.h = M.CROUCH_H;
     this.endSkid(c, false);
     this.emit(c, 'vault', c.vault);
     return true;

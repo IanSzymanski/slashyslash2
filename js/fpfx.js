@@ -2,7 +2,7 @@
 // First person's screen effects. Swings, dashes, hits and parries punch the field of view and roll the view
 // on springs; the screen's edges flare gold on a parry or the counter and white on a dodge, darken red toward
 // whatever hit you, and pulse at low health; speed lines streak in from the edges at a dash, a zip or a
-// sprint. All of it is off in third person, in menus and in cutscenes. Camera.update steps it each frame.
+// sprint. Charging the sword beam narrows the view a little as it fills. All of it is off in third person, in menus and in cutscenes. Camera.update steps it each frame.
 // FOV punches and roll follow the "widen the view" setting; edge flares follow the flashes setting.
 
 const FPFX = {
@@ -10,7 +10,7 @@ const FPFX = {
   // springs: x is the offset, v its velocity; k the stiffness, z the damping ratio
   fovS: { x: 0, v: 0, k: 170, z: 0.5 }, rollS: { x: 0, v: 0, k: 260, z: 0.45 },
   energy: 0, eCol: [255, 214, 120], hurt: 0, hurtX: 50, hurtY: 50, guard: 0, speed: 0, kickSpeed: 0,
-  lowT: 0, lines: [], lastImpact: 0, el: null, glow: null, live: false,
+  lowT: 0, lines: [], lastImpact: 0, el: null, glow: null, live: false, focus: 0,
   // per kind: degrees of FOV (negative narrows), roll in radians, edge energy and its colour, hurt, speed.
   // Your own swings, dashes and slams get no edge colour: red at the edges means you were hurt, and only that.
   KICKS: {
@@ -28,6 +28,9 @@ const FPFX = {
     dodge: { fov: 7, energy: 0.7, col: [255, 255, 255], speed: 0.6 },
     hit: { fov: -8, roll: 0.075, hurt: 1 },
     guard: { fov: -4, roll: 0.04, guard: 1 },
+    beamTap: { fov: 5, roll: 0.03 },
+    beamFull: { fov: 3, energy: 0.55, col: [255, 236, 200] },
+    beamMassive: { fov: 15, roll: 0.06, speed: 0.9 },
   },
   on() { return Camera.fp && Game.state === 'playing' && !Game.cineActive(); },
 
@@ -78,11 +81,11 @@ const FPFX = {
     const n = Math.ceil(dt / 0.008), h = dt / n;
     for (let i = 0; i < n; i++) { S0.v += (-S0.k * S0.x - 2 * S0.z * w * S0.v) * h; S0.x += S0.v * h; }
   },
-  get fov() { return S.camera.fovKick ? this.fovS.x : 0; },
+  get fov() { return S.camera.fovKick ? this.fovS.x + this.focus : 0; },
   get roll() { return S.camera.fovKick ? this.rollS.x : 0; },
   reset() {
     this.fovS.x = this.fovS.v = this.rollS.x = this.rollS.v = 0;
-    this.energy = this.hurt = this.guard = this.speed = this.kickSpeed = 0;
+    this.energy = this.hurt = this.guard = this.speed = this.kickSpeed = this.focus = 0;
   },
 
   update(realDt) {
@@ -97,6 +100,7 @@ const FPFX = {
     this.hurt *= Math.exp(-realDt * 2.4);
     this.guard *= Math.exp(-realDt * 4);
     this.kickSpeed *= Math.exp(-realDt * 3.5);
+    this.focus = damp(this.focus, p.charging ? -7 * p.charging.k : 0, p.charging ? 4 : 14, realDt);
     // speed lines: dashes, drawn slashes, the tether's zip, a sprint, a long fall
     const hs = Controller.hspeed(p);
     let want = clamp((hs - PC.RUN) / (PC.SPRINT - PC.RUN), 0, 1) * 0.3;

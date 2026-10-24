@@ -23,6 +23,7 @@ const Views = {
       // the brute's ground wave: an open band 1 m tall standing on the ground
       band: new THREE.CylinderGeometry(1, 1, 1, 48, 1, true).translate(0, 0.5, 0),
       beam: new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
+      crescent: this.crescentGeo(),
     };
     // afterimages share a player rig's geometry; each has its own skeleton of loose bones posed by copying.
     // Each character's rig has its own pool.
@@ -71,6 +72,7 @@ const Views = {
     add(new THREE.Mesh(this.geos.sphere, this.mats.gFly));
     add(new THREE.Mesh(this.geos.ring, this.mats.halo));
     add(new THREE.Mesh(this.geos.band, add_wave()));
+    add(new THREE.Mesh(this.geos.crescent, BossViews.add('#ff2a48')));
     this.beams[0].visible = true;
     this.rain.visible = this.ash.visible = true;
     add(new THREE.Mesh(this.geos.rock, FX.gibMaterial('#5c5464', false)));
@@ -85,6 +87,20 @@ const Views = {
     this.zones[0].visible = false; this.tetherMesh.visible = false; this.beams[0].visible = false;
     BossViews.prewarmHide();
     AegisViews.prewarmHide();
+  },
+  // The sword beam's crescent: a band across its path, bulging forward in the middle and thinning at its tips,
+  // in its own frame (x across, y up, forward -z), half-width and half-height 1.
+  crescentGeo() {
+    const N = 16, pos = [], idx = [];
+    for (let i = 0; i <= N; i++) {
+      const s = (i / N) * 2 - 1, h = 1 - 0.55 * s * s, z = -(1 - s * s) * 0.45;
+      pos.push(s, -h, z, s, h, z);
+    }
+    for (let i = 0; i < N; i++) { const a = i * 2; idx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    return g;
   },
   waveMat() { return new THREE.MeshBasicMaterial({ color: '#ff7a2a', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }); },
 
@@ -120,6 +136,17 @@ const Views = {
       band.renderOrder = 2;
       g.add(band);
       g.userData = { band };
+    } else if (o.kind === 'swordbeam') {
+      // the player's sword beam: a crescent in crimson round a white-hot core (gold through the massive one),
+      // with a wide haze behind
+      const C = G.crescent, A = BossViews.add;
+      const haze = new THREE.Mesh(C, A(o.full ? '#ff5a2a' : '#ff2a48', { opacity: 0.25 })), outer = new THREE.Mesh(C, A('#ff2a48', { opacity: 0.9 }));
+      const mid = new THREE.Mesh(C, A(o.full ? '#ffd070' : '#ff8a9a', { opacity: 0.9 })), core = new THREE.Mesh(C, A(o.full ? '#fff6e0' : '#fff0f2', { opacity: 0.95 }));
+      haze.scale.set(1.08, 1.3, 1.6); haze.position.z = 0.35;
+      mid.scale.set(0.96, 0.7, 1); mid.position.z = -0.05;
+      core.scale.set(0.9, 0.38, 1); core.position.z = -0.1;
+      g.add(haze, outer, mid, core);
+      g.userData = { beam: { haze, outer, mid, core } };
     } else if (o.kind === 'rock') {
       g.add(new THREE.Mesh(G.rock, FX.gibMaterial(o.color, false)));
       g.scale.setScalar(o.size);
@@ -129,6 +156,11 @@ const Views = {
       shell.scale.setScalar(0.24 * s); core.scale.setScalar(0.15 * s); halo.scale.setScalar(0.45 * s);
       g.add(shell, core, halo);
       g.userData = { core, halo };
+    } else if (o.kind === 'football') {
+      // the training machine's footballs (training.js)
+      const R = Rig.build(MODELS.football);
+      Gfx.scene.add(R.mesh);
+      return { rig: R, lit: null };
     } else if (o.kind === 'barrel') {
       const R = Rig.build(MODELS.barrel);
       R.feet.value.setRGB(0.3, 0.26, 0.34);
@@ -141,6 +173,17 @@ const Views = {
   update(o, v, t) {
     if (v.boss) { BossViews.update(o, v, t); return; }
     if (v.aegis) { AegisViews.update(o, v, t); return; }
+    if (v.rig && o.kind === 'football') {
+      // nose along its flight, spiralling round it
+      const R = v.rig, m = R.mesh;
+      if (!this._fz) { this._fz = new THREE.Vector3(0, 0, 1); this._fd = new THREE.Vector3(); this._fq = new THREE.Quaternion(); }
+      m.position.set(o.pos.x, o.pos.y, o.pos.z);
+      m.quaternion.setFromUnitVectors(this._fz, this._fd.set(o.dir.x, o.dir.y, o.dir.z));
+      m.quaternion.multiply(this._fq.setFromAxisAngle(this._fz, o.roll));
+      m.scale.setScalar(o.state === 'rest' ? Math.max(0.01, 1 - o.rest / 1.6) : 1);
+      if (!v.lit || dist3(v.lit, o.pos) > 0.5) { Render.feet(R.feet, o.pos); v.lit = { x: o.pos.x, y: o.pos.y, z: o.pos.z }; }
+      return;
+    }
     if (v.rig) {
       const R = v.rig, m = R.mesh;
       m.position.set(o.pos.x, o.pos.y, o.pos.z);
@@ -165,6 +208,16 @@ const Views = {
       band.scale.set(r, 0.65 * (1 - k * 0.6), r);
       band.material.opacity = 0.9 * (1 - k * k);
       band.material.color.set(((o.t * 24) | 0) % 2 ? '#ffd080' : '#ff7a2a');
+    } else if (o.kind === 'swordbeam') {
+      // turned to its band's frame (across, up, along its flight), deeper as it widens so it sweeps in an arc
+      const B = g.userData.beam, s = o.side, u = o.up, d = o.dir;
+      if (!this._bm) { this._bm = new THREE.Matrix4(); this._v3a = new THREE.Vector3(); this._v3b = new THREE.Vector3(); this._v3c = new THREE.Vector3(); }
+      this._v3a.set(s.x, s.y, s.z); this._v3b.set(u.x, u.y, u.z); this._v3c.set(-d.x, -d.y, -d.z);
+      this._bm.makeBasis(this._v3a, this._v3b, this._v3c);
+      g.quaternion.setFromRotationMatrix(this._bm);
+      g.scale.set(o.W, o.H, 1 + o.W * 0.18);
+      const f = clamp(o.life / 0.2, 0, 1) * clamp(o.t / 0.05, 0, 1), fl = ((t * 30) | 0) % 2;
+      B.outer.material.opacity = 0.9 * f; B.mid.material.opacity = 0.85 * f; B.core.material.opacity = (fl ? 1 : 0.8) * f; B.haze.material.opacity = (o.full ? 0.35 : 0.22) * f;
     } else if (o.kind === 'rock') {
       const k = 1.2 - o.life;
       g.rotation.set(o.spin.x * k, o.spin.y * k, o.spin.z * k);
@@ -185,6 +238,7 @@ const Views = {
     Gfx.scene.remove(v.group);
     if (v.group.userData.halo) v.group.userData.halo.material.dispose();
     if (v.group.userData.band) v.group.userData.band.material.dispose();
+    if (v.group.userData.beam) for (const m of v.group.children) m.material.dispose();
   },
   boltMat(o) { return !o.hostile ? this.mats.boltF : o.col && o.col.outer === '#ff3a52' ? this.mats.boltS : o.col && o.col.outer === '#2f6bff' ? this.mats.boltB : this.mats.boltH; },
 
@@ -246,7 +300,7 @@ const Views = {
     this.wLast = 0;
   },
   syncWeather() {
-    const on = S.visuals.weather;
+    const on = S.visuals.weather && !(World.def && World.def.indoor);
     this.rain.visible = this.ash.visible = on;
     if (!on) return;
     const now = Game.realTime, dt = clamp(now - this.wLast, 0, 0.1) * (Game.state === 'playing' || Game.state === 'menu' ? Game.slowScale : 0);
@@ -350,6 +404,8 @@ const Views = {
       }
     }
     for (const g of Game.projectiles) if (g.kind === 'grenade' && g.hostile && g.impact && !g.dead) zone(g.impact, g.R, '#4af0ff');
+    // the training ball machine's throws
+    if (Game.mode === 'training') ai = Training.tells(this, ai, zone, cp, t);
     for (; li < this.lasers.length; li++) this.lasers[li].visible = false;
     for (; ai < this.arcs.length; ai++) this.arcs[ai].visible = false;
     for (; zi < this.zones.length; zi++) this.zones[zi].visible = false;
@@ -361,9 +417,11 @@ const Views = {
     const drones = Game.enemies.filter((e) => e.type === 'drone' && !e.dead && !e.spawning).sort((a, b) => dist3(a.pos, cp) - dist3(b.pos, cp));
     for (const d of drones.slice(0, 2)) Gfx.light(d.pos.x, d.pos.y + 0.2, d.pos.z, d.state === 'tele' || d.state === 'dive' ? '#ff6040' : '#ffc070', 1.6, 5);
     let n = 0;
+    // sword beams first: they light the street as they cross it
+    for (const o of Game.projectiles) if (!o.dead && o.kind === 'swordbeam' && n < 2) { Gfx.light(o.pos.x, o.pos.y, o.pos.z, o.full ? '#ffa040' : '#ff3048', o.full ? 4 : 2, o.full ? 11 : 4.5); n++; }
     for (const o of Game.projectiles) {
       if (n >= 3) return;
-      if (o.dead) continue;
+      if (o.dead || o.kind === 'swordbeam') continue;
       if (o.kind === 'bolt') { Gfx.light(o.pos.x, o.pos.y, o.pos.z, o.hostile ? o.col.light : '#ff3048', 1.6, 2.6); n++; }
       else if (o.kind === 'grenade') { Gfx.light(o.pos.x, o.pos.y, o.pos.z, o.state === 'flying' ? '#4af0ff' : o.state === 'caught' ? '#ffd070' : '#ff3048', 2, 3.6); n++; }
     }

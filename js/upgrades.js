@@ -5,7 +5,7 @@
 // character whose move it changes.
 
 const UPGRADES = {
-  arc: { name: 'Arc Conductor', tag: 'AC', only: 'ronin', desc: 'Counter lightning chains to 8 enemies over a wider range, for 40 damage instead of 55.' },
+  arc: { name: 'Arc Conductor', tag: 'AC', only: 'ronin', desc: 'The parry counter charges to full in half the time.' },
   voltHook: { name: 'Volt Hook', tag: 'VH', desc: 'Tether strikes burst for 30 damage around the target. Strikes no longer refund shield.' },
   emberWake: { name: 'Ember Wake', tag: 'EW', desc: 'Dashing through enemies cuts them for 20. Dash charges refill 0.25s slower.' },
   openGuard: { name: 'Open Guard', tag: 'OG', desc: 'Parry window 60% wider. Parries no longer refund shield.' },
