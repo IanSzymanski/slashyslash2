@@ -134,8 +134,10 @@ const Game = {
   },
   startCine(o) {
     this.cine = Object.assign({ t: 0, bars: 0, zoom: 1, focus: null, owner: null, caption: null, big: null, bigT: 0, closing: false, skipHold: 0 }, o);
-    // a cutscene you've already seen this session can be skipped by holding attack, parry or jump
+    // a cutscene you've already seen this session can be skipped by holding attack, parry or jump; keys already
+    // down when it starts (a held beam, gun or hover) don't count until they're let go and pressed again
     this.cine.skippable = this.seenCines.has(this.cine.kind);
+    this.cine.stale = new Set(Input.down);
     this.seenCines.add(this.cine.kind);
     Input.locked = true;
     const p = this.player;
@@ -246,7 +248,8 @@ const Game = {
       C.bars = approach(C.bars, C.closing ? 0 : 1, realDt * (C.closing ? 2.5 : 3.5));
       if (C.closing && C.bars <= 0) this.cine = null;
       else if (C.skippable && !C.closing) {
-        const held = ['attack', 'sheathe', 'jump'].some((a) => Input.codes(a).some((c) => c && Input.down.has(c)));
+        for (const c of C.stale) if (!Input.down.has(c)) C.stale.delete(c);
+        const held = ['attack', 'sheathe', 'jump'].some((a) => Input.codes(a).some((c) => c && Input.down.has(c) && !C.stale.has(c)));
         C.skipHold = held ? C.skipHold + realDt : 0;
         if (C.skipHold >= 0.5 && C.owner && C.owner.skipCine) { C.owner.skipCine(); Game.freezeT = 0; this.slowT = 0; this.slowScale = 1; Sound.setSlow(false); }
       }

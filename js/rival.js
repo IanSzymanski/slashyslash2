@@ -163,6 +163,7 @@ class Rival extends Enemy {
   hovering() { return this.hoverY !== null || (this.act && this.act.kind === 'dive' && this.act.phase === 'hang'); }
   showModel() { return !this.spawning || (this.intro && (this.intro.stage === 'emerge' || this.intro.stage === 'rise' || this.intro.stage === 'title')); }
   emissive() {
+    if (this.dead) return 0;
     if (this.hitFlash > 0) return 0.8;
     if (this.diveFlash > 0) return 1;
     const a = this.act;
@@ -1823,6 +1824,8 @@ class RivalHusk {
     this.r = 1; this.h = 0.6; this.dead = false; this.t = 0; this.wave = Director.wave; this.fade = 0;
   }
   center() { return { x: this.pos.x, y: this.pos.y + 0.3, z: this.pos.z }; }
+  // a blow on the wreck (a swing, a plunge, a blast) only throws sparks: it's too heavy to move
+  hit() { FX.sparks(this.center(), 6, null, TAU, 3, 10, AEGIS_SPARK); }
   update(dt) {
     this.t += dt;
     if (!this.fade && Director.wave !== this.wave) {
