@@ -634,11 +634,12 @@ const PlayerPose = {
       return o;
     }
     if (p.sheathe) {
-      const ch = p.sheathe.empowered ? 1 : 0;
+      // after a parry the stance tightens and shakes harder as the counter charges
+      const sh = p.sheathe, ch = sh.empowered ? 0.4 + 0.6 * (sh.charge || 0) : 0;
       o.lean = 0.5 + ch * 0.1; o.hipY = -7 + ch; o.fF = [6, -1]; o.fB = [-5, -1];
       if (!p.onGround) { o.fF = [4, -4]; o.fB = [-3, -2]; }
       o.sword = 'sheathed'; o.sheathAng = Math.PI - 0.15; o.hF = [3, -9 + ch]; o.hB = [-2, -8 + ch];
-      o.tremble = ch;
+      o.tremble = sh.empowered ? ch * (0.6 + 0.8 * (sh.charge || 0)) : 0;
       return o;
     }
     if (p.plunge) {
@@ -737,9 +738,27 @@ const PlayerPose = {
       else if (!p.onGround) { o.fF = [3, -4]; o.fB = [-3, -2]; }
       return o;
     }
-    if (p.utilT > 0) {
-      o.lean = -0.25; o.hF = [7, -17]; o.hB = [-7, -16]; o.swordAng = -0.9; o.tremble = 1;
-      if (p.onGround) { o.fF = [5, -1]; o.fB = [-5, -1]; } else { o.fF = [3, -4]; o.fB = [-3, -2]; }
+    if (p.charging || p.utilT > 0) {
+      const Y = p.yaw, fx = fwdX(Y), fz = fwdZ(Y), rx = Math.cos(Y), rz = -Math.sin(Y);
+      if (p.onGround) { o.fF = [6, -1]; o.fB = [-6, -1]; o.hipY = -8.5; } else { o.fF = [3, -4]; o.fB = [-3, -2]; }
+      if (p.charging) {
+        // charging the beam, shaking once it's full. Seen from behind, the blade is drawn back low and out to
+        // the right, the body wound after it and the free hand out toward the aim; in first person it's
+        // raised across the front of the view instead, where you can watch it fill
+        const k = p.charging.k;
+        o.tremble = k >= 1 ? 1 : 0.25 * k;
+        if (Camera.fp && p === Game.player) {
+          o.lean = 0.1; o.hF = [8, -11]; o.hB = [9, -12];
+          o.bladeW = { x: -rx * 0.5 + fx * 0.8, y: 0.2, z: -rz * 0.5 + fz * 0.8 };
+        } else {
+          o.lean = 0.12 + 0.08 * k; o.twist = -0.4 * k; o.hF = [-2, -8]; o.hB = [7, -13];
+          o.bladeW = { x: rx * 0.6 - fx * 0.7, y: -0.38, z: rz * 0.6 - fz * 0.7 };
+        }
+      } else {
+        // the sweep's follow-through: the blade out to the left, the body turned after it
+        o.lean = 0.2; o.twist = 0.45; o.hF = [8, -11]; o.hB = [-3, -9];
+        o.bladeW = { x: -rx * 0.85 + fx * 0.45, y: 0.05, z: -rz * 0.85 + fz * 0.45 };
+      }
       return o;
     }
     if (p.hurtT > 0) {

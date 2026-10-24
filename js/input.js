@@ -22,14 +22,8 @@ const Input = {
 
   init(canvas) {
     this.canvas = canvas;
-    const press = (code) => {
-      if (!this.down.has(code)) this.pressed.add(code);
-      this.down.add(code);
-    };
-    const release = (code) => {
-      if (this.down.has(code)) this.released.add(code);
-      this.down.delete(code);
-    };
+    const press = (code) => this.pressCode(code);
+    const release = (code) => this.releaseCode(code);
     window.addEventListener('keydown', (e) => {
       if (this.captureCb) {
         e.preventDefault();
@@ -88,7 +82,16 @@ const Input = {
     for (const k in b) if (b[k].includes(code)) return true;
     return code === 'Space' || code.startsWith('Arrow');
   },
-  codes(action) { return S.controls.bindings[action] || []; },
+  // a binding's keys, and the touch button for it (touch.js presses "T:<action>")
+  codes(action) { return (S.controls.bindings[action] || []).concat('T:' + action); },
+  pressCode(code) {
+    if (!this.down.has(code)) this.pressed.add(code);
+    this.down.add(code);
+  },
+  releaseCode(code) {
+    if (this.down.has(code)) this.released.add(code);
+    this.down.delete(code);
+  },
   blocked(action) { return this.locked && action !== 'pause'; },
   isDown(action) { if (this.blocked(action)) return false; for (const c of this.codes(action)) if (c && this.down.has(c)) return true; return false; },
   wasPressed(action) { if (this.blocked(action)) return false; for (const c of this.codes(action)) if (c && this.pressed.has(c)) return true; return false; },
@@ -115,7 +118,8 @@ const Input = {
   // falls back to a plain lock where it isn't supported.
   requestLock() {
     this.syncLock(true);
-    if (!this.lockRequired || this.pointerLocked) return Promise.resolve(true);
+    // touch controls look with the thumb: there's no mouse to lock
+    if (!this.lockRequired || this.pointerLocked || (typeof Touch !== 'undefined' && Touch.on())) return Promise.resolve(true);
     return new Promise((resolve) => {
       let done = false, timer = 0;
       this.lockPending = true;
@@ -181,6 +185,7 @@ function codeLabel(code) {
 }
 // Primary binding in a form the 3x5 HUD font can draw.
 function hudKey(action) {
+  if (typeof Touch !== 'undefined' && Touch.on()) return '';
   const c = (S.controls.bindings[action] || [])[0];
   if (!c) return '-';
   const arrows = { ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', ArrowUp: 'UP', ArrowDown: 'DOWN' };

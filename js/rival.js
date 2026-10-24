@@ -233,16 +233,29 @@ class Rival extends Enemy {
     if (this.transT > 0) return true;
     if (this.parryInvulnT > 0) { FX.sparks(this.chest(), 4, null, TAU, 5.5, 14.5, AEGIS_SPARK); return true; }
     if (this.phase === 2 && this.guardT > 0) {
-      // fire from range sparks off the raised blade; only a blow it can reach gets parried and answered
-      if (o.ranged) { if (!this._grdT || Game.time > this._grdT) { this._grdT = Game.time + 0.15; FX.sparks(this.bladeTip(), 4, null, TAU, 3.6, 11, AEGIS_SPARK); Sound.play('shieldDeflect', {}, this.center()); } return true; }
-      this.parryPlayer(o); return true;
+      // a blade of light from range breaks on its guard; only a blade in reach gets the counter
+      if (o.ranged) { this.blockBeam(o); return true; }
+      this.parryPlayer(o);
+      return true;
     }
     return false;
+  }
+  blockBeam(o) {
+    const p = Game.player, c = this.chest(), u = flat(p.pos.x - this.pos.x, p.pos.z - this.pos.z);
+    // gunfire patters off it: a few sparks at most every 0.15 s
+    if (o.cause !== 'beam' && o.cause !== 'beamFull') {
+      if (!this._grdT || Game.time > this._grdT) { this._grdT = Game.time + 0.15; FX.sparks(this.bladeTip(), 4, null, TAU, 3.6, 11, AEGIS_SPARK); Sound.play('shieldDeflect', {}, c); }
+      return;
+    }
+    if (!(this.act && this.act.lockYaw !== undefined)) this.yaw = this.faceYaw = this.yawTo(p.pos);
+    FX.sparks({ x: c.x + u.x * 0.8, y: c.y, z: c.z + u.z * 0.8 }, o.full ? 24 : 10, { x: u.x, y: 0.2, z: u.z }, 1.6, 6, 20, AEGIS_SPARK);
+    Sound.play('clash', {}, c);
   }
   noteHurt(d) { this.hurtRecent += d; }
   shieldHit(o) {
     // bolts sent back into the shield crack it; enough cracks break it like a rebounded grenade
-    if (o.cause === 'reflect' && this.phase === 1 && !this.dying) {
+    // so does the full sword beam
+    if ((o.cause === 'reflect' || o.cause === 'beamFull') && this.phase === 1 && !this.dying) {
       this.cracks++;
       FX.ring(this.center(), 0.3, 1.8, 0.2, { c: '#9cc4ff', flat: false });
       Sound.play('reflect', {}, this.center());
@@ -880,11 +893,13 @@ class Rival extends Enemy {
     const m = RIVAL_MOVES[name], p = Game.player;
     this.attack = null; this.lunge = null;
     this.act = { kind: 'melee', move: name, m, phase: 'wind', t: 0, combo };
+    // the red flash picks its line once, at you, as it flares, and holds it to the end
+    if (m.zone) { this.yaw = this.faceYaw = this.yawTo(p.pos); this.act.lockYaw = this.yaw; }
+    else this.faceYaw = this.yawTo(p.pos);
     // the arc it will swing, for the wind-up pose; level swings alternate sides
     const dir = m.down ? -1 : m.rising ? 1 : (this.lastDir = -this.lastDir);
     this.windArc = { yaw: this.yaw, tilt: m.tilt, span: m.span, dir, pa: 0 };
     this.bladeWant = true;
-    if (!m.zone) this.faceYaw = this.yawTo(p.pos);
     Sound.play('enemyWindup', { pm: name === 'riposte' ? 1.4 : 0.6 }, this.center());
   }
   runMelee(dt, a, p) {
@@ -902,11 +917,13 @@ class Rival extends Enemy {
         if (Math.random() < 0.25 + 0.4 * k) { const u = coneDir(null, TAU), R = lerp(3.2, 1.6, k); FX.bolt({ x: c.x + u.x * R, y: c.y + u.y * R, z: c.z + u.z * R }, this.bladeTip(), 0.07, { outer: PERIL_RED, core: '#ffffff', jag: 0.35, w: 0.05 }); }
         if (Math.random() < 0.5) Game.shake(0.04 + 0.08 * k);
       }
-      // it tracks you through most of the wind-up; the red flash tracks you until its eye flashes, then locks
-      if (m.zone ? !a.glinted : a.t < wind * 0.75) this.face(p.pos, m.close ? 14 : 6, dt);
+      // it tracks you through most of the wind-up; the red flash neither turns nor steps once it flares, so
+      // getting behind it is the answer
+      if (m.zone) this.yaw = this.faceYaw = a.lockYaw;
+      else if (a.t < wind * 0.75) this.face(p.pos, m.close ? 14 : 6, dt);
       else this.faceYaw = this.yaw;
       this.windArc.yaw = this.yaw;
-      if (m.close && a.t < wind * 0.8) this.steerTo(p.pos, 1.5);
+      if (m.close && !m.zone && a.t < wind * 0.8) this.steerTo(p.pos, 1.5);
       if (!a.glinted && a.t >= Math.max(0, wind - (m.close ? CUE_LEAD : GLINT_LEAD))) {
         a.glinted = true;
         if (m.close) this.eyeGlint(m.unparryable ? PERIL_RED : '#ffd070', 2.2);
@@ -1003,6 +1020,7 @@ class Rival extends Enemy {
   }
   // the red flash lands everywhere in front of it at once, a beat into the swing
   runPerilSwing(a, m, p) {
+    this.yaw = this.faceYaw = a.lockYaw;
     if (!a.resolved && a.t >= CLOSE_CONNECT) {
       a.resolved = true;
       const c = this.chest(), pc = p.chest(), f = this.fwd();

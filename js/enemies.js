@@ -68,6 +68,7 @@ class Enemy {
     if (t === 'drone' && s === 'dive' && !this.struck) return this.st + this.diveTime();
     if (t === 'shielder' && s === 'bashWind') return this.tele(0.5);
     if (t === 'crawler' && s === 'lungeWind') return this.tele(0.45);
+    if (t === 'dummy' && s === 'windup') return this.tele(DUMMY.WIND);
     return 0;
   }
   glintPoint() {
@@ -515,6 +516,7 @@ function hurtEnemy(e, dmg, o = {}) {
   // the rival's first phase can't be skipped: its health stops at half until the limiters come off
   if (e.gateDamage) { d = e.gateDamage(d); if (d <= 0) return 0; }
   if (e.noteHurt) e.noteHurt(d);
+  if (e.onHurt) e.onHurt(d, o);
   e.hp -= d;
   e.hitFlash = 0.08;
   if (!o.noKnock && o.kv) {
@@ -550,7 +552,7 @@ function killEnemy(e, o) {
   if (e.onDeath) { e.onDeath(o); return; }
   e.dead = true; e.tethered = false; e.hp = 0;
   const c = e.center();
-  const cut = ['slash', 'heavy', 'iaido', 'saw', 'tether', 'plunge', 'chain', 'groundcut'].includes(o.cause);
+  const cut = ['slash', 'heavy', 'iaido', 'saw', 'tether', 'plunge', 'chain', 'groundcut', 'beam', 'beamFull'].includes(o.cause);
   // the model comes apart: a cut throws the halves either side of the blade
   FX.gibs(e, { kv: o.kv, dir: o.dir, cut });
   if (cut && o.dir) {

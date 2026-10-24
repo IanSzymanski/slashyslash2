@@ -248,3 +248,87 @@ table.keys td:last-child { text-align: right; }
 .grid2 button { font-size: 0.72em; padding: 0.4em 0.6em; }
 .stack.row { flex-direction: row; max-width: none; }
 .stack.row button { flex: 1; justify-content: center; }
+
+/* the tutorial's step text, top centre over the view */
+.tut {
+  position: absolute; top: 4%; left: 50%; transform: translateX(-50%);
+  width: min(44%, 24em);
+  background: rgba(14, 9, 20, 0.86);
+  border: 0.1em solid var(--panel-edge);
+  border-left: 0.3em solid #3ad0ff;
+  padding: 0.45em 0.8em 0.55em;
+  pointer-events: none;
+  box-shadow: 0 0.4em 1.4em rgba(0, 0, 0, 0.35);
+}
+.tut .tut-head { display: flex; align-items: baseline; gap: 0.6em; font-family: var(--font-display); font-size: 0.78em; letter-spacing: 0.05em; }
+.tut .tut-n { color: var(--muted); font-size: 0.85em; white-space: nowrap; flex: none; }
+.tut b { font-weight: 400; color: #9ae8ff; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tut .prog { margin-left: auto; color: #ffd070; white-space: nowrap; flex: none; }
+.tut p { margin: 0.25em 0 0; line-height: 1.12; font-size: 0.95em; }
+.tut kbd { font-size: 0.6em; vertical-align: 0.15em; }
+.tut.done { border-left-color: #5aff9a; }
+.tut.done b { color: #5aff9a; }
+/* put back at the step's checkpoint */
+.tut.fail { border-left-color: #ff5a6a; animation: tut-shake 0.3s; }
+.tut.fail b { color: #ff8a9a; }
+@keyframes tut-shake { 0%, 100% { transform: translateX(-50%); } 25% { transform: translateX(calc(-50% - 6px)); } 75% { transform: translateX(calc(-50% + 6px)); } }
+
+/* ---------- touch controls (touch.js) ---------- */
+#touch {
+  position: fixed; inset: 0; z-index: 20;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  --t-size: 1; --t-alpha: 0.6; --u: calc(1vmin * var(--t-size));
+}
+#touch .t-btn, #touch .t-top {
+  position: absolute; padding: 0; margin: 0;
+  width: calc(var(--d) * var(--u)); height: calc(var(--d) * var(--u));
+  right: calc(env(safe-area-inset-right, 0px) + (var(--x) - var(--d) / 2) * var(--u));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + (var(--y) - var(--d) / 2) * var(--u));
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(14, 9, 20, calc(var(--t-alpha) * 0.75));
+  border: calc(0.45 * var(--u)) solid rgba(255, 255, 255, calc(var(--t-alpha) * 0.55));
+  color: rgba(255, 255, 255, calc(0.25 + var(--t-alpha) * 0.75));
+  font-family: var(--font-display); font-size: calc(2.5 * var(--u)); letter-spacing: 0.04em;
+  transform: none; transition: none; touch-action: none;
+}
+#touch .t-btn:hover, #touch .t-btn:focus-visible { transform: none; background: rgba(14, 9, 20, calc(var(--t-alpha) * 0.75)); }
+#touch .t-btn.down { background: rgba(255, 42, 72, 0.62); border-color: #fff; transform: scale(0.93); }
+#touch .t-btn.cooling { opacity: 0.45; }
+#touch .b-attack { --x: 16; --y: 18; --d: 22; font-size: calc(3.2 * var(--u)); border-color: rgba(255, 90, 110, calc(var(--t-alpha) * 0.9)); }
+#touch .b-jump { --x: 38; --y: 10; --d: 14; }
+#touch .b-parry { --x: 35; --y: 31; --d: 14; border-color: rgba(255, 208, 112, calc(var(--t-alpha) * 0.9)); }
+#touch .b-dash { --x: 17; --y: 41; --d: 14; border-color: rgba(58, 208, 255, calc(var(--t-alpha) * 0.9)); }
+#touch .b-crouch { --x: 56; --y: 8; --d: 12; }
+#touch .b-tether { --x: 54; --y: 30; --d: 14; }
+#touch .b-beam { --x: 38; --y: 52; --d: 13; background: conic-gradient(rgba(255, 58, 82, 0.55) calc(var(--cd, 1) * 360deg), rgba(14, 9, 20, calc(var(--t-alpha) * 0.75)) 0); }
+#touch .b-beam.full { background: rgba(255, 208, 112, 0.7); color: #1a0e06; }
+#touch .b-ult { --x: 16; --y: 61; --d: 13; background: rgba(255, 42, 72, 0.55); border-color: #ffd070; animation: tpulse 0.8s ease-in-out infinite alternate; }
+#touch .t-top {
+  --d: 9; font-size: calc(2.2 * var(--u));
+  bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 3 * var(--u));
+}
+#touch .t-pause { --x: 6.5; }
+#touch .t-view { --x: 17; }
+@keyframes tpulse { to { box-shadow: 0 0 calc(3 * var(--u)) rgba(255, 208, 112, 0.8); } }
+/* the stick: a faint one at rest bottom left; a held one under the thumb */
+#touch .t-stick {
+  position: absolute; width: calc(26 * var(--u)); height: calc(26 * var(--u));
+  left: calc(env(safe-area-inset-left, 0px) + 20 * var(--u)); top: calc(100% - 22 * var(--u));
+  transform: translate(-50%, -50%); pointer-events: none; opacity: 0.35;
+}
+#touch .t-stick.on { opacity: 1; }
+#touch .t-base { position: absolute; inset: 0; border-radius: 50%; border: calc(0.5 * var(--u)) solid rgba(255, 255, 255, calc(var(--t-alpha) * 0.5)); background: rgba(14, 9, 20, calc(var(--t-alpha) * 0.35)); }
+#touch .t-knob { position: absolute; left: 50%; top: 50%; width: 42%; height: 42%; border-radius: 50%; background: rgba(255, 255, 255, calc(0.2 + var(--t-alpha) * 0.5)); transform: translate(-50%, -50%); }
+/* turn the device sideways */
+#rotate { position: fixed; inset: 0; z-index: 30; background: #0b0710; display: grid; place-items: center; text-align: center; padding: 2em; font-family: var(--font-body); color: var(--ink); }
+#rotate b { font-family: var(--font-display); font-size: 1.4em; display: block; margin-bottom: 0.4em; }
+#rotate p { color: var(--muted); margin: 0; }
+/* on touch screens: no hover shifts, and menus that scroll */
+body.touch { -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+body.touch button:hover { transform: none; }
+body.touch .side { overflow-y: auto; }
+body.touch #gl { cursor: default; }
+html, body { overscroll-behavior: none; }
+.scroll { touch-action: pan-y; }
+#touch.cine .t-btn:not(.b-parry), #touch.cine .t-stick, #touch.cine .t-view { display: none; }

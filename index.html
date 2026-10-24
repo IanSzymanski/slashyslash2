@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0710">
 <title>SlashySlash 3D</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,6 +23,7 @@
   <p id="nogl" class="nogl" hidden>This browser couldn't start WebGL, which the 3D version needs. The 2D game runs without it.</p>
   <div id="scanlines" hidden></div>
   <div id="ui">
+    <div id="tut" class="tut" hidden aria-live="polite"></div>
     <section id="menu" class="overlay side" hidden>
       <div class="brand">
         <h1 class="logo"><span>SLASHY</span><span class="cut">SLASH</span><span class="dim">3D</span></h1>
@@ -32,12 +37,12 @@
         <button type="button" id="btn-street" data-act="street">The 2D Street <small>free roam on the converted 2D level</small></button>
         <button type="button" id="btn-boss" data-act="boss">Rival Fight</button>
         <button type="button" id="btn-duel" data-act="duel">Melee Duel</button>
-        <button type="button" id="btn-training" data-act="training" disabled>Training <small>not built yet</small></button>
+        <button type="button" id="btn-training" data-act="training">Training <small>guided tutorial, then practice</small></button>
         <button type="button" id="btn-howto" data-act="howto">How to Play</button>
         <button type="button" id="btn-settings" data-act="settings">Settings</button>
       </nav>
       <p class="best" id="best"></p>
-      <p class="need">Keyboard and mouse required. Starting a mode locks the mouse; Esc releases it and pauses.</p>
+      <p class="need" id="need">Keyboard and mouse. Starting a mode locks the mouse; Esc releases it and pauses.</p>
     </section>
 
     <section id="pause" class="overlay side" hidden>
@@ -54,7 +59,7 @@
 
     <section id="train" class="overlay side train" hidden>
       <h2>Training</h2>
-      <p class="tag">Spawn closes the panel and drops the enemy in front of you. You can't die here.</p>
+      <p class="tag">Spawning closes the panel and drops the enemy in front of you. You can't die here.</p>
       <div class="scroll" id="train-body"></div>
       <nav class="stack row">
         <button type="button" data-act="resume">Resume</button>
@@ -106,6 +111,7 @@
 <script src="js/util.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/input.js"></script>
+<script src="js/touch.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/fx.js"></script>
 <script src="js/world.js"></script>
@@ -117,6 +123,7 @@
 <script src="js/aegis.js"></script>
 <script src="js/player.js"></script>
 <script src="js/utilities.js"></script>
+<script src="js/ultimates.js"></script>
 <script src="js/enemies.js"></script>
 <script src="js/specialists.js"></script>
 <script src="js/projectiles.js"></script>
@@ -124,6 +131,7 @@
 <script src="js/aegisplayer.js"></script>
 <script src="js/props.js"></script>
 <script src="js/rival.js"></script>
+<script src="js/training.js"></script>
 <script src="js/upgrades.js"></script>
 <script src="js/waves.js"></script>
 <script src="js/views.js"></script>

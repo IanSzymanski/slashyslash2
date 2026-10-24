@@ -50,6 +50,7 @@ const UI = {
   // A run starts on the click that asked for it, since locking the pointer needs one. If the browser
   // refuses (it does for about a second after Esc), the run waits paused with a hint.
   startRun(mode) {
+    Touch.enterPlay();
     Game.newRun(mode);
     return Input.requestLock().then((ok) => { if (!ok) { Game.pause(); this.lockHint(true); } });
   },
@@ -139,10 +140,12 @@ const UI = {
 
   // ---------- how to play ----------
   renderHowTo() {
+    // on a touch screen, the buttons' names stand in for the keys
+    const touch = Touch.on(), actionLabel = (a) => (touch ? Touch.label(a) : window.actionLabel(a));
     const rows = [
-      ['Look (click the game to lock the mouse)', 'Mouse'],
-      ['Zoom the camera; all the way in is first person', 'Mouse wheel'],
-      ['Move (relative to the camera); keep running and it builds to a sprint', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
+      touch ? ['Look (drag anywhere on the right; a held button drags too)', 'Right thumb'] : ['Look (click the game to lock the mouse)', 'Mouse'],
+      touch ? ['Switch first and third person', '1P / 3P button'] : ['Zoom the camera; all the way in is first person', 'Mouse wheel'],
+      touch ? ['Move: the stick appears under your thumb; push further to run', 'Left thumb'] : ['Move (relative to the camera); keep running and it builds to a sprint', `${actionLabel('forward')} · ${actionLabel('left')} · ${actionLabel('back')} · ${actionLabel('right')}`],
       ['Skid turn: reverse at speed to plant a hand and push off', `${actionLabel('back')} while sprinting`],
       ['Vault over cars and anything chest-high', 'Run into it'],
       ['Climb a ledge you can reach (a container from the street)', 'Walk or jump into it'],
@@ -161,24 +164,26 @@ const UI = {
       ['Cut down street lamps; slashes and blasts drop them', actionLabel('attack')],
       ['Parry stance (15 shield, refunded on parry)', actionLabel('sheathe')],
       ['Counter after a parry', `Release ${actionLabel('sheathe')}`],
-      ['Overload: shock ring that interrupts (10s cooldown)', actionLabel('utility')],
+      ['Sword beam: tap for a quick blade, hold for a massive wave; a hit breaks the charge', actionLabel('utility')],
       ['Tether: tap fling, hold zip (at a ledge\'s edge or the crane: up onto it)', actionLabel('tether')],
       ['Grab, swing and throw barrels', `Hold ${actionLabel('tether')}, release`],
       ['Rebound a pulse grenade: reel in, kick it back', `${actionLabel('tether')} on it, aim`],
       ['Sawblade ultimate (when charged)', `Hold ${actionLabel('ultimate')} 1s`],
     ];
-    // AEGIS-07 as the player: two modes on F, the gun and beam or the blade and block
+    // AEGIS-07 as the player: two modes on F, the gun and beam or the blade and block. Its touch buttons are
+    // named for what they do in each mode.
+    const aL = (a, mode) => (!touch ? actionLabel(a) : a === 'utility' ? 'MODE' : a === 'sheathe' ? (mode === 'gun' ? 'BEAM' : 'BLOCK') : actionLabel(a));
     const aegis = [
-      ['Switch weapon mode, gunner or melee (letting go, dashing, attacking or a hit cancels it)', `Hold ${actionLabel('utility')} 1s`],
+      ['Switch weapon mode, gunner or melee (letting go, dashing, attacking or a hit cancels it)', `Hold ${aL('utility')} 1s`],
       ['Gunner: machine gun, single-target rounds from a 40-round magazine', `Hold ${actionLabel('attack')}`],
-      ['Gunner: reload (it also reloads itself when empty)', actionLabel('reload')],
-      ['Gunner: beam (20 shield, drains while held); pierces everything on its line; you stand, or hover, still', `Hold ${actionLabel('sheathe')}`],
+      touch ? ['Gunner: reloads itself when the magazine runs dry', 'Automatic'] : ['Gunner: reload (it also reloads itself when empty)', actionLabel('reload')],
+      ['Gunner: beam (20 shield, drains while held); pierces everything on its line; you stand, or hover, still', `Hold ${aL('sheathe', 'gun')}`],
       ['Melee: two lunging swipes and a thrust (toward the crosshair)', `Tap ${actionLabel('attack')}`],
       ['Melee: overhead cleave that throws a ring across the ground', `Hold ${actionLabel('attack')}`],
       ['Melee: slide attack, a low sweep that launches', `${actionLabel('attack')} while sliding`],
       ['Melee: jet plunge (in the air)', `Hold ${actionLabel('attack')}`],
-      ['Melee: block on the blade (15 shield, refunded on a block)', actionLabel('sheathe')],
-      ['Melee: pulse burst after a block; hold to draw the arm back for more', `Release ${actionLabel('sheathe')}`],
+      ['Melee: block on the blade (15 shield, refunded on a block)', aL('sheathe', 'blade')],
+      ['Melee: pulse burst after a block; hold to draw the arm back for more', `Release ${aL('sheathe', 'blade')}`],
       ['Jet dash (2 charges, invulnerable); in melee, attack out of it for a boosted thrust', `${actionLabel('dash')} + direction`],
       ['Hover on the jets after a double jump (crouch to drop)', `${actionLabel('jump')} twice`],
       ['Tether: tap fling, hold zip; grab barrels; reel in and kick grenades', actionLabel('tether')],
@@ -191,7 +196,7 @@ const UI = {
       ['AEGIS-07 strike rings: get out before the light erupts', 'Move · ' + actionLabel('dash')],
       ['Pause (training: spawn panel)', actionLabel('pause')],
       ['Skip a cutscene you have seen', `Hold ${actionLabel('sheathe')}`],
-      ['Pick an endless upgrade', 'Click, or 1 / 2 / 3'],
+      ['Pick an endless upgrade', touch ? 'Tap a card' : 'Click, or 1 / 2 / 3'],
     ];
     const all = rows.concat(SaveData.character === 'aegis' ? aegis : ronin, rival);
     document.getElementById('howto-table').innerHTML = all.map(([a, k]) => `<tr><td>${a}</td><td><kbd>${k}</kbd></td></tr>`).join('');
@@ -211,7 +216,10 @@ const UI = {
     safeStorageSet('slashyslash3d.tab', this.tab);
     const body = document.getElementById('settings-body');
     body.innerHTML = '';
-    for (const item of SETTINGS_SCHEMA[this.tab]) body.appendChild(this.renderItem(item));
+    let items = SETTINGS_SCHEMA[this.tab];
+    // the controls you're using come first
+    if (this.tab === 'controls' && !Touch.on()) { const k = items.findIndex((i) => i.type === 'heading' && i.label.startsWith('Keyboard')); items = items.slice(k).concat(items.slice(0, k)); }
+    for (const item of items) body.appendChild(this.renderItem(item));
   },
   renderItem(item) {
     const id = item.key ? 'set-' + item.key.replace(/\./g, '-') : '';
@@ -296,6 +304,22 @@ const UI = {
       }
       wrap.appendChild(table);
       return wrap;
+    }
+    if (item.type === 'choice') {
+      const row = document.createElement('div'); row.className = 'row preset';
+      row.innerHTML = `<label>${item.label}</label><div class="seg" role="group"></div>`;
+      const seg = row.querySelector('.seg'), v = getPath(S, item.key);
+      for (const [val, name] of item.options) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.textContent = name; b.classList.toggle('on', v === val);
+        b.addEventListener('click', () => {
+          Sound.play('ui'); setPath(S, item.key, val); saveSettings();
+          if (item.key === 'controls.touch') Touch.changed();
+          this.renderSettings();
+        });
+        seg.appendChild(b);
+      }
+      return row;
     }
     if (item.type === 'test-sound') {
       const row = document.createElement('div'); row.className = 'row';

@@ -153,6 +153,8 @@ class AegisPlayer extends Player {
     this.updateGun(dt);
     this.updateUlt(dt);
   }
+  // its ultimate is the strike, run from updateCombat, not RONIN's held sawblade
+  updateUltHold() {}
   moveMods(dt, I) {
     super.moveMods(dt, I);
     // firing on the ground is a steadier walk with no sprint; holding F slows it a little
@@ -458,7 +460,7 @@ class AegisPlayer extends Player {
       B.tick = AP.BEAM_TICK;
       for (const e of Game.enemies) {
         if (e.dead || e.spawning || rayBody(o, d, B.len, e, AP.BEAM_R) < 0) continue;
-        hurtEnemy(e, AP.BEAM_DMG, { kv: { x: d.x * 5, y: 2, z: d.z * 5 }, dir: d, cause: 'beam', stagger: 0.15, hitstop: 0, ranged: true });
+        hurtEnemy(e, AP.BEAM_DMG, { kv: { x: d.x * 5, y: 2, z: d.z * 5 }, dir: d, cause: 'laser', stagger: 0.15, hitstop: 0, ranged: true });
       }
       for (const pr of Game.props) if (!pr.dead && pr.grabR && rayBody(o, d, B.len, pr, AP.BEAM_R) >= 0) pr.hit(12, { kv: { x: d.x * 6, y: 4, z: d.z * 6 } });
     }
@@ -589,6 +591,8 @@ class AegisPlayer extends Player {
   // 0..1: how long the arm has been held back since the block, in real time (the parry's slow motion doesn't
   // make it charge slower)
   burstCharge(s) { return s && s.empowered ? clamp((s.heldReal || 0) / AP.BURST_FULL, 0, 1) : 0; }
+  // the arm stays drawn back for a second after a block before the burst fires by itself
+  counterWindow() { return 1.0; }
   stanceFX(s) {
     const e = this.emitter();
     if (s.empowered) s.heldReal = (s.heldReal || 0) + this.realStep();
@@ -609,6 +613,14 @@ class AegisPlayer extends Player {
     FX.elec(e, 1.1, 4, AEGIS_PELEC);
     Sound.play('blockHit');
     if (!was && this.sheathe && this.sheathe.empowered) { this.sheathe.heldReal = 0; if (this.loops.charge) this.loops.charge.set(0.4); }
+  }
+  // hit while the arm is drawn back: the charge sparks off the blade, and no burst
+  breakCounter() {
+    const k = this.burstCharge(this.sheathe), e = this.emitter();
+    this.cancelSheathe();
+    FX.sparks(e, 8 + Math.round(20 * k), null, TAU, 4, 12 + 10 * k, AEGIS_PSPARK);
+    FX.ring(e, 0.2, 1 + k, 0.18, { c: AEGIS_P.hi, flat: false });
+    Sound.play('beamBreak', { power: k });
   }
   // released after a block: the blade drives forward and a focused pulse bursts out of it, stronger the
   // longer the arm was held back
@@ -769,7 +781,7 @@ class AegisPlayer extends Player {
     this.ultAim = null; this.ultHold = 0;
     if (Game.btOwner === this) Game.endBulletTime();
     if (!A || !A.plan) return;
-    this.ultCharge = 0;
+    this.ultCharge = 0; this.ultReadyPlayed = false;
     Game.stats.ults++;
     const o = this.lens(), v = A.plan.v;
     Game.projectiles.push(new StrikeProbe(o, v, { owner: this, cfg: STRIKE.ult }));

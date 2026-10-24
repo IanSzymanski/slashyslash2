@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Headless smoke test. Boots the 3D page and checks WebGL draws, runs scripted checks of the moves
-// (Phases 1 and 2), the nav graph, each enemy type's answer and the wave modes (Phase 3) and the rival's
-// rules (Phase 5), then plays Endless from wave 6 and the rival fight with random input and mouse look.
+// (Phases 1 and 2), the nav graph, each enemy type's answer and the wave modes (Phase 3), the rival's
+// rules (Phase 5), and Training's tutorial, touch controls and the Sawblade (Phase 6), then plays Endless
+// from wave 6, the rival fight and the training hall with random input and mouse look.
 // Fails on any page error, a camera inside a box or under the street, a body inside a box or outside the
 // arena, a shader compiled mid-fight, or a failed check.
 // Needs the dev dependencies:  npm install
@@ -189,15 +190,34 @@ async function run(browser, file, errors) {
     ok(p.sheathe && p.sheathe.empowered, 'a parry empowers the stance');
     ok(Math.abs(p.shield - shield) < 0.01, 'a parry refunds its shield cost');
     ok(e.stun > 0, 'a parried scrapper is staggered');
-    // releasing E throws the counter, a big explosive slash from where you stand, which cuts it down and a
-    // second scrapper 9 m off along the aim
-    e.hp = 60;
-    const e2 = T.scrapper(9, 0.3); e2.hp = 60;
+    // holding E charges the counter to full; releasing throws a big explosive slash from where you stand, which
+    // cuts it down and a second scrapper 9 m off along the aim
+    let tiers = 0;
+    for (let i = 0; i < 120 && p.sheathe && p.sheathe.charge < 1; i++) { T.frame(1); tiers = p.sheathe ? p.sheathe.tier : tiers; }
+    ok(p.sheathe && p.sheathe.charge >= 1 && tiers === COUNTER.TIERS, `holding E after the parry charges the counter to full through its ${COUNTER.TIERS} steps`);
+    e.hp = 120;
+    const e2 = T.scrapper(9, 0.3); e2.hp = 120;
     const px0 = p.pos.x, pz0 = p.pos.z;
     T.release('KeyE');
     let drift = 0;
     for (let i = 0; i < 60; i++) { T.frame(1); drift = Math.max(drift, Math.hypot(p.pos.x - px0, p.pos.z - pz0)); }
-    ok(e.dead && e2.dead && drift < 0.5, `the counter cuts down both scrappers without carrying you (moved ${drift.toFixed(2)} m)`);
+    ok(e.dead && e2.dead && drift < 0.5, `the full counter cuts down both scrappers without carrying you (moved ${drift.toFixed(2)} m)`);
+    // a tapped counter hits like a heavy; a hit while it charges shatters it
+    const counterOn = (hold, hitAt) => {
+      const q = T.fresh(), x = T.scrapper(2.0, 0, { cd: 0 }); x.hp = 999;
+      T.face(x.pos.x, x.pos.z);
+      for (let i = 0; i < 120 && !x.glinted; i++) T.frame(1);
+      T.frame(6); T.press('KeyE');
+      const n = Game.stats.parries;
+      for (let i = 0; i < 40 && Game.stats.parries === n; i++) T.frame(1);
+      for (let i = 0; i < hold * 60 && q.sheathe; i++) { if (i === hitAt) q.takeHit({ dmg: 10, from: { x: q.pos.x + 1, y: 1, z: q.pos.z } }); T.frame(1); }
+      const broke = !q.sheathe;
+      T.release('KeyE'); T.frame(60);
+      return { dmg: 999 - x.hp, broke };
+    };
+    const tap = counterOn(0, -1), broken = counterOn(1, 36);
+    ok(Math.abs(tap.dmg - HEAVIES.rise.dmg) <= 3, `a tapped counter hits like a heavy (${tap.dmg})`);
+    ok(broken.broke && broken.dmg === 0, `a hit while the counter charges shatters it (${broken.dmg} dealt)`);
 
     // an unparried strike costs shield, not health
     p = T.fresh();
@@ -330,12 +350,30 @@ async function run(browser, file, errors) {
     for (let i = 0; i < 3; i++) { T.press('Mouse0'); T.frame(12); T.release('Mouse0'); T.frame(i < 2 ? 18 : 60); e.pos.x = p.pos.x + 2.4; e.pos.z = p.pos.z; e.vel.x = e.vel.z = 0; }
     ok(far.hp < 500, `the heavy slam's ground ring hits a scrapper 6 m behind (${500 - far.hp})`);
 
-    // Overload shocks everything close, then refuses until its cooldown is done
-    p = T.fresh(); const o1 = T.enemy('scrapper', 3, 0), o2 = T.enemy('scrapper', -2, 2);
-    T.tap('KeyF'); T.frame(10);
-    ok(o1.hp < o1.maxHp && o2.hp < o2.maxHp && p.utilCD > 9, 'Overload shocks everything close and starts its cooldown');
+    // the sword beam: a tap throws a weak blade that breaks on the first scrapper, then refuses on cooldown
+    p = T.fresh();
+    const b1 = T.enemy('scrapper', 12, 0, { hp: 500, frozen: true }), b2 = T.enemy('scrapper', 18, 0, { hp: 500, frozen: true });
+    T.aimAt(b1.center()); T.tap('KeyF'); T.frame(40);
+    ok(b1.hp < 500 && 500 - b1.hp <= 20 && b2.hp === 500 && p.utilCD > 6, `a tapped sword beam is a weak blade that stops at the first scrapper (${500 - b1.hp}, ${500 - b2.hp} behind)`);
     T.tap('KeyF'); T.frame(2);
-    ok(p.utilFlash > 0, 'Overload on cooldown is refused');
+    ok(p.utilFlash > 0, 'the sword beam on cooldown is refused');
+    // held to full, the massive wave cuts a whole line, one off to the side and a shield scrapper from the front
+    p = T.fresh();
+    const line = [6, 12, 18, 26].map((d) => T.enemy('scrapper', d, 0, { hp: 500, frozen: true }));
+    const wide = T.enemy('scrapper', 20, 5, { hp: 500, frozen: true }), guard = T.enemy('shielder', 9, 2, { hp: 500 });
+    guard.yaw = yawOf(-1, 0);
+    T.aimAt(line[1].center()); T.press('KeyF'); T.frame(75);
+    const full = p.charging && p.charging.full;
+    T.release('KeyF'); T.frame(100);
+    const cut = [...line, wide, guard].map((e) => 500 - e.hp);
+    ok(full && cut.every((d) => d >= 40), `a full charge sweeps a massive wave through everything in its path (${cut.join(', ')})`);
+    // a hit while charging breaks it: no wave, a short cooldown; a dash drops it at no cost
+    p = T.fresh(); T.press('KeyF'); T.frame(40);
+    p.takeHit({ dmg: 5, from: { x: p.pos.x + 3, y: 1, z: p.pos.z }, kind: 'melee' });
+    T.frame(2); T.release('KeyF'); T.frame(10);
+    ok(!p.charging && p.utilCD > 1 && p.utilCD < 2.5 && !Game.projectiles.some((q) => q.kind === 'swordbeam'), `a hit while charging breaks the sword beam (cooldown ${p.utilCD.toFixed(1)} s)`);
+    p = T.fresh(); T.press('KeyF'); T.frame(30); T.tap('ShiftLeft'); T.frame(5); T.release('KeyF'); T.frame(5);
+    ok(!p.charging && p.utilCD === 0 && !Game.projectiles.some((q) => q.kind === 'swordbeam'), 'a dash drops a charging sword beam at no cost');
 
     // bullet jump out of a slide; wall slide and wall kick off a building
     p = T.fresh(); Camera.pitch = 0.35; T.press('KeyW'); T.frame(30); T.press('KeyC'); T.frame(3);
@@ -504,7 +542,7 @@ async function run(browser, file, errors) {
     // fires waver and neon stutters, in the baked light and on characters
     let fmin = 9, fmax = 0;
     for (let i = 0; i < 90; i++) { T.frame(1); fmin = Math.min(fmin, World.flick.fire); fmax = Math.max(fmax, World.flick.fire); }
-    Gfx._buzz.next = 0; T.frame(2);
+    Gfx._buzz.t = 0; Gfx._buzz.next = 0; T.frame(2);
     ok(fmax - fmin > 0.05 && World.flick.buzz < 1 && Gfx.uBuzz.value === World.flick.buzz, `fires flicker (${fmin.toFixed(2)}-${fmax.toFixed(2)}) and neon stutters (${World.flick.buzz.toFixed(2)})`);
     // a Blackout wave turns the street lamps off with a rebake, and clearing the wave turns them back on
     const lampAt = World.def.lights.find((l) => l.street && l.group === 'lamp'), under = { x: lampAt.x, y: lampAt.y - 4, z: lampAt.z };
@@ -696,7 +734,7 @@ async function run(browser, file, errors) {
     R = rival(0, -3, { phase2: true });
     p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
     R.yaw = R.faceYaw = R.yawTo(p.pos); R.startPeril();
-    // it tracks you until its eye flashes, so get behind it after that
+    // it holds the line it flared on, so getting behind it at any point beats it
     for (let i = 0; i < 90 && R.act && R.act.move === 'peril' && !R.act.glinted; i++) T.frame(1);
     const f1 = R.fwd();
     p.pos.x = p.prev.x = R.pos.x - f1.x * 2.5; p.pos.z = p.prev.z = R.pos.z - f1.z * 2.5;
@@ -713,6 +751,15 @@ async function run(browser, file, errors) {
     T.release('KeyW');
     ok(p.hp === PC.MAX_HP && R.stunT > 0, `dashing straight through its body beats the red flash (ended ${distXZ(p.pos, R.pos).toFixed(1)} m behind it)`);
     S.gameplay.invincible = true;
+    // once it flares red it holds its line: you circle to its side and it neither turns nor steps after you
+    R = rival(0, -3, { phase2: true });
+    R.yaw = R.faceYaw = R.yawTo(p.pos) + 0.5; R.startPeril();
+    const lockY = R.yaw, lockAt = { x: R.pos.x, z: R.pos.z }, lockF = R.fwd(), aimed = Math.abs(angDiff(lockY, R.yawTo(p.pos)));
+    T.frame(3);
+    p.pos.x = p.prev.x = R.pos.x - lockF.z * 4; p.pos.z = p.prev.z = R.pos.z + lockF.x * 4;
+    let swung = 0;
+    for (let i = 0; i < 90 && R.act && R.act.move === 'peril'; i++) { T.frame(1); swung = Math.max(swung, Math.abs(angDiff(lockY, R.yaw))); }
+    ok(aimed < 0.01 && swung < 0.01 && distXZ(R.pos, lockAt) < 0.5, `the red flash aims at you as it flares, then holds its line (turned ${swung.toFixed(3)} rad, moved ${distXZ(R.pos, lockAt).toFixed(2)} m)`);
     // a sword dash chain: to one side of the line to you, to the other, then a cut through where you stand
     R = rival(0, -14, { phase2: true });
     R.startChain('zigzag'); R.act.side = 1;
@@ -832,6 +879,19 @@ async function run(browser, file, errors) {
     const ranged = (q) => q.has('strike') || q.has('dive');
     ok(!ranged(stood) && ranged(ran) && typeof BladeWave === 'undefined', `phase 2 calls strikes or dives only when you run, and throws no blade waves (standing: ${[...stood].join(' ') || 'nothing'}; running: ${[...ran].join(' ') || 'nothing'})`);
     Game.projectiles = []; Game.hazards = [];
+    // a tapped sword beam burns a strike probe out of the air
+    {
+      R = rival(0, -30, { phase2: true });
+      p.utilCD = 0; p.iframes = 0;
+      T.aimAt({ x: p.pos.x, y: p.pos.y + 1.5, z: p.pos.z - 20 }); T.frame(1);
+      // on the beam's line 5 m out, tossed up so it hangs there while the beam flies
+      const c = p.chest(), d = p.aimDir;
+      const pr = new StrikeProbe({ x: c.x + d.x * 5, y: c.y + d.y * 5, z: c.z + d.z * 5 }, { x: 0, y: 5, z: 0 }, { owner: R, hostile: true, cfg: STRIKE.boss });
+      Game.projectiles.push(pr);
+      T.tap('KeyF'); T.frame(30);
+      ok(pr.dead && !Game.hazards.some((h) => h.kind === 'strike'), 'a tapped sword beam burns a strike probe out of the air');
+      Game.enemies = []; Game.projectiles = []; Game.hazards = [];
+    }
     // the knockout: a slow-motion cutscene, then it lies in the street as a husk until the next wave
     R = rival(0, -6, { phase2: true });
     R.hp = 5; hurtEnemy(R, 30, { cause: 'slash', dir: { x: 0, y: 0, z: -1 } });
@@ -961,7 +1021,231 @@ async function run(browser, file, errors) {
       ok(denied && aiming && fired && erupted && br.dead, `the orbital strike: no charge, no strike; held Q aims in bullet time, a press fires the probe, and the eruption kills a brute in its ring (${br.dead ? 'dead' : br.hp + ' hp left'})`);
       Game.enemies = []; Game.hazards = []; Game.projectiles = [];
     }
+    // a hit while the arm is drawn back after a block breaks the charge: no burst
+    {
+      p = aegis(); p.mode = 'blade'; T.frame(5);
+      T.press('KeyE'); T.frame(2);
+      const stance = !!p.sheathe;
+      if (stance) p.doParry({ from: { x: p.pos.x + 2, y: p.pos.y + 1.5, z: p.pos.z } });
+      for (let i = 0; i < 240 && p.parryActive(); i++) T.frame(1);
+      const drawn = !!(p.sheathe && p.sheathe.empowered);
+      p.iframes = 0;
+      const r = p.takeHit({ dmg: 5, from: { x: p.pos.x + 2, y: p.pos.y + 1, z: p.pos.z } });
+      T.release('KeyE'); T.frame(10);
+      ok(stance && drawn && r === 'hit' && !p.sheathe && !(p.burstT > 0), `a hit while the arm is drawn back after a block breaks the charge, and no burst fires (${r})`);
+    }
+    // Training as AEGIS-07: the tutorial teaches RONIN's moves, so it plays as RONIN; skipping it hands the
+    // hall back to AEGIS-07
+    {
+      const done0 = SaveData.tutorialDone;
+      Game.toMenu(); SaveData.tutorialDone = false;
+      UI.act('training'); T.frame(5);
+      const asRonin = Tutorial.active && Game.player.charId === 'ronin' && !(Game.player instanceof AegisPlayer);
+      Game.pause(); Training.act('train-skip'); await new Promise((r) => setTimeout(r, 30)); T.frame(5);
+      Render.draw(1 / 60);
+      const P = Game.player;
+      ok(asRonin && !Tutorial.active && P instanceof AegisPlayer && Math.abs(P.h - P.M.H) < 0.01 && Render.playerRig === Render.rigs.aegis && Game.state === 'playing', 'with AEGIS-07 picked, the Training tutorial plays as RONIN, and skipping it hands the hall back to AEGIS-07');
+      Game.toMenu(); SaveData.tutorialDone = done0;
+    }
     SaveData.character = 'ronin';
+    // ---------- Training, the tutorial, touch controls and the Sawblade ----------
+    {
+      Game.toMenu(); SaveData.tutorialDone = false; S.gameplay.invincible = false;
+      UI.act('training'); T.frame(5);
+      const P = Game.player, St = World.def.tutorialStart;
+      let D = Training.dummy;
+      ok(Arena.id === 'training' && Tutorial.active && Tutorial.step().id === 'move' && distXZ(P.pos, St) < 0.5 && D && D.type === 'dummy' && !document.getElementById('tut').hidden,
+        'Training opens in the training hall with the tutorial at the course start, its text up, and the dummy on its mat');
+      const face = (x, z) => { Camera.yaw = yawOf(x - P.pos.x, z - P.pos.z); };
+      // the orbit camera moves as it pitches, so aim until the crosshair settles on the point
+      const aimHard = (c) => { for (let i = 0; i < 8; i++) T.aimAt(c); };
+      const walkTo = (x, z, max = 300) => { for (let i = 0; i < max; i++) { face(x, z); T.press('KeyW'); T.frame(1); if (Math.hypot(P.pos.x - x, P.pos.z - z) < 0.5) break; } T.release('KeyW'); T.frame(20); };
+      const stepIs = (id, n = 200) => { for (let i = 0; i < n && Tutorial.step().id !== id; i++) T.frame(1); return Tutorial.step().id === id; };
+      const fails = (id) => TUTORIAL_STEPS.find((q) => q.id === id).fails || 0;
+      ok(!Training.doorOpen && Tutorial.locked('tether') && Tutorial.locked('bullet'), 'the tutorial starts with the door to the combat hall shut and the tether and bullet jump held back');
+      // the movement hall's floor: a marker, the 2.5 m block, a jump to the 5.5 m one, a double jump to the tower
+      walkTo(6, 16); walkTo(9, 19); face(9, 24); T.press('KeyW'); T.frame(40); T.release('KeyW');
+      ok(stepIs('jump') && P.pos.y > 2.4, `walking to the marker and into the orange block finishes the first two steps (${Tutorial.step().id}, on top at ${P.pos.y.toFixed(1)} m)`);
+      walkTo(9, 23); face(16, 30); T.press('KeyW'); T.frame(8); T.press('Space');
+      for (let i = 0; i < 90 && !(P.onGround && P.pos.y > 5.4); i++) T.frame(1);
+      T.release('Space'); T.release('KeyW');
+      stepIs('double');
+      walkTo(17, 32.4, 200); face(18, 40); T.press('KeyW'); T.press('Space'); T.frame(16); T.release('Space'); T.frame(3); T.press('Space'); T.frame(40); T.release('Space'); T.frame(30); T.release('KeyW');
+      ok(stepIs('slide') && P.pos.y > 12.9, `a jump onto the teal block and a double jump onto the 13 m tower lead onto the walkway (${Tutorial.step().id})`);
+      // falling off the walkway puts you back at the step's checkpoint
+      walkTo(17, 44); face(10, 44); T.press('KeyW'); T.frame(90); T.release('KeyW'); T.frame(10);
+      ok(fails('slide') === 1 && P.pos.y > 12.9 && Tutorial.step().id === 'slide', `walking off the walkway's edge puts you back on it to try again (${P.pos.y.toFixed(1)} m)`);
+      // the slide gap: too low to walk or crouch through; a slide goes under
+      walkTo(18, 44); face(18, 60); T.press('KeyW'); T.frame(60); T.release('KeyW'); T.frame(5);
+      const blocked = P.pos.z < 48;
+      walkTo(18, 38.5); face(18, 60); T.press('KeyW');
+      for (let i = 0; i < 200 && P.pos.z < 44.5; i++) T.frame(1);
+      T.press('KeyC'); T.frame(70); T.release('KeyC'); T.frame(10); T.release('KeyW');
+      ok(blocked && stepIs('vault'), `the wall's gap stops a run and lets a slide through (${Tutorial.step().id})`);
+      // the vault slot: a jump at it doesn't get through; a run vaults it
+      walkTo(18, 56); face(18, 70); T.press('KeyW'); T.frame(20); T.press('Space'); T.frame(30); T.release('Space'); T.frame(30); T.release('KeyW'); T.frame(20);
+      const jumpBlocked = P.pos.z < 64.2;
+      walkTo(18, 54); face(18, 70); T.press('KeyW'); T.frame(120); T.release('KeyW');
+      ok(jumpBlocked && stepIs('dash'), `a jump can't get through the slot above the barrier; a run vaults it (${Tutorial.step().id})`);
+      // the laser doorway: walking in throws you back; a dash goes through
+      walkTo(18, 72); walkTo(14, 72);
+      const zaps = Training.n('zap');
+      face(0, 72); T.press('KeyW'); T.frame(40); T.release('KeyW'); T.frame(10);
+      const zapped = Training.n('zap') > zaps && P.pos.x > 10;
+      walkTo(13, 72); face(0, 72); T.press('KeyW'); T.frame(6); T.tap('ShiftLeft'); T.frame(30); T.release('KeyW');
+      ok(zapped && stepIs('kick') && P.pos.x < 10, `the red lasers throw back a walk and let a dash through (${P.pos.x.toFixed(1)})`);
+      // the wall kick: a double jump at the pier falls short of the deck; kicking from wall to wall gets up
+      walkTo(0, 71.2); face(0, 60); T.press('KeyW'); T.press('Space'); T.frame(16); T.release('Space'); T.frame(3); T.press('Space'); T.frame(60); T.release('Space'); T.release('KeyW'); T.frame(60);
+      const short = Tutorial.step().id === 'kick' && P.pos.y < 14;
+      walkTo(0, 71); face(0, 80); T.press('KeyW'); T.press('Space');
+      for (let i = 0; i < 90 && !P.cling; i++) T.frame(1);
+      T.release('Space');
+      let clings = P.cling ? 1 : 0;
+      for (let k = 0; k < 6 && !(P.onGround && P.pos.y > 24); k++) {
+        face(0, k % 2 ? 80 : 60); T.frame(2); T.press('Space');
+        for (let i = 0; i < 10 && P.cling; i++) T.frame(1);
+        for (let i = 0; i < 60 && !P.cling && !(P.onGround && P.pos.y > 24); i++) T.frame(1);
+        T.release('Space'); if (P.cling) clings++;
+      }
+      T.release('KeyW');
+      ok(short && clings >= 2 && stepIs('gap'), `wall kicks from the purple wall to the pier and back climb to the deck a double jump can't reach (${clings} grabs)`);
+      // the long jump through the opening: one dash falls short (back to the deck), two clear it
+      const longJump = (dashes) => {
+        walkTo(0, 68); face(0, 0); T.press('KeyW');
+        let t0 = -1, dj = false;
+        const fired = dashes.map(() => false);
+        for (let i = 0; i < 400; i++) {
+          T.frame(1);
+          if (t0 < 0 && P.pos.z < 48.6) { T.press('Space'); t0 = Game.time; }
+          if (t0 < 0) continue;
+          const a = Game.time - t0;
+          if (!dj && a >= 0.45) { dj = true; T.release('Space'); T.frame(1); T.press('Space'); }
+          dashes.forEach((d, k) => { if (!fired[k] && a >= d) { fired[k] = true; T.tap('ShiftLeft'); } });
+          if ((P.onGround || P.mantle) && a > 0.3) break;
+        }
+        T.release('KeyW'); T.release('Space'); T.frame(30);
+      };
+      longJump([1.2]);
+      const oneShort = fails('gap') === 1 && Tutorial.step().id === 'gap' && P.pos.y > 24;
+      longJump([1.0, 1.3]);
+      ok(oneShort && stepIs('zip') && P.pos.z < 4, `the gap to the tether room: a double jump and one dash falls short and puts you back, two dashes clear it (${Tutorial.step().id})`);
+      ok(!Tutorial.locked('tether'), 'the tether comes free in the tether room');
+      // the tether: hold zips up the 15 m ledge to the football field
+      walkTo(0, -14); aimHard({ x: 0, y: 14.4, z: -24 }); T.press('Mouse2'); T.frame(150); T.release('Mouse2'); T.frame(40);
+      ok(stepIs('football') && P.pos.y > 14.9, `a held tether zips up the ledge onto the field (${P.pos.y.toFixed(1)} m)`);
+      // the ball machine: tether a ball in the air, aim between the posts, and the kick goes where you aim
+      walkTo(-3, -31);
+      const GL = World.def.course.GOAL;
+      let arcSeen = false, rebounds = 0;
+      for (let k = 0; k < 8 && Tutorial.step().id === 'football'; k++) {
+        let ball = null;
+        for (let i = 0; i < 400; i++) { T.frame(1); Views.syncTells(Game.realTime); arcSeen = arcSeen || Views.arcs.some((m) => m.visible); ball = Game.projectiles.find((o) => o.kind === 'football' && o.state === 'flying' && o.t > 0.35); if (ball) break; }
+        if (!ball) break;
+        T.aimAt(ball.pos); T.tap('Mouse2', 1);
+        for (let i = 0; i < 30 && !(P.tether && P.tether.mode === 'rebound'); i++) T.aimAt(ball.pos);
+        if (P.tether && P.tether.mode === 'rebound') rebounds++;
+        for (let i = 0; i < 160 && P.tether; i++) T.aimAt({ x: 0, y: GL.y0 + 3, z: GL.z });
+        T.frame(60);
+        if (Tutorial.step().id === 'football' && fails('football')) walkTo(-3, -31);
+      }
+      ok(arcSeen && rebounds >= 2 && Training.n('goal') >= 2 && stepIs('slash') && Training.doorOpen, `the machine's balls show their arcs; tethered and kicked between the posts, two goals open the door (${Training.n('goal')} goals, ${rebounds} catches)`);
+      // through the door and down into the combat hall
+      walkTo(0, -50.5); walkTo(0, -62, 300);
+      ok(P.pos.z < -55 && P.pos.y < 0.5 && Tutorial.step().id === 'slash', `the open door leads onto the balcony and down into the combat hall (${P.pos.z.toFixed(1)})`);
+      // the dummy: a string, a heavy
+      const faceD = () => { Camera.yaw = yawOf(D.pos.x - P.pos.x, D.pos.z - P.pos.z); Camera.pitch = -0.1; };
+      const nearD = (k) => ({ x: D.pos.x, y: 0, z: D.pos.z + k, yaw: 0 });
+      Training.place(P, nearD(2.2)); faceD(); T.frame(5);
+      for (let i = 0; i < 3; i++) { T.tap('Mouse0'); T.frame(16); }
+      T.frame(70); faceD(); T.press('Mouse0'); T.frame(30); T.release('Mouse0'); T.frame(80);
+      ok(Tutorial.step().id === 'fight', `a three-hit string and a heavy on the dummy finish the attack steps (${Tutorial.step().id})`);
+      // two scrappers in front of you while the dummy steps off; it's back afterwards; the sword beam
+      const fw = { x: fwdX(Camera.yaw), z: fwdZ(Camera.yaw) }, sc = Game.enemies.filter((e) => e.tutorial);
+      const ahead = sc.length === 2 && sc.every((e) => { const dx = e.pos.x - P.pos.x, dz = e.pos.z - P.pos.z; return (dx * fw.x + dz * fw.z) / Math.hypot(dx, dz) > 0.5; });
+      const dummyGone = !Game.enemies.includes(D);
+      for (let i = 0; i < 900 && Tutorial.step().id === 'fight'; i++) {
+        const e = Game.enemies.find((x) => x.tutorial && !x.dead && !x.spawning);
+        if (e) { Camera.yaw = yawOf(e.pos.x - P.pos.x, e.pos.z - P.pos.z); if (i % 12 === 0) T.tap('Mouse0'); }
+        T.frame(1);
+      }
+      T.frame(80);
+      const D2 = Training.dummy;
+      ok(ahead && dummyGone && D2 && Game.enemies.includes(D2) && Tutorial.step().id === 'beam', `the fight's scrappers spawn in front of you with the dummy off its mat, and it's back once they're down (${Tutorial.step().id})`);
+      D = D2;
+      Training.place(P, nearD(7)); faceD(); T.frame(3);
+      T.press('KeyF'); T.frame(80); T.release('KeyF'); T.frame(100);
+      ok(Tutorial.step().id === 'parry', `a full sword beam hits the dummy (${Tutorial.step().id})`);
+      // yellow: E on the flash parries it; then a counter
+      const parryLoop = (id) => {
+        Training.place(P, nearD(2)); faceD(); T.frame(3);
+        let armed = true;
+        for (let i = 0; i < 1500 && Tutorial.step().id === id; i++) {
+          faceD();
+          if (distXZ(P.pos, D.pos) > 2.6 && D.state === 'idle') Training.place(P, nearD(2));
+          if (D.state !== 'windup') armed = true;
+          if (armed && D.state === 'windup' && D.st >= D.tele(DUMMY.WIND) - 0.14) { T.press('KeyE'); armed = false; }
+          if (Input.down.has('KeyE') && (!P.sheathe || (P.sheathe.empowered && P.sheathe.t > P.sheathe.parriedAt + 0.12))) T.release('KeyE');
+          T.frame(1);
+        }
+        T.release('KeyE'); T.frame(70);
+      };
+      parryLoop('parry'); parryLoop('counter');
+      ok(Tutorial.step().id === 'red' && Training.n('parry') >= 3 && Training.n('iaido') >= 1, `E on the dummy's yellow flash parries it, and letting go counters (${Training.n('parry')} parries)`);
+      // red: no parry stops it in front; a dash through its body to its back beats it
+      Training.place(P, nearD(4)); faceD(); T.frame(3);
+      const h0 = Training.n('redHit');
+      for (let i = 0; i < 400 && Training.n('redHit') === h0; i++) { faceD(); if (D.state === 'redWind' && !P.sheathe && D.st > 0.6) T.tap('KeyE'); T.frame(1); }
+      const redHit = Training.n('redHit') > h0;
+      for (let i = 0; i < 2400 && Tutorial.step().id === 'red'; i++) {
+        if (D.state === 'idle' && P.dashT <= 0) { if (distXZ(P.pos, D.pos) > 3.2 || D.behindMe(P)) { T.release('KeyW'); Training.place(P, nearD(3)); } D._dashed = false; }
+        faceD();
+        if (D.state === 'redWind' && D.st > 0.3 && !D._dashed) { T.press('KeyW'); T.tap('ShiftLeft'); D._dashed = true; continue; }
+        if (P.dashT <= 0 && P.dashEndT <= 0) T.release('KeyW');
+        T.frame(1);
+      }
+      T.release('KeyW'); T.frame(80);
+      ok(redHit && Training.n('redDodge') >= 2 && Tutorial.step().id === 'done', `the dummy's red flash goes through a parry in front, and dashing through to its back beats it (${Training.n('redDodge')} dodged)`);
+      for (let i = 0; i < 600 && Tutorial.active; i++) T.frame(1);
+      ok(!Tutorial.active && SaveData.tutorialDone && Game.training.dummy === 'still' && document.getElementById('tut').hidden, 'finishing the tutorial saves it as done and leaves the hall as a practice area');
+      // practice: you can't die, the panel spawns things, and the tutorial can be replayed
+      P.shield = 0; P.iframes = 0; P.takeHit({ dmg: 999, from: { x: P.pos.x + 1, y: 1, z: P.pos.z } });
+      const alive = !P.dead && P.hp >= 1;
+      Game.pause(); const panel = UI.openPanel() === 'train' && document.querySelector('#train-body [data-act="train-tutorial"]');
+      const n0 = Game.enemies.length; Training.act('train-spawn', { dataset: { type: 'scrapper' } }); await new Promise((r) => setTimeout(r, 30)); T.frame(5);
+      ok(alive && panel && Game.enemies.length === n0 + 1 && Game.state === 'playing', `in practice a 999 hit leaves you at ${Math.round(P.hp)}, and pause opens the training panel, which spawns a scrapper`);
+      Game.pause(); Training.act('train-tutorial'); await new Promise((r) => setTimeout(r, 30)); T.frame(5);
+      ok(Tutorial.active && Tutorial.step().id === 'move' && distXZ(P.pos, St) < 0.5 && Game.state === 'playing' && !Training.doorOpen, 'Replay the tutorial puts you back at the start of the course, the door shut again');
+      Game.toMenu(); UI.act('training'); T.frame(5);
+      ok(!Tutorial.active && distXZ(Game.player.pos, World.def.playerStart) < 0.5, 'once done, Training opens straight into practice in the hall');
+
+      // touch: a button presses its action, the stick walks, no lock is needed, and the layer only shows in play
+      Game.toMenu(); S.controls.touch = 'on'; Touch.changed();
+      const hiddenInMenu = document.getElementById('touch').hidden;
+      await UI.startRun('test'); T.frame(3); Touch.sync();
+      const tp = Game.player, shown = !document.getElementById('touch').hidden;
+      Input.pressCode('T:attack'); T.frame(1); Input.releaseCode('T:attack'); T.frame(2);
+      const swung = !!(tp.attack || tp.atkPend);
+      T.frame(40);
+      const x0 = { x: tp.pos.x, z: tp.pos.z };
+      Touch.stick = { id: 9, x0: 0, y0: 0, x: 0, y: 1 }; T.frame(30); Touch.stick = null; T.frame(20);
+      const walked = distXZ(tp.pos, x0);
+      ok(hiddenInMenu && shown && Game.state === 'playing' && swung && walked > 3, `touch controls: no mouse lock needed, the layer shows in play only, ATTACK swings and the stick walks (${walked.toFixed(1)} m)`);
+      S.controls.touch = 'auto'; Touch.changed(); Touch.sync();
+      Game.toMenu();
+
+      // the Sawblade: hold Q for a second on a full meter; it can't be hurt, grinds what it touches, ends after 7 s
+      const sp = T.fresh(), near = T.enemy('scrapper', 3, 0, { hp: 500 }), far = T.enemy('scrapper', -12, 0, { hp: 3000 });
+      sp.ultCharge = 1; T.frame(2);
+      T.press('KeyQ'); T.frame(40); const early = !sp.ult; T.frame(30); T.release('KeyQ'); T.frame(2);
+      const sawOn = !!sp.ult && early && 500 - near.hp >= 40;
+      const immune = sp.takeHit({ dmg: 50, from: { x: sp.pos.x + 1, y: 1, z: sp.pos.z } }) === 'immune';
+      for (let i = 0; i < 8; i++) T.aimAt(far.center());
+      T.press('Mouse2'); T.frame(60);
+      const ground = 3000 - far.hp, grind = sp.tether && sp.tether.mode === 'grind';
+      T.release('Mouse2');
+      for (let i = 0; i < 60 * 8 && sp.ult; i++) T.frame(1);
+      ok(sawOn && immune && grind && ground > 60 && !sp.ult && sp.h > 1.7, `the Sawblade starts after a 1 s hold, shrugs off hits, grinds a tethered scrapper (${Math.round(ground)}) and ends after 7 s`);
+    }
 
     // Retro renders at the 2D game's 480x270
     S.visuals.retro = true; Render.resize();
@@ -976,9 +1260,9 @@ async function run(browser, file, errors) {
   for (const c of checks) { console.log(`  ${c.pass ? 'ok  ' : 'FAIL'} ${c.msg}`); if (!c.pass) errors.push(`${name}: ${c.msg}`); }
 
   // ---------- random play ----------
-  // Endless from wave 6, so every enemy type turns up; then the rival fight; then endless and the rival fight
-  // again as AEGIS-07
-  const runs = [['endless', seconds, 'ronin'], ['boss', Math.min(seconds, 30), 'ronin'], ['endless', Math.min(seconds, 30), 'aegis'], ['boss', Math.min(seconds, 30), 'aegis']];
+  // Endless from wave 6, so every enemy type turns up; then the rival fight; then the training hall; then
+  // endless and the rival fight again as AEGIS-07
+  const runs = [['endless', seconds, 'ronin'], ['boss', Math.min(seconds, 30), 'ronin'], ['training', Math.min(seconds, 15), 'ronin'], ['endless', Math.min(seconds, 30), 'aegis'], ['boss', Math.min(seconds, 30), 'aegis']];
   for (const [mode, secs, char] of runs) {
   const res = await page.evaluate(async ([frames, mode, char]) => {
     const problems = [];
@@ -990,7 +1274,7 @@ async function run(browser, file, errors) {
     if (mode === 'endless') Director.wave = 5;
     S.gameplay.invincible = true;
     T.frame(1); Render.draw(1 / 60);
-    const progs0 = Gfx.renderer.info.programs.length;
+    const progs0 = Gfx.renderer.info.programs.length, progSet0 = new Set(Gfx.renderer.info.programs);
     const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'Mouse0', 'KeyE', 'Mouse2', 'KeyF'].concat(char === 'aegis' ? ['KeyQ', 'KeyR'] : []);
     const B = World.def.bounds, PM = Camera.PITCH_MAX + 1e-6;
     const inBox = (b) => World.overlap(b.pos.x, b.pos.y + 0.02, b.pos.z, b.r * 0.9, b.h - 0.04);
@@ -1036,7 +1320,10 @@ async function run(browser, file, errors) {
       for (const o of Game.projectiles.concat(Game.props)) if (!o.dead && ![o.pos.x, o.pos.y, o.pos.z].every(isFinite)) fail(`${o.kind} position not finite at frame ${f}`);
       if (problems.length) break;
     }
-    if (Gfx.renderer.info.programs.length !== progs0) fail(`shaders compiled mid-fight: ${progs0} programs before, ${Gfx.renderer.info.programs.length} after`);
+    if (Gfx.renderer.info.programs.length !== progs0) {
+      const added = Gfx.renderer.info.programs.filter((q) => !progSet0.has(q)).map((q) => q.name + ' [' + String(q.cacheKey).slice(0, 160) + ']');
+      fail(`shaders compiled mid-fight: ${progs0} programs before, ${Gfx.renderer.info.programs.length} after: ${added.join('; ')}`);
+    }
     const boss = Game.enemies.find((e) => e.isBoss);
     SaveData.character = 'ronin';
     const r = { problems, wave: Director.wave, kills: Game.stats.kills, hits: Game.stats.maxCombo, maxEnemies, types: [...seen].join(' '), style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length, boss: boss ? `rival at ${boss.hp}/${boss.maxHp}, phase ${boss.phase}` : 'no rival left' };
@@ -1048,7 +1335,8 @@ async function run(browser, file, errors) {
   if (mode === 'endless') {
     console.log(`  endless from wave 6${who}: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies (${res.types}), style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
     if (res.kills < 1 && !res.hits) errors.push(`${name}: random play${who} hit nothing`);
-  } else console.log(`  rival fight${who}: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
+  } else if (mode === 'boss') console.log(`  rival fight${who}: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
+  else console.log(`  training hall${who}: ${res.time}s simulated, ${res.calls} draw calls, ${res.progs} shader programs`);
   errors.push(...res.problems.map((m) => `${name}: ${mode}${who}: ${m}`));
   }
   await page.waitForTimeout(300);

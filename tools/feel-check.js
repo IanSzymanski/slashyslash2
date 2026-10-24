@@ -193,11 +193,12 @@ for (const id of run('Object.keys(ARENAS)')) {
   console.log(`\n${def.name} (${id}): ${def.boxes.length} boxes`);
   const boxes = def.boxes.filter((b) => !b.hidden);
   // every raised surface can be reached from the highest surface below it within a jump's sideways reach (3 m)
-  const walkable = boxes.filter((b) => b.kind !== 'bound' && b.kind !== 'ground');
+  const walkable = boxes.filter((b) => b.kind !== 'bound' && b.kind !== 'ground' && b.kind !== 'wall' && b.kind !== 'ceiling');
   let worst = 0;
   for (const s of walkable) {
-    // cars and props are climbed over, not onto; the crane is reached by tether; pillar and beam tops aren't floors
-    if (s.kind === 'car' || s.kind === 'prop' || s.kind === 'crane' || Math.min(s.max.x - s.min.x, s.max.z - s.min.z) < 0.8) continue;
+    // cars and props are climbed over, not onto; the crane is reached by tether, and the training course's
+    // tops along the course (wall kicks, the tether); pillar and beam tops aren't floors
+    if (s.kind === 'car' || s.kind === 'prop' || s.kind === 'crane' || s.tetherOnly || s.viaCourse || Math.min(s.max.x - s.min.x, s.max.z - s.min.z) < 0.8) continue;
     let from = def.groundY, fromName = 'the ground';
     for (const o of walkable) {
       if (o === s || o.max.y >= s.max.y - 0.3 || gap(o, s) > 3) continue;
@@ -209,7 +210,7 @@ for (const id of run('Object.keys(ARENAS)')) {
   }
   console.log(`  Highest climb between tiers: ${fmt(worst)} m`);
   // streets and alleys: wide enough, and no building or boundary standing in them
-  const solid = boxes.filter((b) => b.kind === 'building' || b.kind === 'bound');
+  const solid = boxes.filter((b) => b.kind === 'building' || b.kind === 'bound' || b.kind === 'wall');
   const lane = (list, rule, what) => {
     let min = Infinity;
     for (const r of list) {
