@@ -164,7 +164,7 @@ const UI = {
       ['Cut down street lamps; slashes and blasts drop them', actionLabel('attack')],
       ['Parry stance (15 shield, refunded on parry)', actionLabel('sheathe')],
       ['Counter after a parry', `Release ${actionLabel('sheathe')}`],
-      ['Sword beam: tap for a quick blade, hold for a massive wave; a hit breaks the charge', actionLabel('utility')],
+      ['Sword beam: tap for a quick blade, hold for a massive wave; both fly at the crosshair, and a hit breaks the charge', actionLabel('utility')],
       ['Tether: tap fling, hold zip (at a ledge\'s edge or the crane: up onto it)', actionLabel('tether')],
       ['Grab, swing and throw barrels', `Hold ${actionLabel('tether')}, release`],
       ['Rebound a pulse grenade: reel in, kick it back', `${actionLabel('tether')} on it, aim`],

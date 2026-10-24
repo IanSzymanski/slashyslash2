@@ -13,9 +13,10 @@ const CHARACTERS = { ronin: { id: 'ronin', name: 'RONIN', utility: 'swordBeam', 
 function makePlayer(id, pos) { const C = CHARACTERS[id] || CHARACTERS.ronin; return C.make(pos); }
 
 // RONIN's sword beam. A tap throws a small, quick blade of light that breaks on the first thing it meets.
-// Held to full charge, the release sweeps a massive wave out along the ground: it widens as it travels, cuts
-// through everything in its path and burns bolts and strike probes out of the air. A hit while
-// charging breaks the charge; a dash, a slash, the parry stance or the tether drop it at no cost.
+// Held to full charge, the release throws a massive wave at the crosshair: it widens as it travels, cuts
+// through everything in its path and burns bolts and strike probes out of the air, and once it comes down to
+// the ground it runs on along it. A hit while charging breaks the charge; a dash, a slash, the parry stance or
+// the tether drop it at no cost.
 const SWORD_BEAM = {
   FULL: 1.1, // seconds of holding for the massive wave
   CD: 8, BREAK_CD: 2, // cooldown after a release, and after a charge a hit broke
@@ -23,6 +24,9 @@ const SWORD_BEAM = {
   TAP: { dmg: 12, W: 1.1, H: 0.3, speed: 44, life: 0.5, grow: 0 },
   HALF: { dmg: 22, W: 1.8, H: 0.42, speed: 46, life: 0.55, grow: 0 },
   MAX: { dmg: 55, W: 3.2, H: 1.5, speed: 30, life: 1.5, grow: 4.2 },
+  // the massive wave's middle rides RIDE above the ground; past where it was aimed, one heading down, level, or
+  // up by no more than SETTLE_UP (the sine of its climb) settles onto ground up to SETTLE below its ride height
+  RIDE: 1.2, SETTLE_UP: 0.15, SETTLE: 1.5,
 };
 const BEAM_SPARK = { c0: '#ffffff', c1: '#ff8a9a', c2: '#a0101e' };
 const BEAM_GOLD = { c0: '#ffffff', c1: '#ffd070', c2: '#ff3a2a' };
@@ -86,13 +90,15 @@ registerUtility({
     p.aimHold = Math.max(p.aimHold, 0.4);
     let dir, at, cfg;
     if (full) {
-      // the massive wave runs out flat along the ground from your feet
-      const l = Math.hypot(d.x, d.z) || 1;
-      dir = { x: d.x / l, y: 0, z: d.z / l };
-      const g = World.groundAt(p.pos.x, p.pos.z, p.pos.y + 0.1);
-      const base = p.pos.y - g < 3 ? g : p.pos.y;
-      at = { x: p.pos.x + dir.x * 1.2, y: base + 1.2, z: p.pos.z + dir.z * 1.2 };
-      cfg = SWORD_BEAM.MAX;
+      // the massive wave flies at the crosshair; aimed at a floor, it comes down to ride above it there, and
+      // aimed past anything else it rides the ground once it comes down to it
+      const A = Camera.aim, floor = !Camera.aimEnemy && Math.abs(World.groundAt(A.x, A.z, A.y + 0.05) - A.y) < 0.05;
+      const T = floor ? { x: A.x, y: A.y + SWORD_BEAM.RIDE, z: A.z } : A;
+      const dx = T.x - c.x, dy = T.y - c.y, dz = T.z - c.z, l = Math.hypot(dx, dy, dz);
+      if (l > 2) dir = { x: dx / l, y: dy / l, z: dz / l };
+      else { const h = Math.hypot(d.x, d.z) || 1; dir = { x: d.x / h, y: 0, z: d.z / h }; }
+      at = { x: c.x + dir.x * 1.2, y: c.y + dir.y * 1.2, z: c.z + dir.z * 1.2 };
+      cfg = Object.assign({ rideAfter: Math.max(0, l - 1.2) }, SWORD_BEAM.MAX);
     } else {
       // a tap or a partial charge flies where you aim
       const k = C.k, T = SWORD_BEAM.TAP, H = SWORD_BEAM.HALF;
@@ -143,22 +149,42 @@ registerUtility({
 // The beam in flight: a crescent of light across its path, its band W wide and H tall either side of its
 // middle, spanned across (side) and up (up) from its line of flight. It hits each enemy once. The small one
 // breaks on the first enemy or bolt it meets; the massive one cuts through all of them, widening as it goes,
-// and rides the ground over steps and down drops. Walls stop either.
+// and once it has flown rideAfter metres (past where it was aimed) heading down, level or only a little up,
+// over ground close enough below, it settles onto the ground and rides it over steps and down drops. Only its
+// middle meets the world: its edges pass through walls, and a wall in the middle of its path stops it.
 class SwordBeam {
   constructor(pos, dir, cfg, owner, full) {
     this.kind = 'swordbeam';
     this.pos = { x: pos.x, y: pos.y, z: pos.z };
-    const l = Math.hypot(dir.x, dir.y, dir.z) || 1;
-    this.dir = { x: dir.x / l, y: dir.y / l, z: dir.z / l };
-    const hl = Math.hypot(this.dir.x, this.dir.z) || 1;
-    this.side = { x: -this.dir.z / hl, y: 0, z: this.dir.x / hl };
-    const s = this.side, d = this.dir;
-    this.up = { x: s.y * d.z - s.z * d.y, y: s.z * d.x - s.x * d.z, z: s.x * d.y - s.y * d.x };
     this.W = cfg.W; this.H = cfg.H; this.grow = cfg.grow; this.dmg = cfg.dmg; this.speed = cfg.speed;
     this.life = this.life0 = cfg.life; this.full = full; this.owner = owner;
     this.hostile = false; this.dead = false; this.t = 0; this.hit = new Set();
+    // the heading it rides the ground along (its owner's facing if it was thrown straight down)
+    const hl = Math.hypot(dir.x, dir.z);
+    this.head = hl > 1e-3 ? { x: dir.x / hl, y: 0, z: dir.z / hl } : { x: fwdX(owner.yaw), y: 0, z: fwdZ(owner.yaw) };
+    this.setDir(dir);
+    this.ground = false; this.flown = 0;
+    this.rideAfter = cfg.rideAfter === undefined ? Infinity : cfg.rideAfter;
+  }
+  setDir(dir) {
+    const l = Math.hypot(dir.x, dir.y, dir.z) || 1, d = (this.dir = { x: dir.x / l, y: dir.y / l, z: dir.z / l }), hl = Math.hypot(d.x, d.z);
+    this.side = hl > 1e-3 ? { x: -d.z / hl, y: 0, z: d.x / hl } : { x: -this.head.z, y: 0, z: this.head.x };
+    const s = this.side;
+    this.up = { x: s.y * d.z - s.z * d.y, y: s.z * d.x - s.x * d.z, z: s.x * d.y - s.y * d.x };
     this.vel = { x: d.x * this.speed, y: d.y * this.speed, z: d.z * this.speed };
-    this.ground = full;
+  }
+  // down onto the ground: it turns level along its heading, and a steep one hits the street hard
+  land(g) {
+    const steep = this.dir.y < -0.25;
+    this.ground = true;
+    this.setDir(this.head);
+    if (!steep) return;
+    const q = { x: this.pos.x, y: g + 0.06, z: this.pos.z };
+    FX.ring(q, 0.4, this.W + 1.5, 0.3, { c: '#ffd070' });
+    FX.dust(q, 12, { smax: 7, rise: 1.2 });
+    FX.decal('crack', q, { len: 2.2 });
+    FX.light(q, '#ffb040', 4, 8, 0.2);
+    Game.shake(0.2);
   }
   // a point on its band: u metres across from the middle, v up
   pointOn(u, v) {
@@ -206,15 +232,23 @@ class SwordBeam {
     this.t += dt; this.life -= dt;
     if (this.life <= 0) { this.fizzle(false); return; }
     this.W += this.grow * dt;
-    const d = this.dir, step = (this.speed * dt) / 3;
+    const step = (this.speed * dt) / 3, R = SWORD_BEAM.RIDE;
     for (let i = 0; i < 3 && !this.dead; i++) {
+      let d = this.dir;
       this.pos.x += d.x * step; this.pos.y += d.y * step; this.pos.z += d.z * step;
-      // the massive wave keeps its feet on the ground: up steps, down drops
+      this.flown += step;
+      // past where it was aimed, it settles onto the ground it comes down to
+      if (this.full && !this.ground && this.flown >= this.rideAfter - 0.05 && d.y <= SWORD_BEAM.SETTLE_UP) {
+        const g = World.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.4);
+        if (g > -Infinity && this.pos.y - g <= R + SWORD_BEAM.SETTLE) { this.land(g); d = this.dir; }
+      }
+      // then it keeps its feet on the ground: up steps, down drops
       if (this.ground) {
         const g = World.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.4);
-        if (g > -Infinity) this.pos.y = damp(this.pos.y, g + 1.2, g + 1.2 < this.pos.y ? 6 : 40, dt / 3);
+        if (g > -Infinity) this.pos.y = damp(this.pos.y, g + R, g + R < this.pos.y ? 6 : 40, dt / 3);
       }
-      if (World.pointSolid(this.pos.x + d.x * 0.3, this.pos.y, this.pos.z + d.z * 0.3)) { this.fizzle(true); return; }
+      // only its middle meets the world
+      if (World.pointSolid(this.pos.x + d.x * 0.3, this.pos.y + d.y * 0.3, this.pos.z + d.z * 0.3)) { this.fizzle(true); return; }
       for (const e of Game.enemies) {
         if (e.dead || e.spawning || e.dying || this.hit.has(e)) continue;
         if (!this.meets(e.center(), e.r, e.h / 2)) continue;
@@ -225,7 +259,7 @@ class SwordBeam {
     }
     if (this.dead) return;
     // lamps in its path come down
-    const P = this.pos;
+    const P = this.pos, d = this.dir;
     Props.slash((q) => { const L = this.local(q.center()); return Math.abs(L.a) < 0.5 + q.r && Math.abs(L.b) < this.W + q.r && P.y + this.H > q.pos.y && P.y - this.H < q.pos.y + q.h; }, P.y, d);
     const n = this.full ? 3 : 1;
     for (let i = 0; i < n; i++) if (Math.random() < 0.7) FX.sparks(this.pointOn(rand(-this.W, this.W), rand(-this.H, this.H)), 1, { x: -d.x, y: 0, z: -d.z }, 0.4, 1.8, 5.5, Object.assign({ g: 0 }, this.full ? BEAM_GOLD : BEAM_SPARK));

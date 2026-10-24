@@ -367,6 +367,55 @@ async function run(browser, file, errors) {
     T.release('KeyF'); T.frame(100);
     const cut = [...line, wide, guard].map((e) => 500 - e.hp);
     ok(full && cut.every((d) => d >= 40), `a full charge sweeps a massive wave through everything in its path (${cut.join(', ')})`);
+    // the massive wave flies at the crosshair: up onto a scrapper on a 4 m platform (out of a ground wave's reach); only its middle meets the
+    // world, so a pillar in its path stops it and one off to its side doesn't. (A test box goes into the
+    // world's grid for each.)
+    {
+      const box = (min, max) => {
+        const b = { min, max, kind: 'test', _s: 0 }, C = World.CELL, lists = [];
+        for (let cz = Math.floor(min.z / C); cz <= Math.floor(max.z / C); cz++) {
+          for (let cx = Math.floor(min.x / C); cx <= Math.floor(max.x / C); cx++) { const L = World.cells[(cz - World.gz0) * World.gw + (cx - World.gx0)]; if (L) { L.push(b); lists.push(L); } }
+        }
+        return () => { for (const L of lists) L.splice(L.indexOf(b), 1); };
+      };
+      const wave = (aim) => {
+        T.aimAt(aim); T.press('KeyF'); T.frame(75); T.release('KeyF'); T.frame(1);
+        return Game.projectiles.find((q) => q.kind === 'swordbeam' && q.full);
+      };
+      p = T.fresh(); let o = { x: p.pos.x, y: p.pos.y, z: p.pos.z };
+      let undo = box({ x: o.x + 12, y: o.y + 3, z: o.z - 1.5 }, { x: o.x + 16, y: o.y + 4, z: o.z + 1.5 });
+      const up = T.enemy('scrapper', 14, 0, { hp: 500, frozen: true });
+      up.pos.y = o.y + 4; T.frame(2);
+      const wu = wave(up.center());
+      let peak = 0;
+      for (let i = 0; i < 90; i++) { T.frame(1); if (wu) peak = Math.max(peak, wu.pos.y - o.y); }
+      undo();
+      ok(wu && peak > 3.5 && up.hp <= 500 - 40, `the massive wave flies up at the crosshair (to ${peak.toFixed(1)} m) and cuts a scrapper on a 4 m platform (${500 - up.hp})`);
+      p = T.fresh(); o = { x: p.pos.x, y: p.pos.y, z: p.pos.z };
+      undo = box({ x: o.x + 10, y: o.y - 1, z: o.z - 1 }, { x: o.x + 10.6, y: o.y + 6, z: o.z + 1 });
+      const hid = T.enemy('scrapper', 14, 0, { hp: 500, frozen: true });
+      const ws = wave({ x: o.x + 10, y: o.y + 1.2, z: o.z });
+      T.frame(60);
+      undo();
+      ok(ws && ws.dead && ws.flown < 10 && hid.hp === 500, `a pillar in the middle of its path stops it (after ${ws ? ws.flown.toFixed(1) : '?'} m), sparing the scrapper behind`);
+      p = T.fresh(); o = { x: p.pos.x, y: p.pos.y, z: p.pos.z };
+      undo = box({ x: o.x + 8, y: o.y - 1, z: o.z + 1.5 }, { x: o.x + 10, y: o.y + 6, z: o.z + 3.5 });
+      const inLine = T.enemy('scrapper', 16, 0, { hp: 500, frozen: true }), behind = T.enemy('scrapper', 14, 2.5, { hp: 500, frozen: true });
+      const we = wave(inLine.center());
+      let flown = 0;
+      for (let i = 0; i < 60; i++) { T.frame(1); if (we) flown = Math.max(flown, we.flown); }
+      undo();
+      ok(we && flown > 12 && inLine.hp < 500 && behind.hp < 500, `its edge passes through a pillar off to its side (on ${flown.toFixed(1)} m), cutting the scrappers in line (${500 - inLine.hp}) and behind the pillar (${500 - behind.hp})`);
+      // fired down from a 4 m ledge at the street, it comes down where it was aimed and runs on along it
+      p = T.fresh(); o = { x: p.pos.x, y: p.pos.y, z: p.pos.z };
+      const low = [16, 22].map((d) => T.enemy('scrapper', d, 0, { hp: 500, frozen: true }));
+      undo = box({ x: o.x - 2, y: o.y + 3, z: o.z - 2 }, { x: o.x + 2, y: o.y + 4, z: o.z + 2 });
+      p.pos.y = p.prev.y = o.y + 4; p.vel.y = 0; T.frame(5);
+      const wd = wave({ x: o.x + 12, y: o.y, z: o.z });
+      T.frame(80);
+      undo();
+      ok(wd && wd.ground && low.every((e) => e.hp < 500), `fired down from a ledge at the street, it comes down there and rides on along it (${low.map((e) => 500 - e.hp).join(', ')})`);
+    }
     // a hit while charging breaks it: no wave, a short cooldown; a dash drops it at no cost
     p = T.fresh(); T.press('KeyF'); T.frame(40);
     p.takeHit({ dmg: 5, from: { x: p.pos.x + 3, y: 1, z: p.pos.z }, kind: 'melee' });
