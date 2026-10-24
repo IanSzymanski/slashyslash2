@@ -163,6 +163,7 @@ class Rival extends Enemy {
   hovering() { return this.hoverY !== null || (this.act && this.act.kind === 'dive' && this.act.phase === 'hang'); }
   showModel() { return !this.spawning || (this.intro && (this.intro.stage === 'emerge' || this.intro.stage === 'rise' || this.intro.stage === 'title')); }
   emissive() {
+    if (this.dead) return 0;
     if (this.hitFlash > 0) return 0.8;
     if (this.diveFlash > 0) return 1;
     const a = this.act;
@@ -1008,13 +1009,15 @@ class Rival extends Enemy {
     }
     Sound.play('swing', { stage: m.r > 3 || m.spin ? 3 : 1 }, c);
   }
-  // its body is a wall through the red flash: only a dash carries you past it to its back
+  // its body is a wall through the red flash: only a dash carries you past it to its back. It never shoves you
+  // into a wall (a body inside one gets snapped out its far side, out of the arena): pinned, you stay put.
   blockPassage(p) {
     if (p.dead || p.dashT > 0 || p.iaido) return;
     const dx = p.pos.x - this.pos.x, dz = p.pos.z - this.pos.z, d = Math.hypot(dx, dz), R = this.r + p.r + 0.1;
     if (d >= R || p.pos.y > this.pos.y + this.h || p.pos.y + p.h < this.pos.y) return;
-    const f = this.fwd();
-    p.pos.x = this.pos.x + f.x * R; p.pos.z = this.pos.z + f.z * R;
+    const f = this.fwd(), tx = this.pos.x + f.x * R, tz = this.pos.z + f.z * R;
+    if (World.overlap(tx, p.pos.y + 0.02, tz, p.r, p.h - 0.05)) return;
+    p.pos.x = tx; p.pos.z = tz;
     const vn = p.vel.x * f.x + p.vel.z * f.z;
     if (vn < 0) { p.vel.x -= vn * f.x; p.vel.z -= vn * f.z; }
   }
@@ -1823,6 +1826,8 @@ class RivalHusk {
     this.r = 1; this.h = 0.6; this.dead = false; this.t = 0; this.wave = Director.wave; this.fade = 0;
   }
   center() { return { x: this.pos.x, y: this.pos.y + 0.3, z: this.pos.z }; }
+  // a blow on the wreck (a swing, a plunge, a blast) only throws sparks: it's too heavy to move
+  hit() { FX.sparks(this.center(), 6, null, TAU, 3, 10, AEGIS_SPARK); }
   update(dt) {
     this.t += dt;
     if (!this.fade && Director.wave !== this.wave) {

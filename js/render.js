@@ -134,29 +134,17 @@ const Render = {
         this.models.set(e, R);
         e.model = R;
       }
-      const p = e.rp || e.pos;
-      R.mesh.visible = e.showModel ? e.showModel() : !e.spawning;
-      // a body that pitches over (the rival's knockout) lies on the street, not half in it
-      R.mesh.position.set(p.x, p.y + Math.abs(Math.sin(e.tilt || 0)) * 0.35, p.z);
-      R.mesh.rotation.set(e.tilt || 0, e.yaw, 0);
-      Poses[e.type](R, e);
-      if (e.emissive) R.mat.emissive.setScalar(e.emissive());
-      else R.mat.emissive.setRGB(e.hitFlash > 0 ? 0.8 : e.cutMark && ((Game.realTime * 30) | 0) % 2 ? 0.6 : 0, e.hitFlash > 0 ? 0.8 : 0, e.hitFlash > 0 ? 0.8 : 0);
-      const oc = e.outline ? e.outline() : e.elite ? '#ffd070' : null;
-      R.outline.visible = !!oc;
-      if (oc) R.outline.material.color.set(oc);
-      const want = this.inCameraLine(e) ? 0.25 : 1;
-      e.fade = approach(e.fade, want, realDt * 6);
-      R.mat.opacity = e.fade;
-      R.mat.depthWrite = e.fade > 0.99;
-      this.feet(R.feet, p);
-      // drones fly in the dark over the lamps: a floor under their shading keeps them readable against the sky
-      if (e.type === 'drone') { const f = R.feet.value; f.setRGB(Math.max(f.r, 0.32), Math.max(f.g, 0.32), Math.max(f.b, 0.38)); }
+      this.poseModel(e, R, realDt);
     }
     for (const [e, R] of this.models) {
       if (seen.has(e)) continue;
-      // the rival's body stays where it fell, as its husk
-      if (e.husk && !e.husk.rig && !e.husk.dead) { e.husk.rig = R; R.outline.visible = false; this.models.delete(e); continue; }
+      // the rival's body stays where it fell, as its husk, posed as it ended (a skipped knockout ends face down);
+      // posed twice, since the pose sets the pitch the body is drawn at
+      if (e.husk && !e.husk.rig && !e.husk.dead) {
+        this.poseModel(e, R, realDt); this.poseModel(e, R, realDt);
+        e.husk.rig = R; R.outline.visible = false; this.models.delete(e);
+        continue;
+      }
       Gfx.scene.remove(R.mesh);
       R.geo.dispose(); R.mat.dispose(); R.outline.material.dispose();
       this.models.delete(e);
@@ -203,6 +191,27 @@ const Render = {
       R.mat.emissive.setScalar(P.hurtT > 0.12 && !Camera.fp ? 0.8 : 0);
       this.feet(R.feet, p);
     }
+  },
+  // an enemy's model: placed, posed, lit and faded for this frame
+  poseModel(e, R, realDt) {
+    const p = e.rp || e.pos;
+    R.mesh.visible = e.showModel ? e.showModel() : !e.spawning;
+    // a body that pitches over (the rival's knockout) lies on the street, not half in it
+    R.mesh.position.set(p.x, p.y + Math.abs(Math.sin(e.tilt || 0)) * 0.35, p.z);
+    R.mesh.rotation.set(e.tilt || 0, e.yaw, 0);
+    Poses[e.type](R, e);
+    if (e.emissive) R.mat.emissive.setScalar(e.emissive());
+    else R.mat.emissive.setRGB(e.hitFlash > 0 ? 0.8 : e.cutMark && ((Game.realTime * 30) | 0) % 2 ? 0.6 : 0, e.hitFlash > 0 ? 0.8 : 0, e.hitFlash > 0 ? 0.8 : 0);
+    const oc = e.outline ? e.outline() : e.elite ? '#ffd070' : null;
+    R.outline.visible = !!oc;
+    if (oc) R.outline.material.color.set(oc);
+    const want = this.inCameraLine(e) ? 0.25 : 1;
+    e.fade = approach(e.fade, want, realDt * 6);
+    R.mat.opacity = e.fade;
+    R.mat.depthWrite = e.fade > 0.99;
+    this.feet(R.feet, p);
+    // drones fly in the dark over the lamps: a floor under their shading keeps them readable against the sky
+    if (e.type === 'drone') { const f = R.feet.value; f.setRGB(Math.max(f.r, 0.32), Math.max(f.g, 0.32), Math.max(f.b, 0.38)); }
   },
   // the drawn blade lights what's around it
   bladeLight() {

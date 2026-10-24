@@ -144,8 +144,9 @@ Enemy.prototype.runRed = function (dt, p, d, dy) {
   if (!p.dead && p.dashT <= 0 && p.dashEndT <= 0 && !p.iaido && dy < this.h) {
     const R = this.r + p.r + 0.05, ex = p.pos.x - this.pos.x, ez = p.pos.z - this.pos.z, l = Math.hypot(ex, ez);
     if (l < R) {
-      const ux = l > 1e-3 ? ex / l : fwdX(this.yaw), uz = l > 1e-3 ? ez / l : fwdZ(this.yaw);
-      p.pos.x = this.pos.x + ux * R; p.pos.z = this.pos.z + uz * R;
+      const ux = l > 1e-3 ? ex / l : fwdX(this.yaw), uz = l > 1e-3 ? ez / l : fwdZ(this.yaw), tx = this.pos.x + ux * R, tz = this.pos.z + uz * R;
+      // (never into a wall)
+      if (!World.overlap(tx, p.pos.y + 0.02, tz, p.r, p.h - 0.05)) { p.pos.x = tx; p.pos.z = tz; }
       const vn = p.vel.x * ux + p.vel.z * uz;
       if (vn < 0) { p.vel.x -= vn * ux; p.vel.z -= vn * uz; }
     }

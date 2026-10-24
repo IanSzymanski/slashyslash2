@@ -800,6 +800,29 @@ async function run(browser, file, errors) {
     T.release('KeyW');
     ok(p.hp === PC.MAX_HP && R.stunT > 0, `dashing straight through its body beats the red flash (ended ${distXZ(p.pos, R.pos).toFixed(1)} m behind it)`);
     S.gameplay.invincible = true;
+    // its body never shoves you into a wall: AEGIS-07 against the arena's south wall with the rival pressed up to
+    // it, facing the wall through the red flash, isn't put into the wall, and moving off stays in the arena
+    {
+      const char0 = SaveData.character;
+      SaveData.character = 'aegis';
+      R = rival(0, -3, { phase2: true });
+      const B = World.def.bounds, wz = B.minZ + p.r + 0.02;
+      let sx = null, sy = 0;
+      for (let x = -30; x <= 30 && sx === null; x += 0.5) { const g = World.groundAt(x, wz, 1), g2 = World.groundAt(x, wz + 1.2, 1); if (g > -1 && Math.abs(g - g2) < 0.01 && World.boxFree(x, g + 0.02, wz, p.r, p.h) && World.boxFree(x, g + 0.02, wz + 1.12, R.r, R.h)) { sx = x; sy = g; } }
+      p.pos.x = p.prev.x = sx; p.pos.z = p.prev.z = wz; p.pos.y = p.prev.y = sy; p.vel.x = p.vel.y = p.vel.z = 0;
+      R.pos.x = R.prev.x = sx; R.pos.z = R.prev.z = wz + p.r + R.r + 0.02; R.pos.y = R.prev.y = sy;
+      R.yaw = R.faceYaw = yawOf(0, -1);
+      R.blockPassage(p);
+      const shoved = World.overlap(p.pos.x, p.pos.y + 0.02, p.pos.z, p.r, p.h - 0.05);
+      let out = '';
+      for (const k of ['KeyA', 'KeyD', 'KeyW', 'KeyS']) {
+        T.press(k); T.frame(4); T.release(k);
+        const q = p.pos;
+        if (!out && (q.x < B.minX || q.x > B.maxX || q.z < B.minZ || q.z > B.maxZ)) out = `${q.x.toFixed(2)}, ${q.y.toFixed(2)}, ${q.z.toFixed(2)}`;
+      }
+      SaveData.character = char0;
+      ok(sx !== null && !shoved && !out, `its body never shoves you into a wall, so you can't be squeezed out of the arena${shoved ? ' (shoved into a wall)' : ''}${out ? ' (out at ' + out + ')' : ''}`);
+    }
     // once it flares red it holds its line: you circle to its side and it neither turns nor steps after you
     R = rival(0, -3, { phase2: true });
     R.yaw = R.faceYaw = R.yawTo(p.pos) + 0.5; R.startPeril();
@@ -949,6 +972,84 @@ async function run(browser, file, errors) {
     Render.draw(1 / 60);
     const husk = Game.props.find((q) => q.kind === 'husk');
     ok(koCine && R.dead && husk && husk.rig, 'the last hit plays the knockout cutscene and leaves its husk lying in the street');
+    // KO-MATRIX:START
+    // The knockout plays through whatever lands the last hit, for both characters, with the attack's keys still
+    // held once the cutscene is skippable (keys down when it starts don't skip it), and leaves the body face down
+    // and unlit. A fresh hold still skips it, and that too leaves it face down and unlit.
+    {
+      const char0 = SaveData.character;
+      const look = (c) => { const q = Camera.pos; Camera.yaw = yawOf(c.x - q.x, c.z - q.z); Camera.pitch = Math.atan2(c.y - q.y, Math.hypot(c.x - q.x, c.z - q.z)); };
+      const koRun = (char, dz, go, keys = [], o = {}) => {
+        SaveData.character = char;
+        const r = rival(0, dz, { phase2: true }), p = Game.player;
+        r.hp = 3;
+        Game.seenCines.add('ko');
+        if (o.blade) p.mode = 'blade';
+        T.aimAt(r.center());
+        go(p, r);
+        let f = 0;
+        for (; f < 60 * 9 && !r.dying; f++) { if (!o.noLook) look(r.center()); T.frame(1); }
+        const stages = [];
+        for (let i = 0; i < 60 * 10 && !r.dead; i++) {
+          if (i === 150) for (const k of keys) T.release(k);
+          if (o.skip && i === 20) T.press('KeyE');
+          T.frame(1);
+          const st = r.ko && r.ko.stage;
+          if (st && stages[stages.length - 1] !== st) stages.push(st);
+        }
+        for (const k of keys.concat(o.skip ? ['KeyE'] : [])) T.release(k);
+        T.frame(2);
+        const h = Game.props.find((q) => q.kind === 'husk'), M = h && h.rig;
+        const down = !!M && M.mesh.rotation.x < -1.3 && M.mat.emissive.r === 0;
+        Game.enemies = []; Game.projectiles = []; Game.hazards = []; Game.props = [];
+        for (const k of ['KeyE', 'Mouse0', 'Mouse2', 'Space', 'KeyQ', 'KeyF', 'ShiftLeft']) T.release(k);
+        const all = stages.join('>') === 'impact>stagger>kneel>collapse>down';
+        return { ok: r.dead && down && (o.skip ? stages[0] === 'impact' && !all : all), why: f >= 60 * 9 ? 'no kill' : `${stages.join('>')}${down ? '' : ', not face down'}` };
+      };
+      const parryThen = (p) => { T.press('KeyE'); T.frame(2); p.doParry({ from: { x: p.pos.x, y: p.pos.y + 1.5, z: p.pos.z - 2 } }); T.frame(20); T.release('KeyE'); };
+      const cases = [
+        ['AEGIS held beam', 'aegis', -8, () => T.press('KeyE'), ['KeyE']],
+        ['AEGIS held beam, hovering', 'aegis', -8, () => { T.press('Space'); T.frame(14); T.release('Space'); T.press('KeyE'); }, ['KeyE']],
+        ['AEGIS gun', 'aegis', -8, () => T.press('Mouse0'), ['Mouse0']],
+        ['AEGIS gun, hovering', 'aegis', -8, () => { T.press('Space'); T.frame(20); T.press('Mouse0'); }, ['Space', 'Mouse0']],
+        ['AEGIS swipe', 'aegis', -3, () => T.tap('Mouse0'), [], { blade: true }],
+        ['AEGIS cleave', 'aegis', -3, () => T.press('Mouse0'), ['Mouse0'], { blade: true }],
+        ['AEGIS jet plunge', 'aegis', -1.8, () => { T.press('Space'); T.frame(12); T.release('Space'); T.press('Mouse0'); }, ['Mouse0'], { blade: true }],
+        ['AEGIS pulse burst', 'aegis', -6, parryThen, [], { blade: true }],
+        ['AEGIS tether zip strike', 'aegis', -9, () => T.press('Mouse2'), ['Mouse2']],
+        ['AEGIS orbital strike, clicked', 'aegis', -14, (p, r) => { p.ultCharge = 1; T.press('KeyQ'); T.frame(36); T.release('KeyQ'); T.frame(2); look(r.pos); T.frame(1); T.press('Mouse0'); }, ['Mouse0'], { noLook: true }],
+        ['RONIN slash', 'ronin', -3, () => T.tap('Mouse0'), []],
+        ['RONIN heavy', 'ronin', -3, () => T.press('Mouse0'), ['Mouse0']],
+        ['RONIN dash slash', 'ronin', -7, () => { T.press('KeyW'); T.tap('ShiftLeft'); T.frame(2); T.press('Mouse0'); T.release('KeyW'); }, ['Mouse0']],
+        ['RONIN parry counter', 'ronin', -6, parryThen, []],
+        ['RONIN full sword beam', 'ronin', -10, () => { T.press('KeyF'); T.frame(75); T.release('KeyF'); }, []],
+        ['RONIN tether zip strike', 'ronin', -9, () => T.press('Mouse2'), ['Mouse2']],
+        ['RONIN Sawblade', 'ronin', -3, (p) => { p.ultCharge = 1; T.press('KeyQ'); }, ['KeyQ']],
+        ['a fresh hold of E skipping it', 'aegis', -8, () => T.press('Mouse0'), [], { skip: true }],
+      ];
+      const bad = [];
+      for (const [name, char, dz, go, keys, o] of cases) { const r = koRun(char, dz, go, keys, o || {}); if (!r.ok) bad.push(`${name}: ${r.why}`); }
+      SaveData.character = char0;
+      ok(!bad.length, `the knockout plays through and ends face down from every attack (${cases.length} kills, keys held through it; a fresh hold still skips it)${bad.length ? ': ' + bad.join('; ') : ''}`);
+      // blows on the husk (a swing, a heavy, a plunge beside it, a dash slash through it) only throw sparks
+      SaveData.character = 'ronin';
+      const hr = rival(0, -3, { phase2: true });
+      hr.hp = 3; hurtEnemy(hr, 10, { cause: 'slash' });
+      for (let i = 0; i < 60 * 9 && !hr.dead; i++) T.frame(1);
+      T.frame(30);
+      const hk = Game.props.find((q) => q.kind === 'husk');
+      let threw = '';
+      try {
+        T.aimAt(hk.center()); T.tap('Mouse0'); T.frame(30);
+        T.press('Mouse0'); T.frame(40); T.release('Mouse0'); T.frame(30);
+        T.press('Space'); T.frame(10); T.release('Space'); T.press('Mouse0'); T.frame(60); T.release('Mouse0'); T.frame(20);
+        T.aimAt(hk.center()); T.tap('ShiftLeft'); T.frame(2); T.tap('Mouse0'); T.frame(40);
+      } catch (err) { threw = err.message; }
+      ok(hk && !hk.dead && !threw, `blows on the knocked-out rival's husk don't break the game${threw ? ' (' + threw + ')' : ''}`);
+      SaveData.character = char0;
+      Game.enemies = []; Game.props = [];
+    }
+    // KO-MATRIX:END
     S.gameplay.invincible = false;
 
     // ---------- AEGIS-07 as the player ----------
