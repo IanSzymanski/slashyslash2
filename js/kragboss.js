@@ -7,9 +7,12 @@
 //   Combos. Fast strings of jabs, hooks, elbows, knees and kicks that drive straight through a parry: you take
 //   no damage but you're shoved back, it isn't staggered, and you get no counter. Dodging leads it on. Each
 //   string ends on a stopper (a haymaker, an uppercut, a hammer fist, a spinning backfist, a flying knee) with a
-//   long wind-up and a big gold glint; parry that and it's knocked back off balance, open for the counter.
+//   long wind-up, a gold outline, gold fire round the limb, gold rings closing on its feet and a big gold glint;
+//   parry that and it's knocked back off balance, open for the counter. String blows only flick embers.
+//   It stays on you through a string: it turns with you, steps in after you and lunges into each blow.
 //   The block. It only guards when you're a threat: at range (a charging sword beam, gunfire, AEGIS's beam) or
-//   right after you've staggered it. Its onyx arm comes up and takes blows from the front for a fraction of
+//   right after you've staggered it. A blue flash comes off the arm first; then the onyx arm is up and takes
+//   blows from the front for a fraction of
 //   their damage, and every blow it blocks builds heat. Fill it to full heat while it guards and it drops the
 //   guard straight into the Molten Fist. It knows a charged arm is a liability, so at full heat it only guards
 //   when you bait it: stagger it, or come at it from range with something big. Hit the arm then and all of it
@@ -18,11 +21,11 @@
 //   street along the line it will drive, tracking you until its visor flashes; then it lunges and the fist
 //   explodes along that line. No parry stops it and a dash's protection doesn't save you in front of it: dash
 //   out of the wedge on the flash. It hits for a lot, throws you and leaves you dazed. A miss leaves it venting.
-//   Getting to you: long shoulder charges that end in an explosion, leaps that land on you, stomps that send a
-//   shockwave round and raise molten vents out of the street, and its tether: a chain from the right hand onto
-//   a lamp post or a corner that it swings round to build speed and fling itself at you. Everywhere it walks it
-//   leaves smouldering footprints.
-// The last hit plays a slow-motion knockout and leaves its husk in the street.
+//   Getting to you: long shoulder charges that end in an explosion, stomps that split glowing cracks in the
+//   street, send a shockwave round and raise molten vents, and from far off a leap that lands on you or its
+//   tether: a chain from the right hand onto a lamp post or a corner that it swings round in a wide circle, off
+//   its feet, to build speed and fling itself at you. Everywhere it walks it leaves smouldering footprints.
+// It arrives bursting up out of the street; the last hit plays a slow-motion knockout and leaves its husk.
 
 ENEMY_DEFS.krag = { hp: 1500, r: 0.8, h: 2.9, speed: 5.6, score: 6000, mass: 9, dmg: 6, heavy: true, climb: 99, debris: ['#9a6440', '#7c4c30', '#2e2834', '#1e1a24', '#ff6a1a', '#c08a44'] };
 ENEMY_BASE_STATE.krag = 'fight';
@@ -42,14 +45,21 @@ const BLOCK = { MUL: 0.15, COS: 0.34 };
 // The Molten Fist: wind-up (s, before the telegraph setting), its bullet time's speed, the lunge's speed and
 // longest length, the blast's cone (length and half-angle) and its radius round the fist, damage, knock, how
 // long it dazes you, and the vent after it
-const FIST = { WIND: 1.05, BT: 0.7, SPEED: 42, LUNGE: 8, CONE: 12, HALF: 0.6, R: 4.4, DMG: 42, KNOCK: 40, DAZE: 1.0, VENT: 1.6 };
+const FIST = { WIND: 1.1, BT: 0.65, SPEED: 46, LUNGE: 10, CONE: 17, HALF: 0.68, R: 4.8, DMG: 55, KNOCK: 52, DAZE: 1.5, VENT: 1.8 };
 // its arm going off in its face: a share of its health, and the stun
 const DETONATE = { DMG: 0.12, STUN: 3.4 };
-// the shoulder charge, the leap onto you and the tether swing (radius round the pivot, speeds from and to, how
-// far round it has to go before it lets go, and its flight speed)
+// the shoulder charge, the leap onto you (only from far off) and the tether swing (the radii it tries round the
+// pivot, widest first; speeds from and to; how far round it has to go before it lets go; its flight speed; and
+// how high off its feet it's swung at full speed)
 const KCHARGE = { WIND: 0.42, SPEED: 28, MAX: 22, DMG: 22, KNOCK: 30 };
-const KJUMP = { WIND: 0.42, LIFT: 5, DMG: 26, R: 3.2 };
-const KSWING = { R: 3.9, V0: 12, V1: 30, ACC: 30, MIN: 1.6, FLY: 32, DMG: 28 };
+const KJUMP = { WIND: 0.42, LIFT: 5, DMG: 26, R: 3.2, MIN: 16 };
+const KSWING = { R: [8.2, 6.8, 5.6], V0: 14, V1: 34, ACC: 28, MIN: 1.3, FLY: 34, DMG: 30, LIFT: 1.6, MIN_D: 10 };
+// seconds of blue flash off the onyx arm before the guard is up
+const GUARD_RISE = 0.3;
+const KRAG_GOLD = { c0: '#ffffff', c1: '#ffd070', c2: '#a06010' };
+// the entry: how deep under the street it waits, when it bursts out, how hard it's thrown up, and its gravity
+const KINTRO = { DEPTH: 3.4, BURST: 1.5, VY: 19, G: 30 };
+const KRAG_STONE = ['#9a6440', '#7c4c30', '#5a3a2a', '#3a2c2a', '#2a2026', '#c08a44'];
 // what it won't swing round: the ground, the plaza, the arena's walls
 const SWING_SKIP = new Set(['ground', 'plaza', 'bound']);
 // a molten vent: radius, seconds of glowing crack before it erupts, seconds it erupts, damage
@@ -90,11 +100,12 @@ class Krag extends Boss {
     this.lastDir = 1; this.dying = false; this.ko = null; this.koT = 0; this.intro = null; this.husk = null; this.tilt = 0;
     this.steamT = 0;
   }
+  // it waits under the street until it bursts up out of it
   cinematicIntro() {
     const g = this.pos.y;
-    this.intro = { t: 0, ct: 0, stage: 'fall', done: {}, started: false, g, lit: false };
+    this.intro = { t: 0, ct: 0, stage: 'quake', done: {}, started: false, g, lit: false, vy: 0 };
     this.yaw = this.faceYaw = this.yawTo(Game.player.pos);
-    this.pos.y = this.prev.y = g + 40;
+    this.pos.y = this.prev.y = g - KINTRO.DEPTH;
   }
 
   // ---------- where its parts are ----------
@@ -106,7 +117,7 @@ class Krag extends Boss {
   crestPos() { return this.boneAt('mohawk', 0, 0.05, 0) || this.local(0, 2.9, 0.1); }
   handPlant() { const p = this.local(-0.7, 0, 1.0); p.y = World.groundAt(p.x, p.z, p.y + 0.6) + 0.12; return p; }
   limbPos(l) { return l === 'R' ? this.fistR() : l === 'F' ? this.footPos('R') : this.fistPos(); }
-  showModel() { return !this.spawning || !!this.intro; }
+  showModel() { return !this.spawning || (!!this.intro && this.intro.stage !== 'quake'); }
   charged() { return this.heat >= HEAT.MAX; }
   heatK() { return clamp(this.heat / HEAT.MAX, 0, 1); }
   // 0 at full health, 1 near death; later it recovers faster
@@ -131,12 +142,15 @@ class Krag extends Boss {
     if (this.cutMark && ((Game.realTime * 30) | 0) % 2) return 0.6;
     return 0;
   }
-  // the outline: red through the Molten Fist's wind-up, white hot while a charged arm is up to guard
+  // The outline is a tell: red through the Molten Fist's wind-up (no parry), gold through a stopper's (parry
+  // it), blue as the guard comes up, white hot while a charged arm is up to guard (hit it).
   outline() {
-    const a = this.act;
+    const a = this.act, fl = ((this.t * 24) | 0) % 2;
     if (this.dying || this.spawning) return null;
     if (a && a.kind === 'punch' && a.phase === 'wind') return this.perilFlash > 0 && ((this.t * 30) | 0) % 2 ? '#ffffff' : '#ff2a3a';
+    if (a && a.kind === 'guard' && a.t < a.rise) return fl ? '#bfe8ff' : '#2a9aff';
     if (a && a.kind === 'guard' && a.charged) return ((this.t * 14) | 0) % 2 ? '#fff0c8' : '#ff8a2a';
+    if (a && a.kind === 'melee' && a.m.stopper && a.phase === 'wind') return a.glinted && fl ? '#ffffff' : '#ffd070';
     return null;
   }
   // The colours of its molten light: from dull red cold to white hot at full heat, flickering there; the onyx
@@ -175,7 +189,7 @@ class Krag extends Boss {
   intercept(o, dmg) {
     if (this.transT > 0) return true;
     const a = this.act;
-    if (a && a.kind === 'guard' && !this.dying && this.blocks(o)) { this.blockHit(o, dmg || 0); return true; }
+    if (a && a.kind === 'guard' && a.t >= a.rise && !this.dying && this.blocks(o)) { this.blockHit(o, dmg || 0); return true; }
     return false;
   }
   // whether a blow comes at it from the front: against the way it travels, or from you
@@ -256,8 +270,10 @@ class Krag extends Boss {
     FX.debris(at, 20, this.def.debris, 20);
     FX.dust(at, 22, { c: '#2a2026', smax: 9, life: 1.6, rise: 1.8 });
     FX.decal('scorch', this.pos, { r: 2.6, dur: 10 });
-    FX.light(at, '#ffb040', 10, 18, 0.6);
-    FX.flash('#ffd0a0', 0.55);
+    KragViews.fireball(at, 4.5, 0.55);
+    KragViews.crack(this.pos, { r: 4.5, life: 9 });
+    FX.light(at, '#ffb040', 12, 20, 0.6);
+    FX.flash('#ffd0a0', 0.6);
     Sound.play('detonate', {}, at);
     Game.shake(0.95); Game.hitstop(0.12);
     Game.slowmo(0.2, 0.7, true);
@@ -294,8 +310,16 @@ class Krag extends Boss {
     this.hitFlash = Math.max(0, this.hitFlash - dt);
     if (this.spawning) {
       if (this.intro) { this.updateIntro(dt); return; }
+      // without the cutscene it still comes up out of the street: cracks spreading, then the burst
+      if (!this.quaking) {
+        this.quaking = true;
+        KragViews.crack(this.pos, { r: 4.5, grow: this.spawnT * 0.8, life: this.spawnT + 6 });
+        Sound.play('kragQuake', { dur: this.spawnT }, this.pos);
+      }
+      if (Math.random() < 0.5) FX.sparks({ x: this.pos.x + rand(-2, 2), y: this.pos.y + 0.05, z: this.pos.z + rand(-2, 2) }, 1, { x: 0, y: 1, z: 0 }, 0.5, 2, 8, Object.assign({ life: 0.8 }, KRAG_FIRE));
+      if (Math.random() < 0.3) Game.shake(0.03);
       this.spawnT -= dt;
-      if (this.spawnT <= 0) { this.landingBurst(1); this.arrive(true); }
+      if (this.spawnT <= 0) { this.eruptOut(); this.arrive(true); }
       return;
     }
     for (const k in this.cds) this.cds[k] -= dt * (k === 'leap' ? 1 : S.enemies.aggression);
@@ -359,18 +383,21 @@ class Krag extends Boss {
   chooseAct(p) {
     if (p.dead) return;
     const d = distXZ(p.pos, this.pos), dy = p.pos.y - this.pos.y, level = Math.abs(dy) < 2.2, near = d < 3.8 && Math.abs(dy) < 2.6;
+    // a string starts from a stride or two off: it steps in with the first blow
+    const reach = d < 6.5 && Math.abs(dy) < 2.6 && this.lineClear(p, d);
     if (this.charged()) {
       // full heat: it wants the Fist on you, from a few strides off with a clear line
-      if (this.cds.punch <= 0 && level && d > 2.6 && d < 11 && this.lineClear(p, d)) { this.startPunch(p, false); return; }
-      if (near && this.cds.combo <= 0) { this.startCombo(true); return; }
-    } else if (near && this.cds.combo <= 0) { this.startCombo(false); return; }
+      if (this.cds.punch <= 0 && level && d > 2.6 && d < 13 && this.lineClear(p, d)) { this.startPunch(p, false); return; }
+      if (reach && this.cds.combo <= 0) { this.startCombo(true); return; }
+    } else if (reach && this.cds.combo <= 0) { this.startCombo(false); return; }
     if (near || this.cds.closer > 0) return;
     this.cds.closer = rand(0.3, 0.6);
+    // up close and mid-range it charges and stomps; only from far off does it leap or swing on its chain
     const opts = [];
-    if (level && d > 4 && d < 12 && this.cds.stomp <= 0) opts.push(['stomp', 1.2]);
+    if (level && d > 4 && d < 12 && this.cds.stomp <= 0) opts.push(['stomp', 1.3]);
     if (level && d > 8 && d < 26 && this.cds.charge <= 0 && this.lineClear(p, d)) opts.push(['charge', 1.6]);
-    if (d > 7 && d < 30 && this.cds.jump <= 0) opts.push(['jump', Math.abs(dy) > 2 ? 3 : 1]);
-    if (level && d > 7 && d < 26 && this.cds.swing <= 0) opts.push(['swing', 1.1]);
+    if (d > KJUMP.MIN && d < 34 && this.cds.jump <= 0) opts.push(['jump', 0.8]);
+    if (level && d > KSWING.MIN_D && d < 30 && this.cds.swing <= 0) opts.push(['swing', 1.5]);
     if (!opts.length) return;
     let r = Math.random() * opts.reduce((s, o) => s + o[1], 0), pickd = opts[0][0];
     for (const [k, w] of opts) { if (r < w) { pickd = k; break; } r -= w; }
@@ -406,13 +433,21 @@ class Krag extends Boss {
     this.raiseGuard(rand(1.6, 2.4), 'range');
     this.cds.guard = rand(3.5, 5.5);
   }
+  // The guard: a blue flash off the onyx arm as it comes up (blows still land until it's up), then the arm
+  // is raised before its face.
   raiseGuard(dur, why) {
     if (this.stunT > 0 || this.dying) return;
     this.attack = null; this.lunge = null; this.drive = null;
-    this.act = { kind: 'guard', t: 0, dur, why, charged: this.charged(), hitT: 0, closeT: 0, blocked: 0, noShove: why === 'stagger' ? 0.9 : 0.35 };
+    const rise = GUARD_RISE * clamp(S.enemies.telegraph, 0.6, 1.4);
+    this.act = { kind: 'guard', t: 0, dur: dur + rise, rise, up: false, why, charged: this.charged(), hitT: 0, closeT: 0, blocked: 0, noShove: (why === 'stagger' ? 0.9 : 0.35) + rise };
     this.yaw = this.faceYaw = this.yawTo(Game.player.pos);
-    Sound.play('kragGuard', {}, this.center());
-    FX.sparks(this.fistPos(), 8, { x: 0, y: 1, z: 0 }, 1.2, 3, 8, KRAG_SPARK);
+    const f = this.fistPos();
+    FX.glint(f, { c: '#5ac0ff', size: 2.2, dur: rise + 0.06, follow: () => this.fistPos(), threat: this });
+    this.eyeGlint('#5ac0ff', 1.1);
+    FX.ring(f, 0.3, 2.8, 0.3, { c: '#5ac0ff', flat: false });
+    FX.sparks(f, 16, null, TAU, 3, 11, { c0: '#ffffff', c1: '#7ad0ff', c2: '#1a4a9a', g: 0, life: 0.7 });
+    FX.light(f, '#3aa8ff', 6, 9, rise);
+    Sound.play('kragGuardCue', {}, this.center());
   }
 
   runAct(dt, p) {
@@ -446,7 +481,14 @@ class Krag extends Boss {
   // behind it from range. Crowd it and it shoves you off; wait it out and it attacks.
   runGuard(dt, a, p) {
     const d = distXZ(p.pos, this.pos);
-    this.face(p.pos, 3.2);
+    if (!a.up && a.t >= a.rise) {
+      a.up = true;
+      const f = this.fistPos();
+      FX.sparks(f, 10, { x: 0, y: 1, z: 0 }, 1.2, 3, 9, KRAG_SPARK);
+      Sound.play('kragGuard', {}, f);
+      Game.shake(0.06);
+    }
+    this.face(p.pos, a.up ? 3.2 : 8);
     if (d > 3.2) this.steerTo(p.pos, 2.4);
     a.hitT = Math.max(0, a.hitT - dt);
     const f = this.fwd(), inFront = ((p.pos.x - this.pos.x) * f.x + (p.pos.z - this.pos.z) * f.z) / (d || 1) > 0.3;
@@ -469,27 +511,58 @@ class Krag extends Boss {
     this.act = { kind: 'melee', move: name, m, phase: 'wind', t: 0, wind: this.windOf(m), combo, glinted: false, aim: null };
     this.faceYaw = this.yawTo(p.pos);
     this.lastDir = -this.lastDir;
-    Sound.play('enemyWindup', { pm: m.stopper ? 0.45 : 0.75 }, this.center());
+    // through a string it stays on you: out of reach, it steps in after you before the next blow
+    const d = distXZ(p.pos, this.pos);
+    if (combo && this.onGround && d > m.r - 0.3) { this.stepIn(p, d - m.r * 0.55, 0.2); this.act.steps = 1; }
+    if (m.stopper) {
+      // a stopper winds up in gold from the start: fire round the limb, a gold flare, a deep tone
+      const at = this.limbPos(m.limb);
+      FX.sparks(at, 18, null, TAU, 2, 9, Object.assign({ g: -2, life: 0.9 }, KRAG_GOLD));
+      FX.ring(this.chest(), 0.4, 3.6, 0.35, { c: '#ffd070', flat: false });
+      FX.light(at, '#ffd070', 4, 8, 0.3);
+      Sound.play('stopperWind', {}, this.center());
+    } else Sound.play('kragGrunt', { pm: rand(0.9, 1.15) }, this.center());
+  }
+  // a quick hard step at you: dist metres over dur seconds, toward where you're going
+  stepIn(p, dist, dur) {
+    dist = clamp(dist, 0, 7);
+    if (dist < 0.4) return;
+    const u = flat(p.pos.x + p.vel.x * 0.15 - this.pos.x, p.pos.z + p.vel.z * 0.15 - this.pos.z), v = (2 * dist) / dur;
+    this.lunge = { t: 0, dur, vx: u.x * v, vz: u.z * v };
+    this.faceYaw = yawOf(u.x, u.z); this.turnRate = 20;
+    FX.dust(this.pos, 6, { smax: 3.5 });
+    FX.sparks(this.local(0, 0.1, -0.3), 6, { x: -u.x, y: 0.4, z: -u.z }, 0.7, 3, 9, KRAG_FIRE);
+    Sound.play('kragStep', {}, this.pos);
   }
   runMelee(dt, a, p) {
     const m = a.m, c = this.chest(), d = distXZ(p.pos, this.pos);
     if (a.phase === 'wind') {
-      // tracks you through most of the wind-up and steps in on you
-      if (a.t < a.wind * 0.75) this.face(p.pos, m.stopper ? 6 : 10);
+      // it stays on you: turning with you through the wind-up and walking in on where you're going
+      const lead = { x: p.pos.x + p.vel.x * 0.2, z: p.pos.z + p.vel.z * 0.2 }, dl = Math.hypot(lead.x - this.pos.x, lead.z - this.pos.z);
+      if (a.t < a.wind * (m.stopper ? 0.75 : 0.9)) this.face(lead, m.stopper ? 7 : 16);
       else this.faceYaw = this.yaw;
-      if (d > m.r - 0.6 && a.t < a.wind * 0.8) this.steerTo(p.pos, m.stopper ? 2 : 3.4);
+      if (dl > m.r - 0.9 && a.t < a.wind * 0.9 && !this.lunge) this.steerTo(lead, clamp((dl - m.r + 1.2) * 4, 2.5, m.stopper ? 4.5 : 8));
+      // get out of reach and it steps in after you again
+      if ((a.steps || 0) < 2 && !this.lunge && this.onGround && dl > m.r + 0.8 && a.t < a.wind * 0.8) { a.steps = (a.steps || 0) + 1; this.stepIn(p, dl - m.r * 0.55, 0.18); }
       if (!a.glinted && a.t >= Math.max(0, a.wind - GLINT_LEAD)) {
         a.glinted = true;
         const at = this.limbPos(m.limb);
         if (m.stopper) {
-          // the stopper's tell: a big gold glint off the limb and the visor
-          FX.glint(at, { c: '#ffd070', size: 1.6, follow: () => this.limbPos(m.limb), threat: this });
-          this.eyeGlint('#ffd070', 1.2);
+          // the stopper's tell: a big gold glint off the limb and the visor, a gold burst and a bell
+          FX.glint(at, { c: '#ffd070', size: 2.4, follow: () => this.limbPos(m.limb), threat: this });
+          this.eyeGlint('#ffd070', 1.4);
+          FX.ring(at, 0.3, 3.2, 0.28, { c: '#ffd070', flat: false });
+          FX.sparks(at, 22, null, TAU, 3, 12, Object.assign({ g: 0, life: 0.8 }, KRAG_GOLD));
+          FX.light(at, '#ffd070', 6, 9, 0.3);
           Sound.play('stopperCue', {}, c);
-        } else FX.glint(at, { c: '#ffe8c0', size: 0.8, follow: () => this.limbPos(m.limb), threat: this });
-        Sound.play('glint', {}, c);
+          Sound.play('glint', {}, c);
+        } else {
+          // a string blow only flicks embers off the limb: nothing gold, nothing to parry
+          FX.sparks(at, 7, null, TAU, 1.5, 6, Object.assign({ g: 4, life: 0.6 }, KRAG_FIRE));
+          FX.glint(at, { c: '#ff5a1a', size: 0.5, dur: 0.16, follow: () => this.limbPos(m.limb) });
+        }
       }
-      if (m.stopper && Math.random() < 0.5) FX.sparks(this.limbPos(m.limb), 1, null, TAU, 1.5, 5, Object.assign({ g: 0, life: 0.6 }, KRAG_FIRE));
+      if (m.stopper && Math.random() < 0.8) FX.sparks(this.limbPos(m.limb), 1, { x: 0, y: 1, z: 0 }, 1.2, 1.5, 5, Object.assign({ g: -3, life: 0.7 }, KRAG_GOLD));
       if (a.t >= a.wind) this.beginBlow(a, m, p);
       return;
     }
@@ -502,8 +575,12 @@ class Krag extends Boss {
       if (res === 'hit') {
         this.addHeat(HEAT.LAND);
         if (m.launch && !p.dead) { p.vel.y = Math.max(p.vel.y, m.launch); p.onGround = false; }
-        FX.sparks(p.center(), 10, { x: this.fwd().x, y: 0.3, z: this.fwd().z }, 1.3, 6, 20, KRAG_SPARK);
-        Game.hitstop(m.stopper ? 0.07 : 0.035);
+        const pc = p.center(), f = this.fwd();
+        FX.sparks(pc, m.stopper ? 26 : 12, { x: f.x, y: 0.3, z: f.z }, 1.3, 6, m.stopper ? 28 : 20, KRAG_SPARK);
+        FX.ring(pc, 0.3, m.stopper ? 3.4 : 1.8, 0.22, { c: m.stopper ? '#ffb040' : KRAG_ORANGE, flat: false });
+        if (m.stopper) { FX.debris(pc, 8, KRAG_STONE, 12); FX.flash('#ff8a3a', 0.15); }
+        Sound.play('kragHit', { heavy: !!m.stopper }, pc);
+        Game.hitstop(m.stopper ? 0.09 : 0.04); Game.shake(m.stopper ? 0.4 : 0.15);
       } else if (res === 'parried' && !m.stopper) this.plowThrough(p, m);
     }
     if (m.quake && !a.quaked && a.t > 0.1) {
@@ -512,13 +589,14 @@ class Krag extends Boss {
         const f = this.fwd(), at = { x: this.pos.x + f.x * 2.2, y: this.pos.y, z: this.pos.z + f.z * 2.2 };
         Game.hazards.push(new GroundWave(at, 19 * S.enemies.speed, 10 * this.dmgMul, this));
         for (const s of [4.5, 7.5]) this.spawnVent({ x: this.pos.x + f.x * s, y: this.pos.y, z: this.pos.z + f.z * s }, VENT.TELL);
+        KragViews.crack(at, { kind: 'line', yaw: this.yaw, len: 9, w: 3.4, life: 7, grow: 0.2 });
         this.slamFX(at, 0.6);
       }
     }
     if (a.t >= m.swing) {
       this.attack = null;
       const cb = a.combo;
-      if (cb && cb.i + 1 < cb.list.length) { cb.i++; this.startMove(cb.list[cb.i], cb); return; }
+      if (cb && cb.i + 1 < cb.list.length && d < 10) { cb.i++; this.startMove(cb.list[cb.i], cb); return; }
       this.act = { kind: 'recover', t: 0, dur: (m.stopper ? rand(0.6, 0.85) : rand(0.4, 0.6)) * this.rageGap() };
       this.cds.combo = rand(0.25, 0.6) * this.rageGap();
     }
@@ -538,8 +616,9 @@ class Krag extends Boss {
     const pa = clamp(Math.atan2(pc.y - c.y, Math.max(1.2, d)), -0.5, 0.5);
     a.aim = { x: f.x * Math.cos(pa), y: Math.sin(pa), z: f.z * Math.cos(pa) };
     if (m.kind === 'arc') this.attack = { yaw: this.yaw, tilt: m.tilt, span: m.span, dir: m.dir || this.lastDir, t: 0, sweep: m.swing * 0.6, r: m.r, pa };
-    // steps into the blow, never past you
-    const v = Math.min(m.lunge * 2, (Math.max(0, d - 1.8) / m.swing) * 2);
+    // drives into the blow after where you're going, never past you
+    const lx = p.pos.x + p.vel.x * 0.12 - this.pos.x, lz = p.pos.z + p.vel.z * 0.12 - this.pos.z, dl = Math.max(0, (lx * f.x + lz * f.z));
+    const v = Math.min(m.lunge * 2.4, (Math.max(0, Math.max(d, dl) - 1.7) / m.swing) * 2);
     this.lunge = { t: 0, dur: m.swing, vx: f.x * v, vz: f.z * v };
     if (m.leapV) { this.vel.y = m.leapV; this.onGround = false; }
     const at = this.limbPos(m.limb);
@@ -549,7 +628,8 @@ class Krag extends Boss {
       FX.swoosh({ follow: this, oy: 2.0, x: c.x, y: c.y, z: c.z, yaw: this.yaw, tilt: 0.05, r: m.r, span: TAU - 0.05, dir: 1, sweep: m.swing * 0.9, dur: m.swing + 0.15, thick: 0.45, pal: 'molten', trail: 0.9, bolts: 0 });
     }
     FX.sparks(at, m.stopper ? 14 : 5, { x: f.x, y: 0.1, z: f.z }, 0.8, 4, 14, KRAG_FIRE);
-    Sound.play(m.stopper ? 'heavySwing' : 'enemyMelee', {}, c);
+    if (m.stopper) FX.dust(this.pos, 8, { smax: 4 });
+    Sound.play('kragSwing', { heavy: !!m.stopper }, c);
   }
   blowHits(a, m, p) {
     const c = this.chest(), pc = p.center();
@@ -572,11 +652,15 @@ class Krag extends Boss {
     Sound.play('peril', { dur: Math.max(0.1, (wind - CUE_LEAD) / FIST.BT) });
     Sound.play('kragCharge', { dur: wind / FIST.BT }, this.chest());
     const g = { x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, c = this.chest();
-    FX.ring(g, 0.5, 7, 0.35, { c: '#ff2a3a' });
-    FX.ring(c, 0.4, 4.5, 0.3, { c: '#ffd0d4', flat: false });
-    FX.sparks(c, 26, { x: 0, y: 1, z: 0 }, 1.2, 6, 18, { c0: '#ffffff', c1: '#ff5a6a', c2: '#781e2a' });
-    FX.light(c, '#ff2a3a', 6, 12, 0.5);
-    Game.shake(0.25);
+    FX.ring(g, 0.5, 10, 0.4, { c: '#ff2a3a' });
+    FX.ring(c, 0.4, 6, 0.35, { c: '#ffd0d4', flat: false });
+    FX.sparks(c, 40, { x: 0, y: 1, z: 0 }, 1.2, 6, 22, { c0: '#ffffff', c1: '#ff5a6a', c2: '#781e2a' });
+    FX.debris(g, 14, KRAG_STONE, 9);
+    FX.light(c, '#ff2a3a', 8, 14, 0.5);
+    FX.flash('#ff2a3a', 0.12);
+    // the street splits red under it as it gathers the blow
+    KragViews.crack(g, { r: 5.5, red: true, grow: wind * 0.9, life: wind + 3 });
+    Game.shake(0.35);
   }
   // 0..1 through the wind-up, reaching 1 as the visor flashes (the HUD's cue reads it)
   cueProgress() {
@@ -593,9 +677,12 @@ class Krag extends Boss {
         if (!a.locked) {
           a.locked = true;
           this.yaw = this.faceYaw = a.lockYaw = yawOf(a.tx - this.pos.x, a.tz - this.pos.z);
-          this.eyeGlint('#ff2a3a', 2.4);
-          FX.light(fist, '#ffffff', 6, 10, 0.2);
+          this.eyeGlint('#ff2a3a', 3);
+          FX.ring(this.visorPos(), 0.3, 4, 0.25, { c: '#ffffff', flat: false });
+          FX.light(fist, '#ffffff', 8, 12, 0.25);
+          FX.flash('#ff2a3a', 0.16);
           Sound.play('glint', {}, this.chest());
+          Game.shake(0.3);
         }
         this.yaw = this.faceYaw = a.lockYaw;
       }
@@ -604,8 +691,14 @@ class Krag extends Boss {
         const u = coneDir(null, TAU), R = lerp(3.4, 1.4, k), q = { x: fist.x + u.x * R, y: fist.y + u.y * R * 0.8, z: fist.z + u.z * R };
         FX.sparks(q, 1, { x: -u.x, y: -u.y, z: -u.z }, 0.05, R * 3, R * 3.6, { c0: '#ffffff', c1: '#ff4a3a', c2: '#781e1a', g: 0, life: 0.8 });
       }
-      if (Math.random() < 0.25 + 0.4 * k) { const u = coneDir(null, TAU), R = lerp(3, 1.4, k); FX.bolt({ x: fist.x + u.x * R, y: fist.y + u.y * R, z: fist.z + u.z * R }, fist, 0.07, { outer: '#ff2a3a', core: '#ffffff', jag: 0.35, w: 0.05 }); }
-      if (Math.random() < 0.5) Game.shake(0.04 + 0.08 * k);
+      if (Math.random() < 0.35 + 0.5 * k) { const u = coneDir(null, TAU), R = lerp(4, 1.4, k); FX.bolt({ x: fist.x + u.x * R, y: fist.y + u.y * R, z: fist.z + u.z * R }, fist, 0.07, { outer: '#ff2a3a', core: '#ffffff', jag: 0.35, w: 0.06 }); }
+      // grit lifts off the street round it, and fire licks up out of the cracks
+      if (Math.random() < 0.7) {
+        const ang = rand(0, TAU), R = rand(1.5, 5.5), col = hexLinear(pick(KRAG_STONE));
+        FX.add({ x: this.pos.x + Math.cos(ang) * R, y: this.pos.y + 0.1, z: this.pos.z + Math.sin(ang) * R, vx: 0, vy: rand(1, 2.8), vz: 0, g: -0.6, drag: 0.5, t: 0, dur: rand(0.8, 1.4), c0: col, c1: col, c2: col, glow: false });
+      }
+      if (Math.random() < 0.4) { const ang = rand(0, TAU), R = rand(0.8, 4.5); FX.sparks({ x: this.pos.x + Math.cos(ang) * R, y: this.pos.y + 0.05, z: this.pos.z + Math.sin(ang) * R }, 1, { x: 0, y: 1, z: 0 }, 0.4, 2, 6, { c0: '#ffffff', c1: '#ff4a3a', c2: '#781e1a', g: -2, life: 0.9 }); }
+      if (Math.random() < 0.6) Game.shake(0.05 + 0.1 * k);
       if (a.t >= a.wind) {
         a.phase = 'lunge'; a.t = 0;
         if (Game.btOwner === this) Game.endBulletTime();
@@ -614,13 +707,17 @@ class Krag extends Boss {
         a.dirV = { x: f.x, y: 0, z: f.z };
         const V = FIST.SPEED;
         this.drive = { vx: f.x * V, vz: f.z * V, vy: 0, t: 0, dur: Math.max(0.03, L / V), g: 0 };
-        Sound.play('dash', {}, this.center());
-        FX.sparks(this.local(0, 0.3, -0.3), 14, { x: -f.x, y: 0.3, z: -f.z }, 0.8, 6, 16, KRAG_FIRE);
+        a.from = { x: this.pos.x, y: this.pos.y, z: this.pos.z };
+        a.gouge = FX.decal('gouge', this.pos, { w: 1.1, len: 0.4, yaw: this.yaw, dur: 10 });
+        Sound.play('kragLaunch', {}, this.center());
+        this.burst(this.local(0, 0.3, -0.3), 0.6);
       }
       return;
     }
     if (a.phase === 'lunge') {
-      // the fist meets you, or the lunge runs out
+      // its feet tear the street the length of the lunge, until the fist meets you or the lunge runs out
+      if (a.gouge) FX.stretchDecal(a.gouge, a.from, this.pos);
+      FX.sparks(this.local(rand(-0.4, 0.4), rand(0.2, 2), -0.4), 3, { x: -a.dirV.x, y: 0.2, z: -a.dirV.z }, 0.5, 3, 10, Object.assign({ life: 0.8 }, KRAG_FIRE));
       const fp = this.local(-0.2, 1.7, 1.4), pc = p.chest();
       if (!this.drive || (!p.dead && dist3(fp, pc) < 1.4)) { this.drive = null; this.fistBlast(a, p); }
       return;
@@ -647,30 +744,35 @@ class Krag extends Boss {
     if (!p.dead && this.fistZone(p)) {
       landed = p.takeHit({ dmg: FIST.DMG * this.dmgMul, from: c, kind: 'melee', source: this, knock: FIST.KNOCK, unparryable: true, pierce: true, through: true, daze: FIST.DAZE }) === 'hit';
       if (landed) {
-        p.vel.y = Math.max(p.vel.y, 16); p.onGround = false;
-        FX.sparks(p.chest(), 30, { x: f.x, y: 0.3, z: f.z }, 1.6, 11, 38, KRAG_FIRE);
-        FX.flash('#ff3010', 0.45);
-        Game.hitstop(0.14);
+        p.vel.y = Math.max(p.vel.y, 18); p.onGround = false;
+        FX.sparks(p.chest(), 40, { x: f.x, y: 0.3, z: f.z }, 1.6, 11, 42, KRAG_FIRE);
+        FX.flash('#ff3010', 0.6);
+        Game.hitstop(0.18);
+        Game.slowmo(0.3, 0.45, true);
       }
-    } else if (!p.dead && distXZ(p.pos, this.pos) < 12) p.perilDodge(this);
-    // the blast: a fireball off the fist and fire jets along the line
-    FX.ring(fist, 0.4, 6.5, 0.45, { c: '#ffb040', flat: false });
-    FX.ring({ x: fist.x, y: this.pos.y + 0.06, z: fist.z }, 0.5, 8, 0.45, { c: '#ff2a3a' });
-    FX.sparks(fist, 50, { x: f.x, y: 0.2, z: f.z }, 1.2, 10, 36, KRAG_FIRE);
-    FX.sparks(fist, 30, null, TAU, 5, 18, KRAG_FIRE);
-    for (const s of [3, 6, 9, 11.5]) {
-      const q = { x: this.pos.x + f.x * s, y: this.pos.y + 0.2, z: this.pos.z + f.z * s };
-      FX.sparks(q, 10, { x: f.x * 0.4, y: 1, z: f.z * 0.4 }, 0.8, 5, 14, Object.assign({ life: 0.9 }, KRAG_FIRE));
-      FX.dust(q, 3, { c: '#2a2026', smax: 3, rise: 1.6 });
-    }
-    FX.embers(fist, 24);
-    FX.debris(fist, 16, GRIT, 18);
-    FX.decal('scorch', { x: fist.x, y: this.pos.y, z: fist.z }, { r: 2.4, dur: 10 });
-    FX.decal('crack', { x: fist.x, y: this.pos.y, z: fist.z }, { len: 5 });
-    FX.light(fist, '#ff8a2a', 10, 18, 0.5);
-    Props.blast(fist, 4);
+    } else if (!p.dead && distXZ(p.pos, this.pos) < FIST.CONE) p.perilDodge(this);
+    // the blast: a fireball off the fist, the street split open down the wedge and a run of explosions along it
+    const g = { x: fist.x, y: this.pos.y, z: fist.z };
+    KragViews.fireball(fist, 5.5, 0.6);
+    KragViews.fireball({ x: fist.x + f.x * 2.5, y: fist.y + 0.4, z: fist.z + f.z * 2.5 }, 3.8, 0.5);
+    FX.ring(fist, 0.4, 10, 0.5, { c: '#ffb040', flat: false });
+    FX.ring({ x: g.x, y: g.y + 0.06, z: g.z }, 0.5, 13, 0.55, { c: '#ff2a3a' });
+    FX.ring({ x: g.x, y: g.y + 0.07, z: g.z }, 0.3, 6.5, 0.35, { c: '#ffffff' });
+    FX.sparks(fist, 90, { x: f.x, y: 0.2, z: f.z }, 1.1, 12, 46, KRAG_FIRE);
+    FX.sparks(fist, 40, null, TAU, 6, 22, KRAG_FIRE);
+    FX.embers(fist, 40);
+    FX.debris(fist, 30, KRAG_STONE, 22);
+    FX.dust(fist, 26, { c: '#2a2026', smax: 10, rise: 2, life: 1.8 });
+    FX.decal('scorch', g, { r: 3.4, dur: 14 });
+    FX.decal('crack', g, { len: 6, dur: 12 });
+    KragViews.crack(g, { r: 6, life: 10 });
+    KragViews.crack({ x: this.pos.x + f.x * 1.2, y: this.pos.y, z: this.pos.z + f.z * 1.2 }, { kind: 'line', yaw: yawOf(f.x, f.z), len: FIST.CONE, w: 9, life: 11, grow: 0.32 });
+    FX.light(fist, '#ffa040', 14, 26, 0.6);
+    FX.flash('#ffb070', 0.4);
+    Props.blast(fist, 5);
+    Game.hazards.push(new FistWave(this, f, g));
     Sound.play('kragPunch', {}, fist);
-    Game.shake(landed ? 0.95 : 0.7);
+    Game.shake(landed ? 1 : 0.9); Game.hitstop(landed ? 0 : 0.06);
   }
 
   // ---------- getting to you ----------
@@ -698,13 +800,17 @@ class Krag extends Boss {
         a.phase = 'run'; a.t = 0;
         const V = KCHARGE.SPEED * Math.sqrt(S.enemies.speed);
         this.drive = { vx: f.x * V, vz: f.z * V, vy: 0, t: 0, dur: L / V, g: 0, homing: 0.35 };
-        this.burst(this.local(0, 0.4, -0.4), 0.5);
+        a.from = { x: this.pos.x, y: this.pos.y, z: this.pos.z };
+        a.gouge = FX.decal('gouge', this.pos, { w: 0.8, len: 0.4, yaw: this.yaw, dur: 8 });
+        this.burst(this.local(0, 0.4, -0.4), 0.6);
         Sound.play('kragLaunch', {}, this.center());
       }
       return;
     }
     if (a.phase === 'run') {
-      if (Math.random() < 0.8) FX.sparks(this.local(rand(-0.4, 0.4), rand(0.4, 2.2), -0.3), 1, { x: -f.x, y: 0.2, z: -f.z }, 0.5, 2, 6, Object.assign({ life: 0.8 }, KRAG_FIRE));
+      if (a.gouge && this.onGround) FX.stretchDecal(a.gouge, a.from, this.pos);
+      FX.sparks(this.local(rand(-0.4, 0.4), rand(0.4, 2.2), -0.3), 2, { x: -f.x, y: 0.2, z: -f.z }, 0.5, 2, 7, Object.assign({ life: 0.9 }, KRAG_FIRE));
+      if (Math.random() < 0.5) FX.dust(this.local(rand(-0.3, 0.3), 0.05, -0.4), 1, { smax: 2.5 });
       // it smashes through the lamps in its way
       Props.blast(this.center(), this.r + 0.4);
       if (!a.hit && !p.dead) {
@@ -716,7 +822,7 @@ class Krag extends Boss {
           if (res === 'hit') { this.addHeat(HEAT.LAND); this.burst({ x: (c.x + pc.x) / 2, y: pc.y, z: (c.z + pc.z) / 2 }, 0.8); this.drive = null; }
         }
       }
-      if (!this.drive) { a.phase = 'skid'; a.t = 0; a.wall = !!(this.col && this.col.wall); if (a.wall) this.burst(this.local(-0.3, 1.6, 0.9), 1); }
+      if (!this.drive) { a.phase = 'skid'; a.t = 0; a.wall = !!(this.col && this.col.wall); if (a.wall) { this.burst(this.local(-0.3, 1.6, 0.9), 1); FX.decal('crack', this.local(0, 1.6, 1), { len: 3 }); } }
       return;
     }
     if (Math.random() < 0.7) FX.sparks(this.local(rand(-0.3, 0.3), 0.1, 0.3), 1, { x: -f.x, y: 0.5, z: -f.z }, 0.6, 3, 9, KRAG_SPARK);
@@ -729,7 +835,7 @@ class Krag extends Boss {
     this.attack = null; this.lunge = null;
     this.act = { kind: 'jump', phase: 'crouch', t: 0, wind: this.tele(KJUMP.WIND), to: q, glinted: false, hit: false };
     this.faceYaw = this.yawTo(q);
-    this.cds.jump = rand(6, 9);
+    this.cds.jump = rand(10, 14);
     Sound.play('enemyWindup', { pm: 0.35 }, this.center());
   }
   landingSpot(p) {
@@ -798,6 +904,8 @@ class Krag extends Boss {
         at.y = this.pos.y;
         if (this.onGround) {
           Game.hazards.push(new GroundWave(at, 19 * S.enemies.speed, 12 * this.dmgMul, this));
+          KragViews.crack(at, { r: last ? 5.2 : 3.8, life: 8 });
+          KragViews.crack(at, { kind: 'line', yaw: yawOf(u.x, u.z), len: last ? 11 : 8, w: last ? 4 : 3, life: 7, grow: 0.22 });
           const line = last ? [3.5, 6.5, 9.5] : [4, 7];
           line.forEach((s, i) => this.spawnVent({ x: this.pos.x + u.x * s, y: this.pos.y, z: this.pos.z + u.z * s }, VENT.TELL - 0.15 + i * 0.12));
           if (last && a.n > 1) for (let i = 0; i < 6; i++) { const ang = (i / 6) * TAU; this.spawnVent({ x: this.pos.x + Math.cos(ang) * 4.5, y: this.pos.y, z: this.pos.z + Math.sin(ang) * 4.5 }, VENT.TELL + 0.15); }
@@ -822,40 +930,48 @@ class Krag extends Boss {
   }
 
   // ---------- the tether swing ----------
-  // A pivot it can swing round on its chain: a standing lamp post, or the corner of anything solid on its level
-  // at least chest high (a building, a container, a car, a girder's foot), with open street round it far enough
-  // for it to come round and see you down the line it lets go along.
+  // A pivot it can swing round on its chain: a standing lamp post (the chain bites near its top), or the corner
+  // of anything solid on its level at least chest high (a building, a container, a girder's foot), with open
+  // street round it for a wide circle, far enough for it to come round and see you down the line it lets go
+  // along. It tries the widest circle first.
   planSwing(p) {
-    const K = this.pos, g = K.y, cands = [];
-    for (const L of Props.standing()) if (Math.abs(L.y0 - g) < 0.5) cands.push({ x: L.x, z: L.z, lamp: L, pr: 0.16 });
-    for (const b of World.near(K.x - 19, K.z - 19, K.x + 19, K.z + 19)) {
+    const K = this.pos, g = K.y, cands = [], RR = KSWING.R[0] + 4;
+    for (const L of Props.standing()) if (Math.abs(L.y0 - g) < 0.5 && Math.hypot(L.x - K.x, L.z - K.z) < RR + 10) cands.push({ x: L.x, z: L.z, lamp: L, pr: 0.16, top: L.y0 + LAMP_H - 0.8 });
+    for (const b of World.near(K.x - RR - 10, K.z - RR - 10, K.x + RR + 10, K.z + RR + 10)) {
       if (SWING_SKIP.has(b.kind) || b.hidden || b.max.y < g + 1.4 || b.min.y > g + 0.5) continue;
-      for (const [x, z] of [[b.min.x, b.min.z], [b.min.x, b.max.z], [b.max.x, b.min.z], [b.max.x, b.max.z]]) cands.push({ x, z, lamp: null, pr: 0 });
+      for (const [x, z] of [[b.min.x, b.min.z], [b.min.x, b.max.z], [b.max.x, b.min.z], [b.max.x, b.max.z]]) cands.push({ x, z, lamp: null, pr: 0, top: Math.min(b.max.y, g + 5.5) - 0.2 });
     }
     let best = null, bestS = -Infinity;
     for (const C of cands) {
       const dC = Math.hypot(C.x - K.x, C.z - K.z);
-      if (dC < 3.5 || dC > 18) continue;
-      const R = KSWING.R + C.pr, th0 = Math.atan2(K.z - C.z, K.x - C.x), E = { x: C.x + Math.cos(th0) * R, z: C.z + Math.sin(th0) * R };
-      if (!this.freeAt(E.x, g, E.z)) continue;
-      const ex = E.x - K.x, ez = E.z - K.z, el = Math.hypot(ex, ez);
-      if (el > 0.5 && World.raycast({ x: K.x, y: g + 0.8, z: K.z }, { x: ex / el, y: 0, z: ez / el }, el, 0.3)) continue;
-      for (const s of [1, -1]) {
-        // the best place round the free arc to let go: you within 100 degrees of the way it's going (the chain
-        // whips it round onto you as it lets go), in the clear
-        let sweep = 0, rel = null, relCos = Math.cos(1.75);
-        for (let k = 1; k <= 34; k++) {
-          const th = th0 + s * k * 0.17, x = C.x + Math.cos(th) * R, z = C.z + Math.sin(th) * R;
-          if (!this.freeAt(x, g, z)) break;
-          sweep = k * 0.17;
-          if (sweep < KSWING.MIN) continue;
-          const tx = -Math.sin(th) * s, tz = Math.cos(th) * s, px = p.pos.x - x, pz = p.pos.z - z, pd = Math.hypot(px, pz), cs = (tx * px + tz * pz) / (pd || 1);
-          if (pd > 5 && pd < 24 && cs > relCos && this.flightClear({ x, y: g, z }, p)) { rel = sweep; relCos = cs; }
+      if (dC < 2.5 || dC > 22) continue;
+      const th0 = Math.atan2(K.z - C.z, K.x - C.x);
+      for (const R0 of KSWING.R) {
+        const R = R0 + C.pr, E = { x: C.x + Math.cos(th0) * R, z: C.z + Math.sin(th0) * R };
+        // hauled out (or in) onto the circle no further than it can be reeled in a moment
+        if (Math.abs(dC - R) > 9 || !this.freeAt(E.x, g, E.z)) continue;
+        const ex = E.x - K.x, ez = E.z - K.z, el = Math.hypot(ex, ez);
+        if (el > 0.5 && World.raycast({ x: K.x, y: g + 0.8, z: K.z }, { x: ex / el, y: 0, z: ez / el }, el, 0.3)) continue;
+        const step = 1.3 / R;
+        for (const sd of [1, -1]) {
+          // the best place round the free arc to let go: you within 100 degrees of the way it's going (the
+          // chain whips it round onto you as it lets go), in the clear
+          let sweep = 0, rel = null, relCos = Math.cos(1.75);
+          for (let k = 1; k * step <= 5.8; k++) {
+            const th = th0 + sd * k * step, x = C.x + Math.cos(th) * R, z = C.z + Math.sin(th) * R;
+            if (!this.freeAt(x, g, z)) break;
+            sweep = k * step;
+            if (sweep < KSWING.MIN) continue;
+            const tx = -Math.sin(th) * sd, tz = Math.cos(th) * sd, px = p.pos.x - x, pz = p.pos.z - z, pd = Math.hypot(px, pz), cs = (tx * px + tz * pz) / (pd || 1);
+            if (pd > 5 && pd < 28 && cs > relCos && this.flightClear({ x, y: g, z }, p)) { rel = sweep; relCos = cs; }
+          }
+          // with free arc still beyond it, so it gets there before the arc runs out
+          if (rel === null || rel > sweep - 0.3) continue;
+          const score = relCos * 2 + Math.min(rel, 3) * 0.4 + R * 0.35 - Math.abs(dC - R) * 0.12 + rand(0, 1) + (C.lamp ? 0.4 : 0);
+          if (score > bestS) { bestS = score; best = { C, R, s: sd, th0, g, maxSweep: sweep, relSweep: rel, E, hook: { x: C.x, y: C.top, z: C.z } }; }
         }
-        // with free arc still beyond it, so it gets there before the arc runs out
-        if (rel === null || rel > sweep - 0.3) continue;
-        const score = relCos * 2 + Math.min(rel, 3) * 0.4 + rand(0, 1) + (C.lamp ? 0.5 : 0);
-        if (score > bestS) { bestS = score; best = { C, R, s, th0, maxSweep: sweep, relSweep: rel, E, hook: { x: C.x, y: g + (C.lamp ? 2.8 : 2.2), z: C.z } }; }
+        // the widest circle that works round this pivot is the one it takes
+        if (best && best.C === C) break;
       }
     }
     return best;
@@ -871,7 +987,7 @@ class Krag extends Boss {
     const plan = this.planSwing(p);
     if (!plan) return false;
     this.attack = null; this.lunge = null;
-    this.act = { kind: 'swing', phase: 'fire', t: 0, plan, hook: plan.hook, line: 0, side: plan.s, th: plan.th0, sweep: 0, spd: 0, v: null, glinted: false, dir: null, hit: false };
+    this.act = { kind: 'swing', phase: 'fire', t: 0, plan, hook: plan.hook, line: 0, side: plan.s, th: plan.th0, sweep: 0, spd: 0, v: null, glinted: false, dir: null, hit: false, lift: 0 };
     this.faceYaw = this.yawTo(plan.C);
     this.cds.swing = rand(9, 12);
     Sound.play('chain', {}, this.center());
@@ -881,41 +997,50 @@ class Krag extends Boss {
     const P = a.plan, C = P.C;
     if (a.phase === 'fire') {
       // the chain flies from its right hand and bites
-      a.line = clamp(a.t / 0.18, 0, 1);
+      a.line = clamp(a.t / 0.22, 0, 1);
       this.face(C, 14);
-      if (a.t >= 0.18) { a.phase = 'reel'; a.t = 0; FX.sparks(a.hook, 10, null, TAU, 3.6, 12, KRAG_SPARK); Sound.play('tetherAttach', {}, a.hook); }
+      if (a.t >= 0.22) { a.phase = 'reel'; a.t = 0; FX.sparks(a.hook, 14, null, TAU, 3.6, 14, KRAG_SPARK); FX.light(a.hook, '#ffb040', 3, 6, 0.2); Sound.play('tetherAttach', {}, a.hook); Sound.play('chain', {}, a.hook); }
       return;
     }
     if (a.phase === 'reel') {
-      // hauled out onto the circle it will swing round
+      // hauled out onto the circle it will swing round, digging in
       const dx = P.E.x - this.pos.x, dz = P.E.z - this.pos.z, d = Math.hypot(dx, dz);
-      if (d < 0.6 || a.t > 0.7) { a.phase = 'orbit'; a.t = 0; a.th = Math.atan2(this.pos.z - C.z, this.pos.x - C.x); a.spd = KSWING.V0; a.last = { x: this.pos.x, z: this.pos.z }; Sound.play('chainSwing', {}, this.center()); return; }
-      this.want = { x: dx / d, z: dz / d, spd: 14 };
+      if (d < 0.6 || a.t > 0.75) { a.phase = 'orbit'; a.t = 0; a.th = Math.atan2(this.pos.z - C.z, this.pos.x - C.x); a.spd = KSWING.V0; a.last = { x: this.pos.x, z: this.pos.z }; Sound.play('chainSwing', {}, this.center()); return; }
+      this.want = { x: dx / d, z: dz / d, spd: 16 };
       this.face(C, 10);
+      if (Math.random() < 0.6) FX.dust(this.pos, 1, { smax: 2 });
       return;
     }
     if (a.phase === 'orbit') {
       a.spd = Math.min(KSWING.V1, a.spd + KSWING.ACC * dt);
       const dth = (a.spd / P.R) * dt;
       a.th += a.side * dth; a.sweep += dth;
-      const tx = C.x + Math.cos(a.th) * P.R, tz = C.z + Math.sin(a.th) * P.R;
-      a.v = { x: (tx - this.pos.x) / dt, y: -2, z: (tz - this.pos.z) / dt };
+      // the faster it goes the further it's swung up off its feet, leaning out on the chain
+      const sk = clamp((a.spd - KSWING.V0) / (KSWING.V1 - KSWING.V0), 0, 1);
+      a.lift = KSWING.LIFT * Math.pow(sk, 1.2);
+      const tx = C.x + Math.cos(a.th) * P.R, tz = C.z + Math.sin(a.th) * P.R, ty = P.g + a.lift;
+      a.v = { x: (tx - this.pos.x) / dt, y: clamp((ty - this.pos.y) / dt, -8, 8), z: (tz - this.pos.z) / dt };
       const vl = Math.hypot(a.v.x, a.v.z), cap = a.spd * 2;
       if (vl > cap) { a.v.x *= cap / vl; a.v.z *= cap / vl; }
       const T = { x: -Math.sin(a.th) * a.side, z: Math.cos(a.th) * a.side };
       this.faceYaw = this.yaw = yawOf(T.x, T.z);
-      if (Math.random() < 0.9) FX.sparks(this.local(rand(-0.4, 0.4), rand(0.3, 2.2), -0.4), 1, { x: -T.x, y: 0.2, z: -T.z }, 0.4, 2, 6, Object.assign({ life: 0.7 }, KRAG_FIRE));
-      if (Math.random() < 0.5) FX.sparks(a.hook, 1, null, TAU, 1.5, 4, KRAG_SPARK);
+      FX.sparks(this.local(rand(-0.4, 0.4), rand(0.3, 2.2), -0.4), 1 + Math.round(sk * 2), { x: -T.x, y: 0.2, z: -T.z }, 0.4, 2, 7, Object.assign({ life: 0.8 }, KRAG_FIRE));
+      // its feet drag sparks and dust off the street until it's swung clear of it
+      if (a.lift < 0.4 && Math.random() < 0.8) { const f = this.local(rand(-0.3, 0.3), 0.05, 0); FX.sparks(f, 2, { x: -T.x, y: 0.5, z: -T.z }, 0.7, 3, 9, KRAG_SPARK); FX.dust(f, 1, { smax: 2.5 }); }
+      if (Math.random() < 0.6) FX.sparks(a.hook, 1, null, TAU, 1.5, 4, KRAG_SPARK);
+      if ((a.whoosh = (a.whoosh || 0) - dt) <= 0) { a.whoosh = (TAU * P.R) / Math.max(1, a.spd) / 2; Sound.play('chainWhoosh', { pm: 0.8 + 0.4 * sk }, this.center()); }
       // snagged on something: let go
       const moved = Math.hypot(this.pos.x - a.last.x, this.pos.z - a.last.z);
       a.stuck = moved < a.spd * dt * 0.3 && a.t > 0.1 ? (a.stuck || 0) + dt : 0;
       a.last = { x: this.pos.x, z: this.pos.z };
       const px = p.pos.x - this.pos.x, pz = p.pos.z - this.pos.z, pd = Math.hypot(px, pz) || 1;
-      const go = a.sweep >= KSWING.MIN && pd > 4 && ((T.x * px + T.z * pz) / pd > Math.cos(0.45) || a.sweep >= P.relSweep) && this.flightClear(this.pos, p);
+      // (the line is judged from the street under it, as it was planned)
+      const foot = { x: this.pos.x, y: P.g, z: this.pos.z };
+      const go = a.sweep >= KSWING.MIN && pd > 4 && ((T.x * px + T.z * pz) / pd > Math.cos(0.45) || a.sweep >= P.relSweep) && this.flightClear(foot, p);
       if (go) this.releaseSwing(a, p);
       else if (a.sweep >= P.maxSweep - 0.05 || a.stuck > 0.15 || a.t > 3) {
         // out of arc with no clear line at you: the chain lets go and it stumbles out of the swing
-        if (this.flightClear(this.pos, p)) { this.releaseSwing(a, p); return; }
+        if (this.flightClear(foot, p)) { this.releaseSwing(a, p); return; }
         FX.sparks(a.hook, 10, null, TAU, 3, 10, KRAG_SPARK);
         this.vel.x = T.x * a.spd * 0.4; this.vel.z = T.z * a.spd * 0.4;
         this.act = { kind: 'recover', t: 0, dur: 0.5 };
@@ -947,15 +1072,17 @@ class Krag extends Boss {
     a.phase = 'fly'; a.t = 0;
     const c = this.center(), pc = p.center(), lead = { x: pc.x + p.vel.x * 0.15, y: pc.y, z: pc.z + p.vel.z * 0.15 };
     const dx = lead.x - c.x, dz = lead.z - c.z, dh = Math.hypot(dx, dz) || 1, V = KSWING.FLY * Math.sqrt(S.enemies.speed);
-    const T = clamp(dh / V, 0.15, 1), g = 30;
-    // an arc that meets you at your chest, with a hop into it at least; walls and the street end it
-    this.drive = { vx: dx / T, vz: dz / T, vy: Math.max(8, (lead.y - c.y) / T + 0.5 * g * T), t: 0, dur: T + 0.5, g };
+    const T = clamp(dh / V, 0.15, 1.1), g = 30;
+    // an arc that meets you at your chest (it's swung up off its feet, so it flies flat and drops onto you);
+    // walls and the street end it
+    this.drive = { vx: dx / T, vz: dz / T, vy: clamp((lead.y + 0.3 - c.y) / T + 0.5 * g * T, -6, 14), t: 0, dur: T + 0.5, g };
     a.dir = { x: dx / dh, y: 0, z: dz / dh };
     this.yaw = this.faceYaw = yawOf(dx, dz);
     if (a.plan.C.lamp) Props.cut(a.plan.C.lamp, a.plan.C.lamp.y0 + 1.2, { x: -a.dir.x, z: -a.dir.z });
     else FX.sparks(a.hook, 14, null, TAU, 4, 14, KRAG_SPARK);
-    this.burst(this.local(0, 1, -0.4), 0.5);
+    this.burst(this.local(0, 1, -0.4), 0.7);
     Sound.play('kragLaunch', {}, c);
+    Sound.play('kragRoar', { pm: 1.15 }, c);
   }
 
   // ---------- physics ----------
@@ -1035,39 +1162,46 @@ class Krag extends Boss {
   }
   landingBurst(k) {
     const g = { x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z };
-    FX.dust(g, Math.round(14 * k + 4), { smax: 3 + 7 * k });
-    FX.ring(g, 0.3, 1.8 + 3.5 * k, 0.3, { c: KRAG_ORANGE });
-    FX.sparks(g, Math.round(10 * k + 3), { x: 0, y: 1, z: 0 }, 1.6, 3, 10 + 8 * k, KRAG_FIRE);
-    if (k > 0.4) { FX.decal('crack', g, { len: 2.5 + 2 * k }); FX.debris(g, 10, GRIT, 12); Sound.play('kragStomp', {}, g); }
+    FX.dust(g, Math.round(18 * k + 4), { smax: 3 + 8 * k });
+    FX.ring(g, 0.3, 1.8 + 4 * k, 0.3, { c: KRAG_ORANGE });
+    FX.sparks(g, Math.round(14 * k + 3), { x: 0, y: 1, z: 0 }, 1.6, 3, 10 + 10 * k, KRAG_FIRE);
+    if (k > 0.4) { FX.decal('crack', g, { len: 2.5 + 2 * k }); KragViews.crack(g, { r: 2 + 2.5 * k, life: 6 }); FX.debris(g, 14, KRAG_STONE, 13); Sound.play('kragStomp', {}, g); }
     Sound.play('land', {}, g);
-    Game.shake(0.12 + 0.35 * k);
+    Game.shake(0.15 + 0.4 * k);
   }
-  // a blast at the ground: cracks, a ring, dust, debris and fire
+  // A blast at the ground: glowing cracks split out, a ring, a wall of dust, stone thrown up, fire. Close by,
+  // it rocks the camera hard.
   slamFX(at, k) {
-    const g = { x: at.x, y: at.y + 0.06, z: at.z };
-    FX.ring(g, 0.4, 3 + 5 * k, 0.4, { c: KRAG_ORANGE });
-    FX.ring(g, 0.3, 2 + 2.5 * k, 0.3, { c: '#ffd070' });
-    FX.dust(at, Math.round(14 + 16 * k), { smax: 6 + 8 * k, rise: 1.2 });
-    FX.debris(at, Math.round(10 + 14 * k), GRIT, 14 + 8 * k);
-    FX.sparks({ x: at.x, y: at.y + 0.3, z: at.z }, Math.round(12 + 16 * k), { x: 0, y: 1, z: 0 }, 1.4, 5, 16, KRAG_FIRE);
+    const g = { x: at.x, y: at.y + 0.06, z: at.z }, near = clamp(1 - distXZ(at, Game.player.pos) / 30, 0.3, 1);
+    FX.ring(g, 0.4, 3.5 + 6 * k, 0.45, { c: KRAG_ORANGE });
+    FX.ring(g, 0.3, 2 + 3 * k, 0.3, { c: '#ffd070' });
+    FX.ring({ x: at.x, y: at.y + 1, z: at.z }, 0.5, 2.5 + 4 * k, 0.3, { c: '#ffb040', flat: false });
+    FX.dust(at, Math.round(18 + 22 * k), { smax: 7 + 9 * k, rise: 1.2 });
+    FX.dust(at, Math.round(8 + 8 * k), { c: '#2a2026', smax: 3, rise: 3, life: 1.6 });
+    FX.debris(at, Math.round(12 + 16 * k), KRAG_STONE, 15 + 9 * k);
+    FX.sparks({ x: at.x, y: at.y + 0.3, z: at.z }, Math.round(16 + 20 * k), { x: 0, y: 1, z: 0 }, 1.4, 5, 18, KRAG_FIRE);
+    FX.embers(at, Math.round(6 + 8 * k));
     FX.decal('crack', at, { len: 3 + 3 * k });
-    FX.light({ x: at.x, y: at.y + 0.8, z: at.z }, '#ff8a2a', 5 + 4 * k, 9 + 6 * k, 0.35);
-    Sound.play('kragStomp', {}, at);
-    Game.shake(0.3 + 0.45 * k); Game.hitstop(0.03 * k);
+    KragViews.crack(at, { r: 2.6 + 2.8 * k, life: 7 });
+    FX.light({ x: at.x, y: at.y + 0.8, z: at.z }, '#ff8a2a', 6 + 5 * k, 10 + 7 * k, 0.4);
+    Sound.play('kragStomp', { big: k > 0.75 }, at);
+    Game.shake((0.35 + 0.5 * k) * near); Game.hitstop(0.035 * k);
   }
   // an explosion of fire off its body: setting off on a charge or a leap, meeting you, hitting a wall
   burst(at, k) {
-    FX.ring(at, 0.3, 2 + 3 * k, 0.3, { c: KRAG_ORANGE, flat: false });
-    FX.sparks(at, Math.round(14 + 20 * k), null, TAU, 4, 14 + 10 * k, KRAG_FIRE);
-    FX.dust(at, Math.round(4 + 8 * k), { c: '#2a2026', smax: 4, rise: 1.5 });
-    FX.light(at, '#ff8a2a', 4 + 4 * k, 8, 0.25);
+    FX.ring(at, 0.3, 2 + 3.5 * k, 0.3, { c: KRAG_ORANGE, flat: false });
+    FX.sparks(at, Math.round(18 + 24 * k), null, TAU, 4, 16 + 12 * k, KRAG_FIRE);
+    FX.dust(at, Math.round(6 + 10 * k), { c: '#2a2026', smax: 4.5, rise: 1.5 });
+    FX.debris(at, Math.round(4 + 8 * k), KRAG_STONE, 12);
+    if (k >= 0.5) KragViews.fireball(at, 1.6 + 2 * k, 0.35);
+    FX.light(at, '#ff8a2a', 5 + 5 * k, 9, 0.28);
     Sound.play('explode', { big: k > 0.7 }, at);
-    Game.shake(0.15 + 0.3 * k);
+    Game.shake(0.18 + 0.35 * k);
   }
-  // each footfall shakes the street and leaves a smouldering print
+  // each footfall shakes the street (harder the closer you are) and leaves a smouldering print
   footfall(side) {
     const d = distXZ(this.pos, Game.player.pos);
-    if (d < 18) Game.shake(0.05);
+    if (d < 22) Game.shake(0.1 * clamp(1 - d / 22, 0.25, 1));
     Sound.play('kragStep', {}, this.pos);
     const q = this.local(side === 'R' ? 0.36 : -0.36, 0, -0.05);
     q.y = World.groundAt(q.x, q.z, this.pos.y + 0.5);
@@ -1078,15 +1212,30 @@ class Krag extends Boss {
   }
 
   // ---------- entry ----------
+  // the quick way up out of the street (no cutscene): the street bursts round it in fire and stone
+  eruptOut() {
+    const g = { x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z };
+    KragViews.fireball({ x: g.x, y: g.y + 1.2, z: g.z }, 4, 0.5);
+    KragViews.crack(g, { r: 6, life: 10 });
+    FX.ring(g, 0.4, 10, 0.5, { c: KRAG_ORANGE });
+    FX.debris(g, 30, KRAG_STONE, 24);
+    FX.dust(g, 24, { smax: 12, rise: 1.4, life: 1.4 });
+    FX.sparks({ x: g.x, y: g.y + 0.5, z: g.z }, 40, { x: 0, y: 1, z: 0 }, 0.9, 8, 28, Object.assign({ life: 1.1 }, KRAG_FIRE));
+    FX.decal('scorch', g, { r: 2.8, dur: 12 });
+    FX.light({ x: g.x, y: g.y + 2, z: g.z }, '#ff8a2a', 10, 20, 0.6);
+    Sound.play('kragErupt', {}, g);
+    Game.shake(0.6);
+  }
   // From here it fights. quick: no cutscene (training, retries); otherwise the cutscene showed the title.
   arrive(quick) {
     this.spawning = false;
     if (quick) Game.announce(this.name, null, '#ff9a5a', 2.6);
     this.act = { kind: 'intro', t: quick ? 0 : 0.5 };
   }
-  // Entry: a streak of fire falls out of the sky onto the street; it lands in a crouch with a blast, stands
-  // with steam pouring off it, its mohawk catches, it roars, and its title hits as it beats its fist into its
-  // palm.
+  // Entry: the street quakes and splits in glowing cracks round a spot, fire spitting up out of them; the
+  // street bursts in a column of fire and it's thrown up out of it, onyx fist first; it comes down in a crouch
+  // with a blast, stands with steam pouring off it as its mohawk catches, roars, and its title hits as it beats
+  // its fist into its palm.
   updateIntro(dt) {
     const I = this.intro, p = Game.player;
     if (!I.started) {
@@ -1097,61 +1246,89 @@ class Krag extends Boss {
     I.t += dt;
     const ct = (I.ct = own ? C.t : I.t);
     const once = (k) => (I.done[k] ? false : (I.done[k] = true));
-    const g = { x: this.pos.x, y: I.g + 0.05, z: this.pos.z };
+    const g = { x: this.pos.x, y: I.g + 0.05, z: this.pos.z }, B = KINTRO.BURST;
     this.yaw = this.faceYaw = this.yawTo(p.pos);
-    if (ct < 1.05) {
-      I.stage = 'fall';
-      if (once('rumble')) Sound.play('beaconRumble', {}, g);
-      const k = ct / 1.05;
-      this.pos.y = this.prev.y = I.g + 40 * Math.pow(1 - k, 1.6);
-      const c = this.center();
-      FX.sparks(c, 4, { x: 0, y: 1, z: 0 }, 0.6, 6, 18, Object.assign({ life: 0.8 }, KRAG_FIRE));
-      if (Math.random() < 0.6) FX.embers(c, 2);
-      if (Math.random() < 0.5) FX.sparks({ x: g.x + rand(-1, 1), y: g.y, z: g.z + rand(-1, 1) }, 1, { x: 0, y: 1, z: 0 }, 0.5, 1, 4, KRAG_FIRE);
-      Game.shake(0.01 + 0.03 * k);
-    } else if (ct < 1.85) {
-      I.stage = 'impact';
-      if (once('impact')) {
-        this.pos.y = this.prev.y = I.g; this.onGround = true;
-        Sound.play('beaconErupt', {}, g); Sound.play('kragStomp', {}, g);
-        FX.flash('#ffd0a0', 0.5);
-        FX.ring(g, 0.4, 11, 0.6, { c: KRAG_ORANGE });
-        FX.ring(g, 0.3, 6.4, 0.45, { c: '#ffd070' });
-        FX.debris(g, 34, GRIT, 30);
-        FX.dust(g, 30, { smax: 18, rise: 1, life: 1.4 });
-        FX.sparks({ x: g.x, y: g.y + 0.5, z: g.z }, 50, { x: 0, y: 1, z: 0 }, 1.4, 8, 30, KRAG_FIRE);
-        FX.decal('crack', g, { len: 6, dur: 14 });
-        FX.decal('scorch', g, { r: 2.6, dur: 14 });
-        FX.light({ x: g.x, y: g.y + 2, z: g.z }, '#ff8a2a', 9, 20, 0.7);
-        Game.shake(0.8);
+    if (ct < B) {
+      I.stage = 'quake';
+      const k = ct / B;
+      if (once('rumble')) {
+        Sound.play('kragQuake', { dur: B }, g);
+        KragViews.crack(g, { r: 5, grow: B * 0.8, life: 14 });
+        Game.hazards.push(new MoltenVent(g, B - 0.05, this, { R: 1.8, tall: 2.4, erupt: 0.9, harmless: true }));
       }
+      if (ct > B * 0.45 && once('crack2')) { KragViews.crack(g, { r: 8, grow: B * 0.5, life: 14 }); for (let i = 0; i < 3; i++) KragViews.crack(g, { kind: 'line', yaw: (i / 3) * TAU + rand(-0.4, 0.4), len: rand(7, 11), w: 3, grow: B * 0.5, life: 14 }); }
+      // fire and grit spit up out of the cracks, steam rises, the street shakes harder
+      for (let i = 0; i < 1 + k * 3; i++) {
+        const a = rand(0, TAU), r = rand(0.3, 2 + 4 * k), q = { x: g.x + Math.cos(a) * r, y: g.y, z: g.z + Math.sin(a) * r };
+        if (Math.random() < 0.6) FX.sparks(q, 1, { x: 0, y: 1, z: 0 }, 0.5, 2, 6 + 6 * k, Object.assign({ life: 0.8 }, KRAG_FIRE));
+        else FX.debris(q, 1, KRAG_STONE, 3 + 5 * k);
+      }
+      if (Math.random() < 0.4) FX.dust({ x: g.x + rand(-2, 2), y: g.y, z: g.z + rand(-2, 2) }, 1, { c: KRAG_STEAM, smax: 1.2, rise: 2.5, life: 1.6 });
+      Game.shake(0.02 + 0.06 * k);
+    } else if (ct < B + 1.05) {
+      I.stage = 'burst';
+      if (once('burst')) {
+        // the street bursts and it's thrown up out of it
+        I.vy = KINTRO.VY; this.onGround = false;
+        Sound.play('kragErupt', {}, g); Sound.play('kragRoar', {}, g);
+        FX.flash('#ffd0a0', 0.55);
+        KragViews.fireball({ x: g.x, y: g.y + 1.2, z: g.z }, 5, 0.6);
+        FX.ring(g, 0.4, 13, 0.6, { c: KRAG_ORANGE });
+        FX.ring(g, 0.3, 7, 0.45, { c: '#ffd070' });
+        FX.ring({ x: g.x, y: g.y + 1.5, z: g.z }, 0.5, 6, 0.4, { c: '#ffb040', flat: false });
+        FX.debris(g, 50, KRAG_STONE, 30);
+        FX.debris(g, 24, GRIT, 22);
+        FX.dust(g, 34, { smax: 16, rise: 1.4, life: 1.6 });
+        FX.dust(g, 16, { c: '#2a2026', smax: 4, rise: 5, life: 2 });
+        FX.sparks({ x: g.x, y: g.y + 0.5, z: g.z }, 70, { x: 0, y: 1, z: 0 }, 0.9, 10, 34, Object.assign({ life: 1.3 }, KRAG_FIRE));
+        FX.embers(g, 40);
+        FX.decal('scorch', g, { r: 3.2, dur: 16 });
+        FX.decal('crack', g, { len: 7, dur: 16 });
+        FX.light({ x: g.x, y: g.y + 2, z: g.z }, '#ff8a2a', 12, 24, 0.8);
+        Props.blast(g, 4);
+        Game.shake(0.9); Game.hitstop(0.05);
+      }
+      // the arc up out of the hole and back down
+      I.vy -= KINTRO.G * dt;
+      this.pos.y = this.prev.y = Math.max(I.g - KINTRO.DEPTH, this.pos.y + I.vy * dt);
+      if (I.vy < 0 && this.pos.y <= I.g) { this.pos.y = this.prev.y = I.g; I.landed = true; }
+      const c = this.center();
+      FX.sparks(c, 3, { x: 0, y: -Math.sign(I.vy), z: 0 }, 0.7, 3, 10, Object.assign({ life: 0.8 }, KRAG_FIRE));
+      if (Math.random() < 0.6) FX.embers(c, 1);
+      if (I.landed && once('impact')) this.introLand(g);
+    } else if (ct < B + 1.75) {
+      I.stage = 'impact';
+      if (once('impact')) this.introLand(g);
       if (Math.random() < 0.6) FX.dust(this.local(rand(-0.6, 0.6), rand(1, 2.4), rand(-0.4, 0.4)), 1, { c: KRAG_STEAM, smax: 1, rise: 2.4, life: 1.4 });
-    } else if (ct < 2.85) {
+    } else if (ct < B + 2.75) {
       I.stage = 'rise';
       if (Math.random() < 0.8) FX.dust(this.local(rand(-0.6, 0.6), rand(1, 2.6), rand(-0.4, 0.4)), 1, { c: KRAG_STEAM, smax: 1, rise: 2.4, life: 1.4 });
-      if (ct >= 2.3 && once('lit')) {
+      if (ct >= B + 2.2 && once('lit')) {
         I.lit = true;
         const h = this.crestPos();
         FX.sparks(h, 30, { x: 0, y: 1, z: 0 }, 1, 4, 14, Object.assign({ g: -5, life: 1.2 }, KRAG_FIRE));
         FX.light(h, '#ff8a2a', 6, 8, 0.4);
         Sound.play('heatMax', {}, h);
       }
-    } else if (ct < 3.75) {
+    } else if (ct < B + 3.65) {
       I.stage = 'roar';
       I.lit = true;
       if (once('roar')) {
         const c = this.chest();
         if (own) C.zoom = 2;
-        FX.ring(c, 0.4, 10, 0.6, { c: KRAG_ORANGE, flat: false });
-        FX.sparks(c, 40, null, TAU, 6, 24, KRAG_FIRE);
-        FX.light(c, '#ff8a2a', 9, 16, 0.8);
+        FX.ring(c, 0.4, 12, 0.6, { c: KRAG_ORANGE, flat: false });
+        FX.ring({ x: this.pos.x, y: I.g + 0.06, z: this.pos.z }, 0.5, 10, 0.6, { c: '#ffb040' });
+        FX.sparks(c, 50, null, TAU, 6, 26, KRAG_FIRE);
+        FX.dust(this.pos, 20, { smax: 10, rise: 0.6 });
+        FX.light(c, '#ff8a2a', 10, 18, 0.8);
         FX.flash('#ff9a5a', 0.3);
         Sound.play('kragRoar', {}, c); Sound.play('enrageRoar', {}, c);
-        Game.shake(0.6);
+        Game.shake(0.7);
       }
       if (Math.random() < 0.8) FX.sparks(this.crestPos(), 2, { x: 0, y: 1, z: 0 }, 0.8, 3, 10, Object.assign({ g: -6, life: 1 }, KRAG_FIRE));
     } else {
       I.stage = 'title';
+      const t0 = B + 3.65;
       if (once('title')) {
         if (own) { C.zoom = 1; C.big = { style: 'title', text: this.name, color: '#ff8a3a', tag: 'FOUNDRY FRAME', sub: 'THE MOLTEN FIST' }; C.bigT = 0; }
         Sound.play('titleHit');
@@ -1159,11 +1336,23 @@ class Krag extends Boss {
         Game.shake(0.45);
       }
       // the fist beating into the palm
-      const beat = Math.floor((ct - 3.75) * 9 / Math.PI);
-      if (beat !== I.beat) { I.beat = beat; if (beat % 2 === 0) { const h = this.fistPos(); FX.sparks(h, 8, null, TAU, 2, 8, KRAG_SPARK); Sound.play('kragBlock', {}, h); } }
-      if (ct >= 5.3 && once('end')) this.endIntro();
+      const beat = Math.floor((ct - t0) * 9 / Math.PI);
+      if (beat !== I.beat) { I.beat = beat; if (beat % 2 === 0) { const h = this.fistPos(); FX.sparks(h, 10, null, TAU, 2, 9, KRAG_SPARK); Sound.play('kragBlock', {}, h); Game.shake(0.08); } }
+      if (ct >= t0 + 1.55 && once('end')) this.endIntro();
     }
     this.cineShot('intro', ct, I.stage);
+  }
+  // it comes down out of the air in a crouch, the onyx fist driven into the street
+  introLand(g) {
+    const I = this.intro;
+    this.pos.y = this.prev.y = I.g; this.onGround = true; I.vy = 0;
+    Sound.play('kragStomp', { big: true }, g);
+    FX.ring(g, 0.4, 9, 0.5, { c: KRAG_ORANGE });
+    FX.dust(g, 26, { smax: 12, rise: 1, life: 1.4 });
+    FX.debris(g, 20, KRAG_STONE, 18);
+    KragViews.crack(this.handPlant(), { r: 3.4, life: 12 });
+    FX.light({ x: g.x, y: g.y + 1, z: g.z }, '#ff8a2a', 8, 14, 0.4);
+    Game.shake(0.7);
   }
   endIntro() {
     const I = this.intro;
@@ -1275,11 +1464,12 @@ class Krag extends Boss {
     let s;
     if (kind === 'intro') {
       const g = this.intro ? this.intro.g : P.y, pp = Game.player.pos, d = distXZ(pp, P);
-      if (stage === 'fall') s = { look: { x: P.x, y: g + 3 + Math.min(18, (P.y - g) * 0.45), z: P.z }, yaw: yawOf(P.x - pp.x, P.z - pp.z) + 0.3, pitch: 0.42, dist: Math.min(16, d * 0.55 + 4), ease: 3 };
+      if (stage === 'quake') s = { look: { x: P.x, y: g + 0.6, z: P.z }, yaw: yawOf(P.x - pp.x, P.z - pp.z) + 0.35, pitch: -0.32, dist: lerp(Math.min(16, d * 0.5 + 5), 11, clamp(ct / KINTRO.BURST, 0, 1)), ease: 2 };
+      else if (stage === 'burst') s = { look: { x: P.x, y: Math.max(g + 1.5, P.y + 1.6), z: P.z }, yaw: y + Math.PI + 0.55, pitch: 0.22, dist: 10.5, ease: 4 };
       else if (stage === 'impact') s = { look: at(1.3), yaw: y + Math.PI + 0.6, pitch: 0.06, dist: 9.5, ease: 3 };
       else if (stage === 'rise') s = { look: at(1.9), yaw: y + Math.PI + 0.35, pitch: 0.12, dist: 7, ease: 3 };
       else if (stage === 'roar') s = { look: at(2.5), yaw: y + Math.PI - 0.2, pitch: 0.14, dist: 5.4, ease: 4 };
-      else s = { look: at(2.2), yaw: y + Math.PI + 0.45 - (ct - 3.75) * 0.06, pitch: 0.04, dist: 5.8, ease: 3 };
+      else s = { look: at(2.2), yaw: y + Math.PI + 0.45 - (ct - KINTRO.BURST - 3.65) * 0.06, pitch: 0.04, dist: 5.8, ease: 3 };
     } else {
       if (stage === 'impact') s = { look: at(1.9), yaw: y + Math.PI / 2 + 0.2, pitch: 0.02, dist: 7, ease: 4 };
       else if (stage === 'down') s = { look: at(0.7), yaw: y + Math.PI * 0.75 + (ct - 3.45) * 0.1, pitch: -0.5, dist: 8.5, ease: 1.5 };
@@ -1289,15 +1479,51 @@ class Krag extends Boss {
   }
 }
 
+// The Molten Fist's blast rolling on down the street along its wedge: a run of explosions out to the cone's
+// end, each throwing fire and grit up out of the split street. It only shows; the blow is the blast's own.
+class FistWave {
+  constructor(owner, f, at) {
+    this.kind = 'fistwave'; this.owner = owner; this.f = { x: f.x, z: f.z }; this.o = { x: at.x, y: at.y, z: at.z };
+    this.t = 0; this.s = 1.2; this.n = 0; this.dead = false; this.boomed = false;
+  }
+  update(dt) {
+    this.t += dt;
+    const reach = Math.min(FIST.CONE, 1.2 + this.t * 50), F = this.f;
+    while (this.s < reach) {
+      const s = this.s, w = Math.tan(FIST.HALF) * s * 0.75, n = s < 5 ? 1 : 2;
+      for (let i = 0; i < n; i++) {
+        const side = n === 1 ? 0 : (i ? 1 : -1) * rand(0.25, 1) * w, x = this.o.x + F.x * s - F.z * side, z = this.o.z + F.z * s + F.x * side;
+        const y = World.groundAt(x, z, this.o.y + 1.5);
+        if (y === -Infinity || Math.abs(y - this.o.y) > 1.5) continue;
+        const q = { x, y, z };
+        FX.sparks({ x, y: y + 0.3, z }, 9, { x: F.x * 0.5, y: 1, z: F.z * 0.5 }, 0.7, 6, 18, Object.assign({ life: 1 }, KRAG_FIRE));
+        FX.dust(q, 3, { c: '#2a2026', smax: 4, rise: 2.4, life: 1.4 });
+        if (Math.random() < 0.5) FX.debris(q, 3, KRAG_STONE, 13);
+        if (this.n++ % 3 === 1) { KragViews.fireball({ x, y: y + 0.9, z }, rand(1.8, 2.8), 0.42); FX.light({ x, y: y + 1, z }, '#ff8a2a', 5, 9, 0.3); }
+      }
+      this.s += 1.6;
+    }
+    if (!this.boomed && reach >= FIST.CONE * 0.6) {
+      this.boomed = true;
+      Sound.play('kragRumble', {}, { x: this.o.x + F.x * FIST.CONE * 0.6, y: this.o.y, z: this.o.z + F.z * FIST.CONE * 0.6 });
+      Game.shake(0.3);
+    }
+    if (reach >= FIST.CONE) this.dead = true;
+  }
+}
+
 // A molten vent: a glowing crack in the street, bubbling, that bursts into a column of fire. Standing on it as
 // it erupts throws you up out of it.
+// o.R, o.tall and o.erupt size it; o.harmless for show (the entry).
 class MoltenVent {
-  constructor(pos, delay, owner) {
+  constructor(pos, delay, owner, o = {}) {
     this.kind = 'vent';
     this.pos = { x: pos.x, y: pos.y, z: pos.z };
-    this.owner = owner; this.R = VENT.R; this.delay = Math.max(0.2, delay * S.enemies.telegraph);
+    this.owner = owner; this.R = o.R || VENT.R; this.tall = o.tall || 1; this.erupt = o.erupt || VENT.ERUPT; this.harmless = !!o.harmless;
+    this.delay = Math.max(0.2, delay * (this.harmless ? 1 : S.enemies.telegraph));
     this.t = 0; this.phase = 'tell'; this.dead = false; this.hit = false;
-    FX.decal('crack', { x: pos.x, y: pos.y, z: pos.z }, { len: 2.4, dur: 3 });
+    FX.decal('crack', { x: pos.x, y: pos.y, z: pos.z }, { len: 2.4 * (this.R / VENT.R), dur: 3 });
+    KragViews.crack(pos, { r: this.R * 1.7, life: this.delay + 3, grow: Math.min(0.4, this.delay * 0.6) });
   }
   update(dt) {
     this.t += dt;
@@ -1306,23 +1532,26 @@ class MoltenVent {
       if (Math.random() < 0.5) FX.sparks({ x: c.x + rand(-0.6, 0.6), y: c.y + 0.05, z: c.z + rand(-0.6, 0.6) }, 1, { x: 0, y: 1, z: 0 }, 0.5, 1, 4, KRAG_FIRE);
       if (this.t >= this.delay) {
         this.phase = 'erupt'; this.t = 0;
-        FX.sparks({ x: c.x, y: c.y + 0.3, z: c.z }, 24, { x: 0, y: 1, z: 0 }, 0.6, 8, 22, Object.assign({ life: 1.1 }, KRAG_FIRE));
-        FX.embers(c, 10);
-        FX.dust(c, 6, { c: '#2a2026', smax: 3, rise: 3, life: 1.2 });
-        FX.light({ x: c.x, y: c.y + 1.5, z: c.z }, '#ff8a2a', 5, 8, 0.4);
-        Sound.play('molten', {}, c);
+        const k = this.R / VENT.R;
+        FX.sparks({ x: c.x, y: c.y + 0.3, z: c.z }, Math.round(28 * k), { x: 0, y: 1, z: 0 }, 0.6, 8, 24 * Math.sqrt(this.tall), Object.assign({ life: 1.2 }, KRAG_FIRE));
+        FX.embers(c, Math.round(12 * k));
+        FX.dust(c, Math.round(7 * k), { c: '#2a2026', smax: 3 * k, rise: 3, life: 1.3 });
+        FX.debris(c, Math.round(4 * k), KRAG_STONE, 12);
+        FX.ring({ x: c.x, y: c.y + 0.07, z: c.z }, this.R * 0.6, this.R * 1.8, 0.3, { c: '#ffb040' });
+        FX.light({ x: c.x, y: c.y + 1.5, z: c.z }, '#ff8a2a', 6 * k, 9 * k, 0.45);
+        Sound.play('molten', { big: k > 1.4 }, c);
       }
       return;
     }
     if (this.phase === 'erupt') {
-      if (Math.random() < 0.8) FX.sparks({ x: c.x + rand(-0.4, 0.4), y: c.y + rand(0.5, 3), z: c.z + rand(-0.4, 0.4) }, 1, { x: 0, y: 1, z: 0 }, 0.5, 4, 10, KRAG_FIRE);
+      if (Math.random() < 0.9) FX.sparks({ x: c.x + rand(-0.4, 0.4) * this.R, y: c.y + rand(0.5, 3) * this.tall, z: c.z + rand(-0.4, 0.4) * this.R }, 1, { x: 0, y: 1, z: 0 }, 0.5, 4, 11, KRAG_FIRE);
       const P = Game.player;
-      if (!this.hit && !P.dead && distXZ(P.pos, c) < this.R + P.r && P.pos.y > c.y - 0.4 && P.pos.y < c.y + 3.2) {
+      if (!this.harmless && !this.hit && !P.dead && distXZ(P.pos, c) < this.R + P.r && P.pos.y > c.y - 0.4 && P.pos.y < c.y + 3.2) {
         this.hit = true;
         const res = P.takeHit({ dmg: VENT.DMG * (this.owner ? this.owner.dmgMul : 1), from: { x: c.x, y: c.y - 0.5, z: c.z }, kind: 'shockwave', source: this.owner && !this.owner.dead ? this.owner : null, knock: 10 });
         if (res === 'hit') { P.vel.y = Math.max(P.vel.y, 17); P.onGround = false; }
       }
-      if (this.t >= VENT.ERUPT) { this.phase = 'fade'; this.t = 0; }
+      if (this.t >= this.erupt) { this.phase = 'fade'; this.t = 0; }
       return;
     }
     if (this.t >= 0.4) this.dead = true;

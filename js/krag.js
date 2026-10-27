@@ -249,7 +249,8 @@ const KragPose = {
       case 'guard': {
         // the onyx forearm raised upright before the face, the right fist cocked at the side; white hot and
         // shaking when the arm is charged
-        const hand = e.local(-0.3, 2.5, 0.55);
+        // it snaps up through the blue flash
+        const k = easeOutCubic(clamp(a.t / Math.max(0.05, a.rise || 0.01), 0, 1)), hand = e.local(lerp(-0.6, -0.3, k), lerp(1.4, 2.5, k), lerp(0.35, 0.55, k));
         o.armL = { at: hand, pole: [-0.3, -1, -0.5] };
         o.armR = { rot: [-0.3, 0.35, 1.4] };
         stance(0.22); o.lean = 0.22; o.twist = 0.25; o.head = 0.15;
@@ -342,7 +343,8 @@ const KragPose = {
           o.armR = { D: { x: dx / l, y: dy / l, z: dz / l }, reach: 0.98 };
           o.armL = { D: this.dir(e, -0.3, -0.3, -0.8), reach: 0.8 };
           o.twist = -0.35;
-          if (a.phase === 'orbit') { o.legs = 'air'; o.lean = 0.35; o.roll = -0.5 * a.side; o.head = -0.2; }
+          // swung off its feet, leaning out hard against the chain, legs trailing
+          if (a.phase === 'orbit') { const sk = clamp(a.lift / KSWING.LIFT, 0, 1); o.legs = 'air'; o.lean = 0.35 + 0.25 * sk; o.roll = -(0.5 + 0.35 * sk) * a.side; o.head = -0.2; }
           else stance(0.2);
         } else if (a.phase === 'fly') {
           // a comet: the onyx fist out ahead, legs trailing
@@ -463,13 +465,16 @@ const KragPose = {
   },
   introPose(e, o, I) {
     const S = KRAG_SCALE;
-    if (I.stage === 'fall') {
-      o.legs = 'air'; o.lean = 0.2; o.armL = { D: this.dir(e, 0.4, -0.6, -0.2), reach: 0.95 }; o.armR = { rot: [-1.4, 0.8, 0.4] };
-    } else if (I.stage === 'impact') {
+    if (I.stage === 'quake' || (I.stage === 'burst' && !I.landed)) {
+      // thrown up out of the street onyx fist first, then the fist brought down to land on
+      o.legs = 'air';
+      if (I.vy > 0) { o.lean = -0.1; o.head = -0.3; o.armL = { D: this.dir(e, 0.15, 1, -0.2), reach: 1 }; o.armR = { rot: [-0.6, 0.9, 0.6] }; }
+      else { o.lean = 0.3; o.head = 0.1; o.armL = { D: this.dir(e, 0.5, -0.7, -0.2), reach: 0.95 }; o.armR = { rot: [-1.2, 0.8, 0.4] }; }
+    } else if (I.stage === 'impact' || I.stage === 'burst') {
       o.legs = 'kneel'; o.kneel = 1; o.drop = 0.62 * S; o.lean = 0.6; o.head = 0.2;
       o.armL = { at: e.handPlant(), pole: [-0.6, 0.2, 0.6] }; o.armR = { rot: [0.5, 0.9, 0.6] };
     } else if (I.stage === 'rise') {
-      const k = easeOutCubic(clamp((I.ct - 1.9) / 0.7, 0, 1));
+      const k = easeOutCubic(clamp((I.ct - KINTRO.BURST - 1.85) / 0.7, 0, 1));
       o.legs = 'kneel'; o.kneel = 1 - k; o.drop = lerp(0.62 * S, 0.1, k); o.lean = lerp(0.6, 0.15, k); o.head = lerp(0.3, 0, k);
       o.armL = k < 0.3 ? { at: e.handPlant(), pole: [-0.6, 0.2, 0.6] } : { rot: [0.35, -0.15, 0.5] }; o.armR = { rot: [0.3, 0.5, 0.6] };
     } else if (I.stage === 'roar') {
@@ -477,7 +482,7 @@ const KragPose = {
       o.armR = { rot: [-0.5, 1.3, 1.0] }; o.armL = { rot: [-0.5, -1.3, 1.0] };
     } else {
       // the onyx fist driven into the right palm in front of the chest
-      const beat = Math.max(0, Math.sin((I.ct - 3.7) * 9)) * 0.08, hand = e.local(0.0, 1.85 + beat, 0.62);
+      const beat = Math.max(0, Math.sin((I.ct - KINTRO.BURST - 3.6) * 9)) * 0.08, hand = e.local(0.0, 1.85 + beat, 0.62);
       o.legs = 'plant'; o.fR = [0.28, 0, -0.3]; o.fL = [-0.3, 0, 0.3]; o.drop = 0.12; o.lean = 0.1; o.head = 0;
       o.armL = { at: hand, pole: [-1, -0.4, 0] }; o.armR = { at: e.local(0.15, 1.85, 0.6), pole: [1, -0.4, 0] };
     }
