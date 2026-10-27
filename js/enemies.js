@@ -504,8 +504,8 @@ function separateEnemies(dt) {
 function hurtEnemy(e, dmg, o = {}) {
   if (e.dead || e.spawning || e.dying) return 0;
   if (e.shielded && e.shielded(o)) { e.shieldHit(o); return 0; }
-  // the rival's own parries and the phase change, and its evasive boosts
-  if (e.intercept && e.intercept(o)) return 0;
+  // the rival's own parries and the phase change, KRAG's guard, and evasive boosts
+  if (e.intercept && e.intercept(o, dmg)) return 0;
   if (e.dodging && e.dodging()) {
     if (!e._missT || Game.time > e._missT) { e._missT = Game.time + 0.4; FX.sparks(e.center(), 5, null, TAU, 3.6, 9, { c0: '#ffffff', c1: '#7aa8ff', c2: '#1a3a8a' }); }
     return 0;

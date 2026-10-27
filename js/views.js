@@ -1,7 +1,7 @@
 'use strict';
 // Meshes for the simulation's non-character objects, synced each rendered frame: bolts, rubble, pulse
 // grenades and their blast zones, barrels, the tether line, gunner lasers, grenadier arcs, and the
-// player's afterimages. The rival's own effects are in rivalviews.js. Every material is made once here and
+// player's afterimages. The rival's own effects are in rivalviews.js, KRAG's in kragviews.js. Every material is made once here and
 // compiled in Render.prewarm.
 
 const Views = {
@@ -62,6 +62,7 @@ const Views = {
     this.initWeather();
     BossViews.init();
     AegisViews.init();
+    KragViews.init();
   },
   // everything once, visible, for the shader compile
   prewarmShow(group) {
@@ -81,12 +82,14 @@ const Views = {
     this.tetherMesh.visible = true;
     BossViews.prewarmShow(group);
     AegisViews.prewarmShow(group);
+    KragViews.prewarmShow(group);
   },
   prewarmHide() {
     for (const pool of this.ghostPools.values()) pool[0].mesh.visible = false;
     this.zones[0].visible = false; this.tetherMesh.visible = false; this.beams[0].visible = false;
     BossViews.prewarmHide();
     AegisViews.prewarmHide();
+    KragViews.prewarmHide();
   },
   // The sword beam's crescent: a band across its path, bulging forward in the middle and thinning at its tips,
   // in its own frame (x across, y up, forward -z), half-width and half-height 1.
@@ -124,10 +127,12 @@ const Views = {
     this.syncTells(t);
     BossViews.sync();
     AegisViews.sync();
+    KragViews.sync();
   },
   make(o) {
     if (BossViews.kinds.has(o.kind)) return BossViews.make(o);
     if (AegisViews.kinds.has(o.kind)) return AegisViews.make(o);
+    if (KragViews.kinds.has(o.kind)) return KragViews.make(o);
     const M = this.mats, G = this.geos, g = new THREE.Group();
     if (o.kind === 'bolt') {
       g.add(new THREE.Mesh(G.bolt, this.boltMat(o)), new THREE.Mesh(G.boltCore, M.boltCore));
@@ -173,6 +178,7 @@ const Views = {
   update(o, v, t) {
     if (v.boss) { BossViews.update(o, v, t); return; }
     if (v.aegis) { AegisViews.update(o, v, t); return; }
+    if (v.krag) { KragViews.update(o, v, t); return; }
     if (v.rig && o.kind === 'football') {
       // nose along its flight, spiralling round it
       const R = v.rig, m = R.mesh;
@@ -234,6 +240,7 @@ const Views = {
   dispose(v) {
     if (v.boss) { BossViews.dispose(v); return; }
     if (v.aegis) { AegisViews.dispose(v); return; }
+    if (v.krag) { KragViews.dispose(v); return; }
     if (v.rig) { Gfx.scene.remove(v.rig.mesh); v.rig.geo.dispose(); v.rig.mat.dispose(); v.rig.outline.material.dispose(); return; }
     Gfx.scene.remove(v.group);
     if (v.group.userData.halo) v.group.userData.halo.material.dispose();

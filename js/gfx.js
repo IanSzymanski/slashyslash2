@@ -329,6 +329,43 @@ const Gfx = {
     this.texCache.set('camo', t);
     return t;
   },
+  // KRAG's finish from its concept art: pixel stone in 2x2 blocks, warm patches of rust and ochre with dark pits
+  // and lighter chips, multiplied into each part's colour (rust plates show it warm, the onyx arm faintly).
+  kragTexture() {
+    let t = this.texCache.get('krag');
+    if (t) return t;
+    const N = 64, B = 2, M = N / B, c = makeCanvas(N, N), g = c.ctx, R = mulberry32(7741);
+    const grid = new Uint8Array(M * M);
+    const blob = (kind, count, len) => {
+      for (let i = 0; i < count; i++) {
+        let x = (R() * M) | 0, y = (R() * M) | 0;
+        for (let s = 0, L = len * (0.5 + R()); s < L; s++) {
+          grid[y * M + x] = kind;
+          if (R() < 0.5) x = (x + (R() < 0.5 ? M - 1 : 1)) % M; else y = (y + (R() < 0.5 ? M - 1 : 1)) % M;
+        }
+      }
+    };
+    blob(1, 40, 14); blob(2, 30, 10); blob(3, 24, 5); blob(4, 40, 2);
+    const COLS = [[236, 222, 206], [255, 214, 170], [206, 182, 160], [160, 138, 126], [255, 244, 228]];
+    for (let y = 0; y < M; y++) {
+      for (let x = 0; x < M; x++) {
+        const [r, gg, b] = COLS[grid[y * M + x]], k = 0.88 + R() * 0.14;
+        g.fillStyle = `rgb(${Math.min(255, r * k) | 0},${Math.min(255, gg * k) | 0},${Math.min(255, b * k) | 0})`;
+        g.fillRect(x * B, y * B, B, B);
+      }
+    }
+    // block seams and rivets
+    g.fillStyle = 'rgb(120,100,92)';
+    g.fillRect(0, 31, N, 1); g.fillRect(31, 0, 1, N);
+    g.fillStyle = 'rgb(255,236,200)';
+    for (const [x, y] of [[4, 4], [58, 4], [4, 58], [58, 58], [27, 27], [35, 35]]) g.fillRect(x, y, 2, 2);
+    t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.magFilter = THREE.NearestFilter;
+    this.texCache.set('krag', t);
+    return t;
+  },
   // Ground marks as white masks the material tints: a furrow running down the texture (with a fainter
   // churned rim), cracks out from the middle, or a soft round scorch.
   decalTexture(kind) {

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Headless smoke test. Boots the 3D page and checks WebGL draws, runs scripted checks of the moves
 // (Phases 1 and 2), the nav graph, each enemy type's answer and the wave modes (Phase 3), the rival's
-// rules (Phase 5), and Training's tutorial, touch controls and the Sawblade (Phase 6), then plays Endless
-// from wave 6, the rival fight and the training hall with random input and mouse look.
+// rules (Phase 5), KRAG's rules, and Training's tutorial, touch controls and the Sawblade (Phase 6), then plays
+// Endless from wave 6, the rival fight, the KRAG fight and the training hall with random input and mouse look.
 // Fails on any page error, a camera inside a box or under the street, a body inside a box or outside the
 // arena, a shader compiled mid-fight, or a failed check.
 // Needs the dev dependencies:  npm install
@@ -1052,6 +1052,207 @@ async function run(browser, file, errors) {
     // KO-MATRIX:END
     S.gameplay.invincible = false;
 
+    // KRAG:START
+    // ---------- KRAG ----------
+    {
+      let p = Game.player;
+      // the KRAG fight opens on its entry cutscene (it falls out of the sky), and it fights once that's over
+      Game.toMenu(); UI.act('krag');
+      p = Game.player; S.gameplay.invincible = true;
+      let K = null;
+      for (let i = 0; i < 60 * 4 && !K; i++) { T.frame(1); K = Game.enemies.find((e) => e.type === 'krag'); }
+      T.frame(2);
+      const kIntro = !!(Game.cine && Game.cine.kind === 'kragIntro'), fell = K && K.pos.y > K.intro.g + 10;
+      for (let i = 0; i < 60 * 12 && (K.spawning || !K.act || K.act.kind === 'intro'); i++) T.frame(1);
+      let kActed = '';
+      for (let i = 0; i < 60 * 8 && !kActed; i++) { T.frame(1); if (K.act && K.act.kind !== 'intro') kActed = K.act.kind; }
+      ok(kIntro && fell && !K.spawning && kActed && !Game.cineActive(), `the KRAG fight opens on its entry cutscene, falling out of the sky, then it fights (first act: ${kActed || 'none'})`);
+      // endless takes turns between the bosses
+      const bossAt = (n) => { Game.toMenu(); UI.act('endless'); T.frame(1); Director.wave = n - 1; Director.nextWave(); T.frame(1); return Game.enemies.find((e) => e.isBoss); };
+      const b8 = bossAt(BOSS_EVERY), b16 = bossAt(BOSS_EVERY * 2);
+      ok(b8 && b8.type === 'aegis' && b16 && b16.type === 'krag', `endless takes turns between the bosses: wave ${BOSS_EVERY} brings ${b8 ? b8.name : 'nothing'}, wave ${BOSS_EVERY * 2} ${b16 ? b16.name : 'nothing'}`);
+      // a KRAG at (dx, dz) from the player, done arriving, facing you, its own choices switched off
+      const krag = (dx, dz, o = {}) => {
+        Game.toMenu(); UI.act('test'); T.frame(2);
+        p = Game.player; S.gameplay.invincible = !!o.inv; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
+        const q = p.pos, k = new Krag({ x: q.x + dx, y: 0, z: q.z + dz }, {});
+        k.spawning = false; k.pos.y = k.prev.y = World.groundAt(k.pos.x, k.pos.z, 1);
+        for (const c in k.cds) k.cds[c] = 99;
+        k.chooseAct = () => {};
+        if (!o.react) k.react = () => {};
+        if (!o.move) k.navigate = () => {};
+        k.yaw = k.faceYaw = k.yawTo(p.pos);
+        Game.enemies.push(k); T.frame(1);
+        Camera.yaw = yawOf(k.pos.x - p.pos.x, k.pos.z - p.pos.z); Camera.pitch = -0.1;
+        return k;
+      };
+      // holds E from just before the named blow lands
+      const parryOn = (k, move) => {
+        for (let i = 0; i < 150 && !(k.act && k.act.kind === 'melee' && k.act.move === move && k.act.phase === 'wind' && k.act.t >= k.act.wind - 0.08); i++) T.frame(1);
+        T.press('KeyE');
+      };
+      // its strings drive through a parry: no damage, no stagger and no counter, and you're shoved back; the stopper
+      // at the end of one, parried, knocks it back off balance and charges your counter, and it guards after
+      K = krag(0, -2.6);
+      K.startMove('jab', { list: ['jab', 'haymaker'], i: 0 });
+      const par0 = Game.stats.parries;
+      parryOn(K, 'jab');
+      for (let i = 0; i < 40 && K.act && K.act.move === 'jab'; i++) T.frame(1);
+      const plowed = Game.stats.parries > par0 && K.act && K.act.move === 'haymaker' && !(p.sheathe && p.sheathe.empowered) && p.hp === PC.MAX_HP && p.shield < PC.MAX_SHIELD;
+      T.release('KeyE'); T.frame(2);
+      parryOn(K, 'haymaker');
+      for (let i = 0; i < 40 && !(K.act && K.act.kind === 'flinch'); i++) T.frame(1);
+      const flinched = !!(K.act && K.act.kind === 'flinch'), countered = !!(p.sheathe && p.sheathe.empowered);
+      T.release('KeyE');
+      for (let i = 0; i < 90 && K.act && K.act.kind === 'flinch'; i++) T.frame(1);
+      const guardAfter = !!(K.act && K.act.kind === 'guard' && K.act.why === 'stagger');
+      ok(plowed && flinched && countered && guardAfter && K.stunT === 0, `its strings drive through a parry (no counter, shield ${Math.round(p.shield)}); a parried stopper knocks it off balance (${flinched}), charges your counter (${countered}) and it guards after (${guardAfter})`);
+      // the guard: from the front a blow does a fraction of its damage and builds heat; from behind it lands in full
+      K = krag(0, -3); K.heat = 30; K.raiseGuard(9, 'range'); T.frame(1);
+      const fr = K.fwd(), front = { x: -fr.x, y: 0.2, z: -fr.z }, back = { x: fr.x, y: 0.2, z: fr.z };
+      let h0 = K.hp, heat0 = K.heat;
+      hurtEnemy(K, 30, { cause: 'slash', dir: front });
+      const frontTook = h0 - K.hp, heatUp = K.heat - heat0;
+      h0 = K.hp; hurtEnemy(K, 30, { cause: 'slash', dir: back });
+      const backTook = h0 - K.hp;
+      T.aimAt(K.center()); h0 = K.hp; heat0 = K.heat; T.tap('Mouse0'); T.frame(20);
+      ok(frontTook > 0 && frontTook <= 5 && heatUp > 15 && backTook === 30 && K.heat > heat0 && h0 - K.hp <= 3, `its guard takes a blow from the front for ${frontTook} of 30 and ${heatUp.toFixed(0)} heat; from behind ${backTook} of 30; your slash on it ${h0 - K.hp} and ${(K.heat - heat0).toFixed(0)} heat`);
+      // filled to full heat on its guard, it drops the guard straight into the Molten Fist in bullet time
+      K = krag(0, -3); K.heat = HEAT.MAX - 4; K.raiseGuard(9, 'range'); T.frame(1);
+      hurtEnemy(K, 20, { cause: 'slash', dir: { x: -K.fwd().x, y: 0.2, z: -K.fwd().z } });
+      ok(K.act && K.act.kind === 'punch' && Game.btKind === 'peril', `filled to full heat on its guard, it answers with the Molten Fist in bullet time (${K.act && K.act.kind})`);
+      // baited into guarding at full heat, a blow on the arm sets it off in its face: big damage and the stun
+      K = krag(0, -3); K.heat = HEAT.MAX; K.raiseGuard(9, 'stagger'); T.frame(1);
+      const outl = K.outline();
+      h0 = K.hp;
+      T.aimAt(K.center()); T.tap('Mouse0'); T.frame(20);
+      ok(h0 - K.hp >= K.maxHp * DETONATE.DMG && K.stunT > 0 && K.heat === 0 && outl, `at full heat a blow on its raised arm blows it up in its face: ${h0 - K.hp} damage, a ${K.stunT.toFixed(1)} s stun, heat ${K.heat}`);
+      // from range it guards against a sword beam charging; at full heat it won't for anything less than a full charge
+      const beamGuard = (heat) => {
+        const k = krag(0, -13, { react: true }); k.cds.guard = 0; k.heat = heat; p.utilCD = 0;
+        T.aimAt(k.center()); T.press('KeyF');
+        let g = false;
+        for (let i = 0; i < 52; i++) { T.frame(1); g = g || !!(k.act && k.act.kind === 'guard'); }
+        T.release('KeyF'); T.frame(2);
+        return g;
+      };
+      const coldG = beamGuard(20), hotG = beamGuard(HEAT.MAX);
+      ok(coldG && !hotG, `from range it guards against a sword beam charging (${coldG}); at full heat it doesn't for a part charge (${hotG})`);
+      // the Molten Fist: it tracks you until its visor flashes, then holds the line. Standing in front, a parry does
+      // nothing: it hits hard and dazes you. Running out sideways after the flash doesn't clear it; a dash does.
+      const fist = (after) => {
+        const k = krag(0, -6); k.heat = HEAT.MAX;
+        k.startPunch(p, false);
+        for (let i = 0; i < 60 * 4 && k.act && !k.act.locked; i++) T.frame(1);
+        const lockY = k.yaw;
+        after(k);
+        let turned = 0;
+        for (let i = 0; i < 60 * 3 && k.act && k.act.kind === 'punch' && k.act.phase !== 'vent'; i++) { T.frame(1); if (k.act && k.act.phase === 'wind') turned = Math.max(turned, Math.abs(angDiff(lockY, k.yaw))); }
+        for (const c of ['KeyE', 'KeyD', 'ShiftLeft']) T.release(c);
+        T.frame(2);
+        return { hurt: PC.MAX_HP - p.hp, daze: p.dazeT, turned };
+      };
+      const fParry = fist(() => T.press('KeyE'));
+      const fRun = fist((k) => { Camera.yaw = yawOf(k.pos.x - p.pos.x, k.pos.z - p.pos.z); T.press('KeyD'); });
+      const fDash = fist((k) => { Camera.yaw = yawOf(k.pos.x - p.pos.x, k.pos.z - p.pos.z); T.press('KeyD'); T.tap('ShiftLeft'); });
+      ok(fParry.hurt >= 30 && fParry.daze > 0.5 && fRun.hurt > 0 && fDash.hurt === 0 && fParry.turned < 0.01, `the Molten Fist goes through a parry (${fParry.hurt} damage, dazed ${fParry.daze.toFixed(2)} s) and holds its line once it flashes; running out sideways after the flash doesn't clear it (${fRun.hurt}), a dash does (${fDash.hurt})`);
+      // dazed, nothing you press does anything
+      {
+        const k = krag(0, -6); k.heat = HEAT.MAX; k.startPunch(p, false);
+        for (let i = 0; i < 60 * 4 && k.act && k.act.kind === 'punch' && k.act.phase !== 'vent'; i++) T.frame(1);
+        // thrown clear, it lands and settles while still dazed
+        for (let i = 0; i < 60 * 1.5 && !(p.onGround && Controller.hspeed(p) < 1.5); i++) T.frame(1);
+        const dz0 = p.dazeT, at0 = { x: p.pos.x, z: p.pos.z };
+        T.press('KeyW'); T.tap('Mouse0'); T.frame(8); T.release('KeyW');
+        ok(dz0 > 0 && !p.attack && distXZ(p.pos, at0) < 0.8, `dazed by the Fist, moving and swinging do nothing (${dz0.toFixed(2)} s left, moved ${distXZ(p.pos, at0).toFixed(2)} m)`);
+      }
+      // getting to you: the shoulder charge crosses the street into you; the leap lands on you with a shockwave and
+      // a ring of vents; a stomp sends a shockwave out and raises vents along the street toward you
+      K = krag(0, -16);
+      K.startCharge(p);
+      let chHit = false;
+      for (let i = 0; i < 60 * 3 && K.act && K.act.kind === 'charge'; i++) { T.frame(1); chHit = chHit || !!(K.act && K.act.hit); }
+      K = krag(0, -14);
+      K.startJump(p);
+      let landD = 99, jVents = 0, jWave = 0;
+      for (let i = 0; i < 60 * 4 && K.act && K.act.kind === 'jump'; i++) {
+        T.frame(1);
+        if (K.act && K.act.phase === 'land' && landD === 99) { landD = distXZ(K.pos, p.pos); jVents = Game.hazards.filter((h) => h.kind === 'vent').length; jWave = Game.hazards.filter((h) => h.kind === 'wave').length; }
+      }
+      const jHurt = p.hp + p.shield < PC.MAX_HP + PC.MAX_SHIELD;
+      K = krag(0, -7, { inv: true });
+      K.startStomp(p, 3);
+      let sVents = 0, sWaves = 0, sErupt = 0;
+      const seenV = new Set();
+      for (let i = 0; i < 60 * 4 && (K.act && K.act.kind === 'stomp' || Game.hazards.length); i++) {
+        T.frame(1);
+        for (const h of Game.hazards) { if (seenV.has(h)) continue; if (h.kind === 'vent') { seenV.add(h); sVents++; } if (h.kind === 'wave') { seenV.add(h); sWaves++; } }
+        sErupt = Math.max(sErupt, Game.hazards.filter((h) => h.kind === 'vent' && h.phase === 'erupt').length);
+      }
+      ok(chHit && landD < 3 && jVents >= 3 && jWave >= 1 && jHurt && sVents >= 6 && sWaves === 3 && sErupt > 0, `its shoulder charge crosses 16 m into you (${chHit}); its leap lands ${landD.toFixed(1)} m from you with a shockwave and ${jVents} vents; three stomps send ${sWaves} shockwaves and raise ${sVents} vents`);
+      // a vent erupting under you throws you out of it; off it before it erupts, you're safe
+      K = krag(0, -14);
+      Game.hazards.push(new MoltenVent({ x: p.pos.x, y: p.pos.y, z: p.pos.z }, 0.5, K));
+      for (let i = 0; i < 60 * 1.5 && Game.hazards.length; i++) T.frame(1);
+      const vHit = p.hp + p.shield < PC.MAX_HP + PC.MAX_SHIELD;
+      p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0; T.frame(40); p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
+      const v2 = new MoltenVent({ x: p.pos.x, y: p.pos.y, z: p.pos.z }, 0.5, K);
+      Game.hazards.push(v2);
+      T.frame(10); p.pos.x = p.prev.x = v2.pos.x + 3;
+      for (let i = 0; i < 60 * 1.5 && Game.hazards.length; i++) T.frame(1);
+      ok(vHit && p.hp === PC.MAX_HP && p.shield === PC.MAX_SHIELD, 'a molten vent erupting under you hits you, and stepping off it before it erupts is safe');
+      // its tether: a chain from its right hand onto a post or a corner, a swing round it, and it flings itself at you
+      {
+        K = krag(0, -12, { inv: true });
+        let plan = null;
+        for (let j = 0; j < 40 && !plan; j++) {
+          const a = Arena.freeGroundAt(rand(-24, 24), rand(-24, 24), 0.9);
+          K.pos.x = K.prev.x = a.x; K.pos.y = K.prev.y = a.y; K.pos.z = K.prev.z = a.z;
+          plan = K.planSwing(p);
+        }
+        const started = !!plan && K.startSwing(p), d0 = distXZ(K.pos, p.pos), phases = [];
+        let why = '', struck = false;
+        for (let i = 0; i < 60 * 5 && K.act && K.act.kind === 'swing'; i++) {
+          const a = K.act, was = a.phase, sw = a.sweep;
+          struck = struck || !!a.hit;
+          T.frame(1);
+          const ph = K.act && K.act.phase;
+          if (ph && phases[phases.length - 1] !== ph) phases.push(ph);
+          if (was === 'orbit' && ph === 'fly') why += ` let go at ${sw.toFixed(2)} of ${a.plan.maxSweep.toFixed(2)} (planned ${a.plan.relSweep.toFixed(2)}, stuck ${(a.stuck || 0).toFixed(2)}) ${distXZ(K.pos, p.pos).toFixed(1)} m off`;
+          if (was === 'fly' && ph === 'land') why += `, landed (wall ${!!(K.col && K.col.wall)}, hit ${a.hit})`;
+        }
+        ok(started && phases.join('>') === 'fire>reel>orbit>fly>land' && (struck || distXZ(K.pos, p.pos) < d0 - 4), `it chains onto a ${plan && plan.C.lamp ? 'lamp post' : 'corner'}, swings round it and flings itself at you (${phases.join('>')}, from ${d0.toFixed(1)} m to ${distXZ(K.pos, p.pos).toFixed(1)} m${why})`);
+      }
+      // its heat shows: the seams run from dull red to white hot and the mohawk grows, tearing up at full heat; it
+      // leaves smouldering footprints as it walks
+      {
+        K = krag(0, -22, { move: true, inv: true });
+        K.heat = 0; Render.draw(1 / 60);
+        const t0 = Object.assign({}, K.tints()), m0 = K.model.flames.tongues[3].g.scale.y;
+        K.heat = HEAT.MAX; Render.draw(1 / 60);
+        const t1 = Object.assign({}, K.tints()), m1 = K.model.flames.tongues[3].g.scale.y;
+        KragViews.prints = [];
+        for (let i = 0; i < 60 * 2.5; i++) { T.frame(1); Render.draw(1 / 60); }
+        ok(t0.vein !== t1.vein && m1 > m0 * 2 && KragViews.prints.length >= 3, `its heat shows (seams ${t0.vein} to ${t1.vein}, mohawk ${m0.toFixed(2)} to ${m1.toFixed(2)} m), and it leaves ${KragViews.prints.length} smouldering footprints walking at you`);
+      }
+      // the last hit plays its knockout and leaves the husk; blows on the husk only throw sparks
+      K = krag(0, -6, { inv: true });
+      Render.draw(1 / 60);
+      K.hp = 5; hurtEnemy(K, 30, { cause: 'slash', dir: { x: 0, y: 0, z: -1 } });
+      const kKo = !!(Game.cine && Game.cine.kind === 'ko');
+      for (let i = 0; i < 60 * 9 && !K.dead; i++) T.frame(1);
+      Render.draw(1 / 60);
+      const kHusk = Game.props.find((q) => q.kind === 'husk');
+      let kThrew = '';
+      try { T.aimAt(kHusk.center()); T.tap('Mouse0'); T.frame(30); } catch (err) { kThrew = err.message; }
+      ok(kKo && K.dead && kHusk && kHusk.rig && !kThrew && SaveData.unlocks.krag, `the last hit plays KRAG's knockout and leaves its husk in the street (cutscene ${kKo}, dead ${K.dead}, husk ${!!kHusk}${kHusk ? ', rig ' + !!kHusk.rig : ''})${kThrew ? ' (' + kThrew + ')' : ''}`);
+      Game.enemies = []; Game.props = []; Game.hazards = []; Game.projectiles = [];
+      for (const c of ['KeyE', 'KeyD', 'KeyW', 'ShiftLeft', 'Mouse0', 'KeyF']) T.release(c);
+    }
+    S.gameplay.invincible = false;
+    // KRAG:END
+
+
     // ---------- AEGIS-07 as the player ----------
     // picked on the title screen, it plays as the mech: a taller body, gunner mode first, its own model
     const aegis = () => {
@@ -1468,9 +1669,9 @@ async function run(browser, file, errors) {
   for (const c of checks) { console.log(`  ${c.pass ? 'ok  ' : 'FAIL'} ${c.msg}`); if (!c.pass) errors.push(`${name}: ${c.msg}`); }
 
   // ---------- random play ----------
-  // Endless from wave 6, so every enemy type turns up; then the rival fight; then the training hall; then
-  // endless and the rival fight again as AEGIS-07
-  const runs = [['endless', seconds, 'ronin'], ['boss', Math.min(seconds, 30), 'ronin'], ['training', Math.min(seconds, 15), 'ronin'], ['endless', Math.min(seconds, 30), 'aegis'], ['boss', Math.min(seconds, 30), 'aegis']];
+  // Endless from wave 6, so every enemy type turns up; then the rival fight; then the KRAG fight; then the
+  // training hall; then endless and both boss fights again as AEGIS-07
+  const runs = [['endless', seconds, 'ronin'], ['boss', Math.min(seconds, 30), 'ronin'], ['krag', Math.min(seconds, 30), 'ronin'], ['training', Math.min(seconds, 15), 'ronin'], ['endless', Math.min(seconds, 30), 'aegis'], ['boss', Math.min(seconds, 30), 'aegis'], ['krag', Math.min(seconds, 30), 'aegis']];
   for (const [mode, secs, char] of runs) {
   const res = await page.evaluate(async ([frames, mode, char]) => {
     const problems = [];
@@ -1505,8 +1706,10 @@ async function run(browser, file, errors) {
       if (Game.state === 'pick') Game.chooseUpgrade(UI.pickIds[0]);
       // AEGIS gets its strike now and then, so the aim, the probe and the eruption get played
       if (char === 'aegis' && f % 400 === 200) Game.player.ultCharge = 1;
-      // a third of the way into the rival fight, bring it to half health so its blade phase gets played too
+      // a third of the way into the rival fight, bring it to half health so its blade phase gets played too;
+      // in the KRAG fight, fill its heat now and then so the Molten Fist and the charged guard get played
       if (mode === 'boss' && f === Math.floor(frames / 3)) { const r = Game.enemies.find((e) => e.isBoss && !e.spawning); if (r) r.hp = Math.floor(r.maxHp / 2) - 1; }
+      if (mode === 'krag' && f % 600 === 300) { const r = Game.enemies.find((e) => e.type === 'krag' && !e.spawning && !e.dying); if (r) r.heat = HEAT.MAX; }
       if (f === Math.floor(frames / 2)) { Game.pause(); if (Game.state !== 'paused') fail('pause failed'); await UI.resumeGame(); if (Game.state !== 'playing') fail('resume failed'); }
       T.frame(1);
       if (f % 3 === 0) Render.draw(1 / 60);
@@ -1534,7 +1737,7 @@ async function run(browser, file, errors) {
     }
     const boss = Game.enemies.find((e) => e.isBoss);
     SaveData.character = 'ronin';
-    const r = { problems, wave: Director.wave, kills: Game.stats.kills, hits: Game.stats.maxCombo, maxEnemies, types: [...seen].join(' '), style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length, boss: boss ? `rival at ${boss.hp}/${boss.maxHp}, phase ${boss.phase}` : 'no rival left' };
+    const r = { problems, wave: Director.wave, kills: Game.stats.kills, hits: Game.stats.maxCombo, maxEnemies, types: [...seen].join(' '), style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length, boss: boss ? `${boss.name} at ${boss.hp}/${boss.maxHp}, ${boss.phase ? 'phase ' + boss.phase : 'heat ' + Math.round(boss.heat)}` : 'no boss left' };
     Game.toMenu();
     S.visuals.resScale = 1; Render.resize();
     return r;
@@ -1544,6 +1747,7 @@ async function run(browser, file, errors) {
     console.log(`  endless from wave 6${who}: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies (${res.types}), style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
     if (res.kills < 1 && !res.hits) errors.push(`${name}: random play${who} hit nothing`);
   } else if (mode === 'boss') console.log(`  rival fight${who}: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
+  else if (mode === 'krag') console.log(`  KRAG fight${who}: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
   else console.log(`  training hall${who}: ${res.time}s simulated, ${res.calls} draw calls, ${res.progs} shader programs`);
   errors.push(...res.problems.map((m) => `${name}: ${mode}${who}: ${m}`));
   }

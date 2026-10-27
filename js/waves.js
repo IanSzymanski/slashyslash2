@@ -1,8 +1,8 @@
 'use strict';
-// Wave director for the scripted demo, endless survival, the rival fight and the melee duel test mode.
-// Spawns go through Arena (world.js); distances are in metres, converted from the 2D pixel values.
-// AEGIS-07 (rival.js) is the demo's last wave, every eighth wave in endless, and the whole of the rival fight
-// and the melee duel.
+// Wave director for the scripted demo, endless survival, the rival fight, the melee duel test mode and the
+// KRAG fight. Spawns go through Arena (world.js); distances are in metres, converted from the 2D pixel values.
+// AEGIS-07 (rival.js) is the demo's last wave and the whole of the rival fight and the melee duel; KRAG
+// (kragboss.js) is the whole of the KRAG fight. Every eighth wave in endless is a boss, the two taking turns.
 
 // Each wave introduces one problem that a specific move solves, so the rival tests practised skills.
 const DEMO_WAVES = [
@@ -29,14 +29,15 @@ const ENDLESS_TYPES = [
 const ENDLESS_NAMES = ['STREET SWEEP', 'RUST TIDE', 'NIGHT SHIFT', 'SCRAPYARD', 'BLACKOUT', 'NEON RIOT', 'DEAD GRID', 'RED HOUR'];
 
 const Director = {
-  mode: 'demo', wave: 0, state: 'idle', queue: [], spawnT: 0, breakT: 0, waveName: '', total: 0, scale: { hp: 1, dmg: 1 }, bossWave: false, modifier: null,
+  mode: 'demo', wave: 0, state: 'idle', queue: [], spawnT: 0, breakT: 0, waveName: '', total: 0, scale: { hp: 1, dmg: 1 }, bossWave: false, bossType: 'aegis', modifier: null,
 
   start(mode) {
     this.mode = mode; this.wave = 0; this.state = mode === 'training' ? 'training' : mode === 'test' || mode === 'street' ? 'idle' : 'intro'; this.breakT = 1.4; this.queue = []; this.modifier = null;
   },
   enabledTypes() { return ALL_TYPES.filter((t) => S.enemies[t]); },
   rivalBuilt() { return typeof Rival === 'function'; },
-  soloRival() { return this.mode === 'boss' || this.mode === 'duel'; },
+  kragBuilt() { return typeof Krag === 'function'; },
+  soloRival() { return this.mode === 'boss' || this.mode === 'duel' || this.mode === 'krag'; },
   demoWaves() { return this.rivalBuilt() ? DEMO_WAVES.length : DEMO_WAVES.filter((w) => !w.boss).length; },
   lastWave() { return this.soloRival() ? 1 : this.mode === 'demo' ? this.demoWaves() : Infinity; },
   buildDemo(n) {
@@ -55,8 +56,10 @@ const Director = {
   buildEndless(n) {
     this.bossWave = S.enemies.bossEndless && this.rivalBuilt() && n % BOSS_EVERY === 0;
     if (this.bossWave) {
+      // AEGIS-07 first, then KRAG, taking turns
+      this.bossType = this.kragBuilt() && (n / BOSS_EVERY) % 2 === 0 ? 'krag' : 'aegis';
       this.scale = { hp: 1 + (n - 1) * 0.06, dmg: 1 + (n - 1) * 0.03 };
-      this.waveName = 'RIVAL';
+      this.waveName = this.bossType === 'krag' ? 'KRAG' : 'RIVAL';
       return [];
     }
     let budget = (4 + n * 1.7) * S.enemies.count;
@@ -80,6 +83,7 @@ const Director = {
   },
   nextWave() {
     this.wave++;
+    this.bossType = this.mode === 'krag' ? 'krag' : 'aegis';
     if (this.soloRival()) { this.bossWave = true; this.scale = { hp: 1, dmg: 1 }; this.waveName = ''; this.queue = []; }
     else this.queue = this.mode === 'demo' ? this.buildDemo(this.wave) : this.buildEndless(this.wave);
     this.total = this.queue.length;
@@ -91,8 +95,8 @@ const Director = {
     // Blackout: the street lamps go out for this wave (a rebake while the title shows)
     Arena.setBlackout(this.modifier === 'blackout');
     if (this.bossWave) this.spawnRival();
-    const title = this.mode === 'duel' ? 'MELEE DUEL' : this.mode === 'boss' ? 'RIVAL FIGHT' : 'WAVE ' + this.wave + (this.mode === 'demo' ? ' / ' + this.demoWaves() : '');
-    Game.announce(title, this.waveName, this.mode === 'duel' ? '#ff6a7a' : this.bossWave ? '#4af0ff' : '#ff3a52', 2.2);
+    const title = this.mode === 'duel' ? 'MELEE DUEL' : this.mode === 'boss' ? 'RIVAL FIGHT' : this.mode === 'krag' ? 'KRAG FIGHT' : 'WAVE ' + this.wave + (this.mode === 'demo' ? ' / ' + this.demoWaves() : '');
+    Game.announce(title, this.waveName, this.mode === 'duel' ? '#ff6a7a' : this.bossWave ? (this.bossType === 'krag' ? '#ff9a5a' : '#4af0ff') : '#ff3a52', 2.2);
     if (this.modifier) Game.announce(WAVE_MODIFIERS[this.modifier].name, null, '#ffd070', 2.2, true);
     Sound.play('waveStart');
     Sound.setIntensity(1);
@@ -131,7 +135,7 @@ const Director = {
     Game.player.heal(15);
     if (this.mode === 'endless' && this.wave > SaveData.bestWave) { SaveData.bestWave = this.wave; saveProgress(); }
     const last = this.wave >= this.lastWave();
-    const done = this.mode === 'duel' ? 'DUEL WON' : this.mode === 'boss' ? 'RIVAL DEFEATED' : 'DEMO CLEAR';
+    const done = this.mode === 'duel' ? 'DUEL WON' : this.mode === 'boss' ? 'RIVAL DEFEATED' : this.mode === 'krag' ? 'KRAG DOWN' : 'DEMO CLEAR';
     this.modifier = null;
     Arena.setBlackout(false);
     const pickDue = this.mode === 'endless' && upgradeDue(this.wave);
@@ -145,7 +149,7 @@ const Director = {
     // 27 m from the player, toward the middle of the arena
     const d = distXZ(p, c) || 1, k = 27 / d;
     const x = clamp(p.x + (c.x - p.x) * k, B.minX + 11, B.maxX - 11), z = clamp(p.z + (c.z - p.z) * k, B.minZ + 11, B.maxZ - 11);
-    const r = new Rival(this.rivalSpot(x, z), this.scale);
+    const r = this.bossType === 'krag' && this.kragBuilt() ? new Krag(this.rivalSpot(x, z), this.scale) : new Rival(this.rivalSpot(x, z), this.scale);
     if (this.mode === 'duel') r.startDuel();
     // the entry cutscene plays except on duel retries, which go straight to the fight
     if (!(this.mode === 'duel' && (Game.runs.duel || 0) > 1)) r.cinematicIntro();

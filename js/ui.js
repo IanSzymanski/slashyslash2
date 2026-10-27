@@ -65,6 +65,7 @@ const UI = {
       case 'endless': this.startRun('endless'); break;
       case 'boss': this.startRun('boss'); break;
       case 'duel': this.startRun('duel'); break;
+      case 'krag': this.startRun('krag'); break;
       case 'training': this.startRun('training'); break;
       case 'test': this.startRun('test'); break;
       case 'street': this.startRun('street'); break;
@@ -97,7 +98,7 @@ const UI = {
   },
   refreshBest() {
     const el = document.getElementById('best');
-    if (el) el.textContent = `Best endless: wave ${SaveData.bestWave} · ${SaveData.bestScore.toLocaleString()} pts${SaveData.demoCleared ? ' · Demo cleared' : ''}${SaveData.unlocks.aegis ? ' · AEGIS-07 beaten' : ''}`;
+    if (el) el.textContent = `Best endless: wave ${SaveData.bestWave} · ${SaveData.bestScore.toLocaleString()} pts${SaveData.demoCleared ? ' · Demo cleared' : ''}${SaveData.unlocks.aegis ? ' · AEGIS-07 beaten' : ''}${SaveData.unlocks.krag ? ' · KRAG beaten' : ''}`;
   },
   applyVisualToggles() {
     document.getElementById('scanlines').hidden = !S.visuals.scanlines;
@@ -116,10 +117,12 @@ const UI = {
   // ---------- results ----------
   showOver(victory) {
     const st = Game.stats;
-    const boss = Game.mode === 'boss', duel = Game.mode === 'duel';
-    document.getElementById('over-title').textContent = victory ? (duel ? 'Duel won' : boss ? 'Rival defeated' : 'Demo complete') : 'Signal lost';
+    const boss = Game.mode === 'boss', duel = Game.mode === 'duel', krag = Game.mode === 'krag';
+    document.getElementById('over-title').textContent = victory ? (duel ? 'Duel won' : boss ? 'Rival defeated' : krag ? 'KRAG defeated' : 'Demo complete') : 'Signal lost';
     let sub;
-    if (victory && duel) sub = 'You beat AEGIS-07 blade to blade. Practice only: the full Rival Fight is the one that counts.';
+    if (victory && krag) sub = 'KRAG is down, and the street stops shaking.';
+    else if (krag) sub = 'KRAG still stands. Dodge its strings, parry the big blow, and hit its arm when it guards at full heat.';
+    else if (victory && duel) sub = 'You beat AEGIS-07 blade to blade. Practice only: the full Rival Fight is the one that counts.';
     else if (victory && !boss && !Director.rivalBuilt()) sub = 'All six demo waves cleared. AEGIS-07 joins the demo as its last wave in a later build.';
     else if (victory) sub = boss ? 'AEGIS-07 is down.' : 'All demo waves cleared, rival included.';
     else if (duel) sub = 'AEGIS-07 won the duel. Parry a swing, let it parry your counter, then parry its gold riposte.';
@@ -194,6 +197,9 @@ const UI = {
       ['AEGIS-07 gold flash: parry its riposte to stun it', actionLabel('sheathe')],
       ['AEGIS-07 red flash: no parry stops it; dash through to its back', actionLabel('dash')],
       ['AEGIS-07 strike rings: get out before the light erupts', 'Move · ' + actionLabel('dash')],
+      ['KRAG strings drive through a parry: dodge them; parry the big gold-glinting blow at the end to stagger it', `${actionLabel('dash')} · ${actionLabel('sheathe')}`],
+      ['KRAG guarding: blows on its arm build its heat; at full heat, hit the arm to blow it up in its face and stun it', actionLabel('attack')],
+      ['KRAG Molten Fist (red): no parry stops it; dash out of the red wedge on the flash', actionLabel('dash')],
       ['Pause (training: spawn panel)', actionLabel('pause')],
       ['Skip a cutscene you have seen', `Hold ${actionLabel('sheathe')}`],
       ['Pick an endless upgrade', touch ? 'Tap a card' : 'Click, or 1 / 2 / 3'],
