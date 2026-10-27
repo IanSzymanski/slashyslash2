@@ -93,31 +93,10 @@ const CHAINS = {
   backstep: [['back'], ['side', 1, 90]],
 };
 
-// a horizontal unit vector, and one turned deg degrees toward the right of it (s = 1) or the left (s = -1)
-const flat = (x, z) => { const l = Math.hypot(x, z) || 1; return { x: x / l, z: z / l }; };
-const turnFlat = (u, s, deg) => { const a = (deg * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a) * s; return { x: u.x * c - u.z * sn, z: u.z * c + u.x * sn }; };
-// Whether a body is in a swing's arc: within reach in the swing's plane (tilted from level by a.tilt and
-// pitched by a.pa), within the band either side of it, and inside the span.
-function arcHits(c, a, reach, b, band = 0.9) {
-  const pa = a.pa || 0, cp = Math.cos(pa), sp = Math.sin(pa), fx = fwdX(a.yaw), fz = fwdZ(a.yaw);
-  const F = [fx * cp, sp, fz * cp], R = [Math.cos(a.yaw), 0, -Math.sin(a.yaw)], U = [-fx * sp, cp, -fz * sp];
-  const ct = Math.cos(a.tilt), st = Math.sin(a.tilt);
-  const A = [R[0] * ct + U[0] * st, R[1] * ct + U[1] * st, R[2] * ct + U[2] * st];
-  const N = [F[1] * A[2] - F[2] * A[1], F[2] * A[0] - F[0] * A[2], F[0] * A[1] - F[1] * A[0]];
-  for (const k of [0.2, 0.5, 0.85]) {
-    const vx = b.pos.x - c.x, vy = b.pos.y + b.h * k - c.y, vz = b.pos.z - c.z;
-    const f = vx * F[0] + vy * F[1] + vz * F[2], s = vx * A[0] + vy * A[1] + vz * A[2], n = vx * N[0] + vy * N[1] + vz * N[2];
-    const d = Math.hypot(f, s);
-    if (d - b.r > reach || Math.abs(n) > band + b.r) continue;
-    if (d < b.r + 0.5 || Math.abs(Math.atan2(s, f)) <= a.span / 2 + Math.atan2(b.r, d)) return true;
-  }
-  return false;
-}
-
-class Rival extends Enemy {
+class Rival extends Boss {
   constructor(pos, scale = {}) {
     super('aegis', pos, scale);
-    this.isBoss = true; this.name = CHARACTERS.aegis.name;
+    this.name = CHARACTERS.aegis.name; this.G = AEGIS_G;
     this.spawnT = 1.5; this.phase = 1; this.p2Hp = 0;
     this.shield = true; this.shieldDownT = 0; this.cracks = 0;
     this.stunT = 0; this.flinchT = 0; this.deflectT = 0; this.guardT = 0; this.parryInvulnT = 0; this.transT = 0; this.dodgeT = 0; this.perilFlash = 0;
@@ -135,28 +114,14 @@ class Rival extends Enemy {
   cinematicIntro() { this.intro = { t: 0, ct: 0, stage: 'gather', done: {}, started: false }; this.yaw = this.faceYaw = this.yawTo(Game.player.pos); }
 
   // ---------- where its parts are ----------
-  center() { return { x: this.pos.x, y: this.pos.y + this.h * 0.55, z: this.pos.z }; }
   chest() { return { x: this.pos.x, y: this.pos.y + 1.85, z: this.pos.z }; }
-  right() { return { x: Math.cos(this.yaw), z: -Math.sin(this.yaw) }; }
-  // a point in its body frame: x to its right, y up from its feet, f forward
-  local(x, y, f) { const F = this.fwd(), R = this.right(); return { x: this.pos.x + R.x * x + F.x * f, y: this.pos.y + y, z: this.pos.z + R.z * x + F.z * f }; }
   shoulderR() { return this.local(0.43, 2.05, 0); }
-  boneAt(name, x, y, z) {
-    const R = this.model;
-    if (!R || !R.bones[name]) return null;
-    const v = this._bv || (this._bv = new THREE.Vector3());
-    R.bones[name].updateWorldMatrix(true, false);
-    v.set(x * AEGIS_SCALE, y * AEGIS_SCALE, z * AEGIS_SCALE).applyMatrix4(R.bones[name].matrixWorld);
-    return { x: v.x, y: v.y, z: v.z };
-  }
   muzzle() { return this.boneAt('foreR', 0, -0.42, 0) || (() => { const s = this.shoulderR(), a = this.aimDir; return { x: s.x + a.x * 0.95, y: s.y + a.y * 0.95, z: s.z + a.z * 0.95 }; })(); }
   lensPos() { return this.boneAt('cannon', 0, 0.08, -0.37) || this.local(-0.42, 2.45, 0.3); }
   visorPos() { return this.boneAt('head', 0, 0.11, -0.18) || this.local(0, 2.35, 0.22); }
   orbPos() { return this.boneAt('handL', 0, -0.2, 0) || this.local(-0.45, 3.0, 0.1); }
   bladeTip() { return this.boneAt('weapon', 0, (AEGIS_BLADE * 0.85) / AEGIS_SCALE, 0) || this.local(0.5, 1.6, 1.4); }
   handPlant() { const p = this.local(-0.55, 0, 0.75); p.y = World.groundAt(p.x, p.z, p.y + 0.6) + 0.06; return p; }
-  yawTo(q) { return yawOf(q.x - this.pos.x, q.z - this.pos.z); }
-  groundY() { return World.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.3); }
 
   // ---------- state readers for the model and views ----------
   dashing() { return !!this.dash; }
@@ -355,7 +320,6 @@ class Rival extends Enemy {
     const T = S.enemies.telegraph;
     return m.wind * (T < 1 ? 1 - (1 - T) * 0.55 : T) * this.windMul;
   }
-  eyeGlint(c, size) { FX.glint(this.visorPos(), { c, size, dur: 0.24, follow: () => this.visorPos(), threat: this }); }
   parryPlayer(o) {
     const reparry = !!(this.act && this.act.why === 'reparry');
     this.guardT = 0; this.parryInvulnT = 0.45;
@@ -455,7 +419,6 @@ class Rival extends Enemy {
     this.thrust = approach(this.thrust, want, dt * 8);
     if ((this.dash || (this.lunge && this.phase === 2) || dive === 'dive' || dive === 'rise') && (this.ghostT -= dt) <= 0) { this.ghostT = 0.035; this.ghostReq = (this.ghostReq || 0) + 1; }
   }
-  aimFrom(o, c) { const dx = c.x - o.x, dy = c.y - o.y, dz = c.z - o.z, l = Math.hypot(dx, dy, dz) || 1; return { x: dx / l, y: dy / l, z: dz / l }; }
 
   // ---------- stance ----------
   // Phase 1 always zones (holding its range, boosting and zipping away); phase 2 always presses in, and only
@@ -519,11 +482,6 @@ class Rival extends Enemy {
     const ux = (p.pos.x - this.pos.x) / d, uz = (p.pos.z - this.pos.z) / d;
     return p.vel.x * ux + p.vel.z * uz > 4.5 || this.farT > 0.8;
   }
-  clearShot(from) {
-    const c = Game.player.chest(), dx = c.x - from.x, dy = c.y - from.y, dz = c.z - from.z, d = Math.hypot(dx, dy, dz) || 1;
-    return !World.raycast(from, { x: dx / d, y: dy / d, z: dz / d }, d - 0.4);
-  }
-  headroom(h) { return !World.raycast({ x: this.pos.x, y: this.pos.y + this.h, z: this.pos.z }, { x: 0, y: 1, z: 0 }, h, 0.4); }
 
   runAct(dt, p) {
     const a = this.act;
@@ -558,8 +516,6 @@ class Rival extends Enemy {
   }
 
   // ---------- getting around ----------
-  face(q, rate, dt) { this.faceYaw = this.yawTo(q); this.turnRate = rate; }
-  steerTo(q, spd) { const u = flat(q.x - this.pos.x, q.z - this.pos.z); this.want = { x: u.x, z: u.z, spd }; }
   runSpeed() { return this.def.speed * S.enemies.speed * (this.phase === 2 ? 1.2 : 1); }
   // where to be when it has nothing on: zoning holds a band of range and strafes; charging closes in
   navigate(dt, p) {
@@ -591,65 +547,8 @@ class Rival extends Enemy {
     this.want = { x: m.x, z: m.z, spd: spd * (d < near ? 0.9 : 0.6) };
     if (chance(0.004)) this.side = -this.side;
   }
-  blockedAhead(m, L) {
-    const knee = { x: this.pos.x, y: this.pos.y + 0.6, z: this.pos.z };
-    if (World.raycast(knee, { x: m.x, y: 0, z: m.z }, L, 0.3)) return true;
-    const ax = this.pos.x + m.x * L, az = this.pos.z + m.z * L;
-    return World.groundAt(ax, az, this.pos.y + 0.6) < this.pos.y - 1.2;
-  }
-  // Toward the player: straight when on its level with the way clear, else along the nav graph; links it can't
-  // walk it boosts over with a thruster leap.
-  pathTo(p, spd) {
-    const dx = p.pos.x - this.pos.x, dz = p.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1e-3;
-    const level = Math.abs(p.pos.y - this.pos.y) < 1.2, knee = { x: this.pos.x, y: this.pos.y + 0.6, z: this.pos.z };
-    if (level && !World.raycast(knee, { x: dx / d, y: 0, z: dz / d }, d, 0.25)) { this.want = { x: dx / d, z: dz / d, spd }; return; }
-    const s = this.onGround ? Nav.steer(this, 99) : null;
-    if (s) {
-      if (s.kind === Nav.JUMP && this.cds.leap <= 0) { this.leapTo(s.to); return; }
-      this.want = { x: s.x, z: s.z, spd };
-      return;
-    }
-    // off the graph: boost to where the player is, if it can
-    if (this.onGround && this.cds.leap <= 0 && Math.abs(p.pos.y - this.pos.y) > 1.5) {
-      const q = this.spotNear(p.pos, 2.5, 5.5, true);
-      if (q) { this.leapTo(q); return; }
-    }
-    this.want = { x: dx / d, z: dz / d, spd };
-  }
-  // it hasn't got anywhere for a while: boost to a clear spot near the player
-  unstick(dt, p, trying) {
-    const moved = Math.hypot(this.pos.x - this.lastPos.x, this.pos.z - this.lastPos.z);
-    if (moved > 0.6 || !trying) { this.stuckT = 0; this.lastPos.x = this.pos.x; this.lastPos.z = this.pos.z; return; }
-    this.stuckT += dt;
-    if (this.stuckT > 1.4 && this.onGround && this.cds.leap <= 0) {
-      const q = this.spotNear(p.pos, 3, 7, Math.abs(p.pos.y - this.pos.y) > 1.5);
-      if (q) this.leapTo(q);
-      this.stuckT = 0;
-    }
-  }
-  // a clear spot for its body near c, rMin to rMax away; level: on c's own surface
-  spotNear(c, rMin, rMax, level) {
-    const B = Arena.bounds();
-    for (let i = 0; i < 28; i++) {
-      const a = rand(0, TAU), r = rand(rMin, rMax), x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
-      if (x < B.minX + 2 || x > B.maxX - 2 || z < B.minZ + 2 || z > B.maxZ - 2) continue;
-      const y = World.groundAt(x, z, c.y + 0.6);
-      if (y === -Infinity || (level && Math.abs(y - c.y) > 0.7)) continue;
-      if (!World.boxFree(x, y + 0.02, z, this.r, this.h)) continue;
-      return { x, y, z };
-    }
-    return null;
-  }
-  // A thruster leap: up over whatever is between and down onto q, timed so it lands there.
-  leapTo(q) {
-    const g = AEGIS_G * 0.6, top = Math.max(this.pos.y, q.y) + 2.5;
-    const room = World.raycast({ x: this.pos.x, y: this.pos.y + this.h, z: this.pos.z }, { x: 0, y: 1, z: 0 }, top - this.pos.y, 0.4);
-    const apex = room ? this.pos.y + Math.max(0.5, room.t - 0.2) : top;
-    const vy = Math.sqrt(2 * g * Math.max(0.3, apex - this.pos.y)), T = vy / g + Math.sqrt(2 * Math.max(0.05, apex - q.y) / g);
-    this.leap = { to: q, t: 0, T, g, vx: (q.x - this.pos.x) / T, vz: (q.z - this.pos.z) / T };
-    this.vel.y = vy; this.onGround = false;
-    this.cds.leap = 1.2;
-    this.faceYaw = this.yawTo(q);
+  // its leap off the street: a blue ring on its thrusters
+  leapFX() {
     Sound.play('jump', {}, this.pos);
     FX.dust(this.pos, 8, { smax: 4.5 });
     FX.ring({ x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z }, 0.3, 2.2, 0.25, { c: '#4a8aff' });
@@ -665,24 +564,6 @@ class Rival extends Enemy {
     FX.sparks(back, 8, { x: -m.x, y: -0.3, z: -m.z }, 0.6, 7.3, 16, AEGIS_SPARK);
     FX.ring({ x: this.pos.x, y: this.pos.y + 0.05, z: this.pos.z }, 0.3, 1.8, 0.2, { c: '#4a8aff' });
     if (this.onGround) FX.dust(this.pos, 4, { smax: 3.6 });
-  }
-  // open floor along m from here, up to L metres
-  legRoom(m, L) {
-    let free = L;
-    for (const y of [0.5, 1.6]) {
-      const h = World.raycast({ x: this.pos.x, y: this.pos.y + y, z: this.pos.z }, { x: m.x, y: 0, z: m.z }, L + this.r, 0.25);
-      if (h) free = Math.min(free, h.t - this.r - 0.1);
-    }
-    // stop short of a drop
-    for (let s = 1; s <= free; s += 1) {
-      if (World.groundAt(this.pos.x + m.x * s, this.pos.z + m.z * s, this.pos.y + 0.5) < this.pos.y - 1.5) { free = s - 0.6; break; }
-    }
-    const B = Arena.bounds();
-    for (let s = 0.5; s <= free; s += 0.5) {
-      const x = this.pos.x + m.x * s, z = this.pos.z + m.z * s;
-      if (x < B.minX + 1.5 || x > B.maxX - 1.5 || z < B.minZ + 1.5 || z > B.maxZ - 1.5) { free = s - 0.5; break; }
-    }
-    return Math.max(0, free);
   }
   // With its shield down or its guard free, it answers incoming swings: a sideways boost, or in phase 2 a
   // guard that parries. Only while idle or moving: its recovery is your punish window.
@@ -1045,11 +926,6 @@ class Rival extends Enemy {
       this.act = { kind: 'recover', t: 0, dur: rand(0.55, 0.85) * this.rageGap() };
       this.cds.combo = rand(0.3, 0.8) * this.rageGap();
     }
-  }
-  // within 45 degrees of straight behind it
-  inBackWedge(p) {
-    const f = this.fwd(), dx = p.pos.x - this.pos.x, dz = p.pos.z - this.pos.z, d = Math.hypot(dx, dz);
-    return d > 0.3 && (dx * f.x + dz * f.z) / d < -Math.SQRT1_2;
   }
   // it committed to the red flash and hit nothing: wide open
   whiff() {

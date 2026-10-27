@@ -37,10 +37,11 @@ const Render = {
   // Three deletes a compiled program once no material uses it, so one material of each kind is kept for good.
   keep: [],
   prewarm() {
-    const g = new THREE.Group(), r = Rig.build(MODELS.scrapper), ra = Rig.build(MODELS.aegis);
+    const g = new THREE.Group(), r = Rig.build(MODELS.scrapper), ra = Rig.build(MODELS.aegis), rk = Rig.build(MODELS.krag);
     r.outline.visible = true;
     ra.blade.visible = true;
-    g.add(r.mesh, ra.mesh);
+    rk.flames.g.visible = true;
+    g.add(r.mesh, ra.mesh, rk.mesh);
     for (const glow of [false, true]) g.add(new THREE.Mesh(r.parts[0].geo, FX.gibMaterial('#ffffff', glow)));
     g.add(new THREE.Mesh(this.pickupGeo, this.pickupMat));
     const o = { x: 0, y: 1, z: 0 };
@@ -63,7 +64,7 @@ const Render = {
     Views.prewarmHide();
     SawView.g.visible = Tutorial.marker.visible = false;
     Gfx.scene.remove(g);
-    this.keep.push(r.mat, r.outline.material, ra.mat, ra.blade.children[0].material, decal, ...FX.detachAll());
+    this.keep.push(r.mat, r.outline.material, ra.mat, ra.blade.children[0].material, rk.mat, rk.flames.outer, decal, ...FX.detachAll());
   },
   // The 2D game's 16:9 frame; the 3D view renders at the frame's native size times the resolution scale.
   resize() {
@@ -247,6 +248,7 @@ const Render = {
     this.bladeLight();
     BossViews.pushLights();
     AegisViews.pushLights();
+    KragViews.pushLights();
     Views.pushLights();
     FX.pushLights();
     Gfx.endFrame();
@@ -357,7 +359,7 @@ const Render = {
     // wave info
     const D = Director;
     if (D.wave > 0) {
-      const label = G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
+      const label = G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : G.mode === 'krag' ? 'KRAG FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
       drawText(ctx, label, VIEW_W / 2, 6, { align: 'center', color: '#ffd0d8' });
       let sub;
       if (D.state === 'fight') sub = D.remaining() + ' HOSTILES' + (D.modifier ? ' - ' + WAVE_MODIFIERS[D.modifier].name : '');
@@ -445,22 +447,29 @@ const Render = {
     else if (active) drawText(ctx, name, cx + 13, cy - 3, { color: '#ffffff' });
     else drawText(ctx, (ready ? key + ' ' : '') + name, cx + 13, cy - 3, { color: ready ? (((t * 3) | 0) % 2 ? (A ? AEGIS_P.hi : '#ff8a9a') : '#ffffff') : A ? '#4a5a6a' : '#5a4a5a' });
   },
-  // ---------- the rival ----------
-  // Its health along the bottom of the screen with the half-health mark of phase 1 and its shield.
+  // ---------- the bosses ----------
+  // Its health along the bottom of the screen: the rival's with the half-health mark of phase 1 and its shield,
+  // KRAG's in orange with its heat in a strip underneath that pulses once it's full.
   drawBossBar(ctx, b, t) {
     const w = 220, x = Math.round(VIEW_W / 2 - w / 2), y = VIEW_H - 18;
-    drawText(ctx, b.name, x, y - 9, { color: '#bfd4ff' });
+    drawText(ctx, b.name, x, y - 9, { color: b.barName || '#bfd4ff' });
     ctx.fillStyle = '#0b0910'; ctx.fillRect(x - 1, y - 1, w + 2, 6);
     ctx.fillStyle = '#300a12'; ctx.fillRect(x, y, w, 4);
     const k = Math.max(0, b.hp) / b.maxHp;
-    ctx.fillStyle = b.stunT > 0 && ((t * 10) | 0) % 2 ? '#ffffff' : '#4a7aff'; ctx.fillRect(x, y, Math.round(w * k), 4);
-    ctx.fillStyle = '#a8c4ff'; ctx.fillRect(x, y, Math.round(w * k), 1);
+    ctx.fillStyle = b.stunT > 0 && ((t * 10) | 0) % 2 ? '#ffffff' : b.barCol || '#4a7aff'; ctx.fillRect(x, y, Math.round(w * k), 4);
+    ctx.fillStyle = b.barHi || '#a8c4ff'; ctx.fillRect(x, y, Math.round(w * k), 1);
     if (!b.duel && b.phase === 1) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + w / 2, y - 2, 1, 8); }
     if (b.shield) {
       ctx.globalAlpha = 0.6;
       ctx.fillStyle = '#9cc4ff';
       for (let i = 0; i < w; i += 2) if (((i + ((t * 20) | 0)) >> 1) % 3) ctx.fillRect(x + i, y, 1, 4);
       ctx.globalAlpha = 1;
+    }
+    if (b.heatK) {
+      const h = b.heatK(), full = h >= 1, fl = ((t * 8) | 0) % 2;
+      ctx.fillStyle = '#0b0910'; ctx.fillRect(x - 1, y + 5, w + 2, 3);
+      ctx.fillStyle = '#2a120a'; ctx.fillRect(x, y + 6, w, 1);
+      ctx.fillStyle = full ? (fl ? '#fff0c8' : '#ff8a2a') : b.ventT > 0 ? '#5a2a1a' : '#ff6a1a'; ctx.fillRect(x, y + 6, Math.round(w * h), 1);
     }
   },
   // Its riposte (gold) or red flash (red) in bullet time: a reticle on its eye closes as the flash nears.

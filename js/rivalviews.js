@@ -136,7 +136,7 @@ const BossViews = {
   // ---------- the rival itself ----------
   sync() {
     if (!this.ready) return;
-    const t = Game.realTime, r = Game.enemies.find((e) => e.isBoss && !e.dead), R = r && r.model;
+    const t = Game.realTime, r = Game.enemies.find((e) => e.type === 'aegis' && !e.dead), R = r && r.model;
     const hide = [this.shield, ...this.flames, this.beam, ...this.beamRings, this.flare, this.charge, this.orb, this.orbHalo, this.beacon, this.mark, this.zone, this.aimLine, this.arcLine, this.diveLine, this.zipLine, ...this.chargeRings, this.chargeHalo, this.perilAura, ...this.perilRings, this.gunRing];
     for (const o of hide) o.visible = false;
     if (!r) { this.syncGhosts(null); return; }
@@ -383,7 +383,7 @@ const BossViews = {
   },
   // its lights: the visor, the drawn blade, the jets, and the beam along its length
   pushLights() {
-    const r = Game.enemies.find((e) => e.isBoss && !e.dead);
+    const r = Game.enemies.find((e) => e.type === 'aegis' && !e.dead);
     if (!r || !r.model || !r.model.mesh.visible) return;
     if (r.dying && r.ko && (r.ko.stage === 'collapse' || r.ko.stage === 'down')) return;
     const v = r.visorPos();

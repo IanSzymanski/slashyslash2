@@ -606,6 +606,15 @@ const Training = {
     Game.enemies.push(r);
     Sound.play('spawn', {}, q);
   },
+  // KRAG, a little further off; hot: already at full heat
+  spawnKrag(hot) {
+    const p = Game.player, f = { x: fwdX(Camera.yaw), z: fwdZ(Camera.yaw) }, H = World.def.course.HALL;
+    const q = Arena.freeGroundAt(clamp(p.pos.x + f.x * 14, H.x0 + 3, H.x1 - 3), clamp(p.pos.z + f.z * 14, H.z0 + 4, H.z1 - 5), 0.9);
+    const k = new Krag(q, {});
+    if (hot) k.heat = HEAT.MAX;
+    Game.enemies.push(k);
+    Sound.play('spawn', {}, q);
+  },
   clear() {
     for (const e of Game.enemies) { if (e.type === 'dummy') continue; if (e.stopLoops) e.stopLoops(); e.dead = true; }
     Game.projectiles = []; Game.hazards = [];
@@ -631,6 +640,7 @@ const Training = {
     h += '</div><h3>Spawn</h3><div class="grid2">';
     for (const [t, name] of TRAIN_TYPES) h += btn('train-spawn', name, '', `data-type="${t}"`);
     h += btn('train-rival', 'AEGIS-07', 'phase 1', 'data-p2="0"') + btn('train-rival', 'AEGIS-07', 'blade phase', 'data-p2="1"');
+    h += btn('train-krag', 'KRAG', 'cold', 'data-hot="0"') + btn('train-krag', 'KRAG', 'full heat', 'data-hot="1"');
     h += '</div><h3>Practice</h3><div class="grid2">';
     h += btn('train-dummy', DUMMY_MODES[Game.training.dummy]);
     h += btn('train-mod', 'Modifier', Director.modifier ? WAVE_MODIFIERS[Director.modifier].name.toLowerCase() : 'none');
@@ -645,6 +655,7 @@ const Training = {
     switch (a) {
       case 'train-spawn': this.spawn(el.dataset.type); UI.resumeGame(); return;
       case 'train-rival': this.spawnRival(el.dataset.p2 === '1'); UI.resumeGame(); return;
+      case 'train-krag': this.spawnKrag(el.dataset.hot === '1'); UI.resumeGame(); return;
       case 'train-clear': this.clear(); UI.resumeGame(); return;
       case 'train-tutorial': Tutorial.begin(true); UI.resumeGame(); return;
       case 'train-skip': Tutorial.finish(true); UI.resumeGame(); return;

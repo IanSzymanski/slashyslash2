@@ -466,8 +466,8 @@ const AegisPose = {
       o.armR = { rot: [-0.8, 0.9, 0.3] }; o.armL = { rot: [-0.8, -0.9, 0.3] };
       return o;
     }
-    if (p.hurtT > 0 && !p.ultAim) {
-      o.lean = -0.35; o.head = -0.3; o.armR = { rot: [-0.6, 0.6, 0.3] }; o.armL = { rot: [-0.5, -0.6, 0.3] };
+    if ((p.hurtT > 0 || p.dazeT > 0) && !p.ultAim) {
+      o.lean = -0.35 + (p.dazeT > 0 ? Math.sin(p.t * 5) * 0.12 : 0); o.head = -0.3; o.armR = { rot: [-0.6, 0.6, 0.3] }; o.armL = { rot: [-0.5, -0.6, 0.3] };
       if (p.onGround) plant([0.18, 0, -0.45], [-0.18, 0, 0.4], 0.12);
       return o;
     }

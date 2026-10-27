@@ -68,7 +68,7 @@ class Player {
     this.rp = { x: pos.x, y: pos.y, z: pos.z };
     this.yaw = pos.yaw || 0;
     this.hp = PC.MAX_HP; this.shield = PC.MAX_SHIELD; this.shieldDelay = 0; this.shieldFlash = 0; this.regenOn = false;
-    this.iframes = 0; this.hurtT = 0;
+    this.iframes = 0; this.hurtT = 0; this.dazeT = 0;
     this.dashBuf = 0; this.dashHold = 0; this.parryBuf = 0; this.parrySpam = 0; this.shieldWasFull = true; this.shieldFullFlash = 0;
     this.attack = null; this.comboTimer = 0; this.attackQueued = null; this.attackCD = 0;
     this.atkPend = null; this.strN = 0; this.strLights = 0; this.lastDir = 1;
@@ -167,8 +167,9 @@ class Player {
     this.updateUltHold(dt);
     if (this.ult) { getUltimate(this.ult.id).update(this, dt); return; }
 
-    const I = this.intent();
-    this.updateCombat(dt, I);
+    // dazed (KRAG's Molten Fist): no moves, no attacks, until it clears
+    const I = this.dazeT > 0 ? this.dazedIntent() : this.intent();
+    if (this.dazeT > 0) { this.updateTether(dt); this.dazeFX(); } else this.updateCombat(dt, I);
     Controller.buffer(this, I);
     this.moveMods(dt, I);
     // anything that takes over the body lets go of a wall
@@ -225,6 +226,25 @@ class Player {
   }
   // timers that count down to zero every tick
   timerKeys() { return Player.TIMERS; }
+  dazedIntent() { return { mx: 0, mz: 0, jump: false, jumpHeld: false, jumpReleased: false, crouch: false, crouchPressed: false, aim: null }; }
+  // Knocked senseless for dur seconds: whatever you were doing stops, and nothing you press does anything.
+  dazeFor(dur) {
+    if (this.dead || this.ult) return;
+    this.dazeT = Math.max(this.dazeT, dur);
+    if (this.sheathe) this.cancelSheathe();
+    if (this.tether) this.releaseTether();
+    if (this.charging) this.cancelCharge();
+    this.cancelActions();
+    this.attack = null; this.attackQueued = null; this.atkPend = null; this.plunge = null; this.iaido = null; this.kickAnim = null;
+    this.sliding = false; this.mantle = null; this.vault = null;
+    Controller.dropCling(this); Controller.endSkid(this, false);
+  }
+  // sparks circling the head while it lasts
+  dazeFX() {
+    if (Math.random() > 0.5) return;
+    const h = this.head(), a = this.animT * 9 + rand(-0.3, 0.3);
+    FX.sparks({ x: h.x + Math.cos(a) * 0.38, y: h.y + 0.3, z: h.z + Math.sin(a) * 0.38 }, 1, { x: -Math.sin(a), y: 0.1, z: Math.cos(a) }, 0.3, 1.2, 2.4, { c0: '#ffffff', c1: '#ffe080', c2: '#a06010', g: 0, life: 0.6 });
+  }
   // E, dash, the tether, attacks and the utility, read this tick
   updateCombat(dt, I) {
     this.updateSheathe(dt);
@@ -1702,6 +1722,7 @@ class Player {
     Game.hitstop(0.05);
     Game.stats.damageTaken += h.dmg;
     if (this.hp <= 0) this.die();
+    else if (h.daze) this.dazeFor(h.daze);
     return 'hit';
   }
   // a hit that only hurts: on the tether, a bullet leaves you on the line
@@ -1834,5 +1855,5 @@ class Player {
     }
   }
 }
-Player.TIMERS = ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT', 'utilT', 'utilFlash', 'bulletT', 'rollT', 'utilBuf'];
+Player.TIMERS = ['iframes', 'hurtT', 'attackCD', 'postPose', 'parryCD', 'parryFlash', 'shieldOffT', 'shieldFlash', 'parryBuf', 'dashHold', 'shieldFullFlash', 'aimHold', 'spinT', 'landSquash', 'blinkT', 'utilT', 'utilFlash', 'bulletT', 'rollT', 'utilBuf', 'dazeT'];
 Player.prototype.fxCol = RONIN_COL;

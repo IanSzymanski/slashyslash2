@@ -761,8 +761,9 @@ const PlayerPose = {
       }
       return o;
     }
-    if (p.hurtT > 0) {
-      o.lean = -0.35; o.hF = [4, -16]; o.hB = [-5, -15]; o.fF = [3, -2]; o.fB = [-3, -1]; o.swordAng = -1;
+    if (p.hurtT > 0 || p.dazeT > 0) {
+      // reeling from a hit; dazed, it sways where it stands
+      o.lean = -0.35 + (p.dazeT > 0 ? Math.sin(p.animT * 5) * 0.12 : 0); o.hF = [4, -16]; o.hB = [-5, -15]; o.fF = [3, -2]; o.fB = [-3, -1]; o.swordAng = -1;
       return o;
     }
     if (p.skid) {

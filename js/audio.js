@@ -6,7 +6,7 @@ const Sound = (() => {
   let comp, master, lowpass, sfxBus, musicBus, reverbIn, noiseBuf, crackleBuf;
   let focusMute = 1;
   const last = {};
-  const GAP = { aegisGun: 0.03, probePulse: 0.08, dryFire: 0.1, hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08, scrape: 0.12, grab: 0.1 };
+  const GAP = { aegisGun: 0.03, probePulse: 0.08, dryFire: 0.1, hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08, scrape: 0.12, grab: 0.1, kragStep: 0.12, molten: 0.06, kragBlock: 0.04, kragStomp: 0.05 };
 
   function makeNoise(sec) {
     const n = (ac.sampleRate * sec) | 0, b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0);
@@ -758,6 +758,91 @@ const Sound = (() => {
       for (const [f, d] of [[1760, 0], [2349, 0.07], [3136, 0.14]]) tone({ type: 'square', f0: f, dur: 0.05, vol: 0.04, delay: d });
       tone({ type: 'sine', f0: 3520, dur: 0.3, vol: 0.05, delay: 0.2, rev: 0.5 });
     },
+    // ---------- KRAG ----------
+    // a roar like a furnace door thrown open: a deep growl over grinding stone
+    kragRoar() {
+      tone({ type: 'sawtooth', f0: 58, f1: 36, dur: 1.1, vol: 0.16, a: 0.05, rev: 0.5 });
+      tone({ type: 'square', f0: 86, f1: 52, dur: 1.0, vol: 0.06, detune: -20 });
+      noise({ dur: 1.0, vol: 0.4, type: 'lowpass', f0: 700, f1: 180, a: 0.05, rev: 0.4 });
+      crackle(0.9, 0.4, { f: 300 });
+    },
+    // full heat: the mohawk going up with a whoomp of flame
+    heatMax() {
+      noise({ dur: 0.6, vol: 0.6, type: 'lowpass', f0: 3200, f1: 200, rev: 0.4 });
+      tone({ type: 'sine', f0: 130, f1: 40, dur: 0.5, vol: 0.7 });
+      crackle(0.9, 0.45, { f: 900 });
+    },
+    // a blow meeting the onyx arm: stone and metal
+    kragBlock(p) {
+      const h = p.heavy ? 1.4 : 1;
+      tone({ type: 'triangle', f0: 420, f1: 260, dur: 0.12, vol: 0.07 * h });
+      noise({ dur: 0.12, vol: 0.32 * h, f0: 900, q: 1.2 });
+      tone({ type: 'sine', f0: 95, f1: 48, dur: 0.18 * h, vol: 0.45 * h });
+    },
+    kragGuard() {
+      noise({ dur: 0.25, vol: 0.2, f0: 400, f1: 900, q: 1.4 });
+      tone({ type: 'square', f0: 110, f1: 90, dur: 0.15, vol: 0.03 });
+    },
+    // the arm going off in its face
+    detonate() {
+      tone({ type: 'sine', f0: 110, f1: 20, dur: 1.6, vol: 1.0 });
+      noise({ dur: 1.8, vol: 1.0, type: 'lowpass', f0: 6000, f1: 80, rev: 0.6 });
+      tone({ type: 'sawtooth', f0: 70, f1: 28, dur: 0.8, vol: 0.1, rev: 0.4 });
+      crackle(1.4, 0.6, { f: 700 });
+    },
+    kragPunch() {
+      tone({ type: 'sine', f0: 130, f1: 24, dur: 1.1, vol: 0.95 });
+      noise({ dur: 1.2, vol: 0.85, type: 'lowpass', f0: 5000, f1: 90, rev: 0.5 });
+      crackle(1.0, 0.5, { f: 800 });
+    },
+    // knocked back off a parried stopper
+    kragStagger() {
+      tone({ type: 'sine', f0: 170, f1: 60, dur: 0.3, vol: 0.5 });
+      noise({ dur: 0.2, vol: 0.3, f0: 1200, f1: 400, q: 1 });
+      tone({ type: 'triangle', f0: 900, f1: 500, dur: 0.15, vol: 0.05, rev: 0.4 });
+    },
+    // the big blow is coming: lower and heavier than a glint
+    stopperCue() {
+      tone({ type: 'triangle', f0: 1800, f1: 2300, dur: 0.25, vol: 0.06, rev: 0.4 });
+      tone({ type: 'sine', f0: 150, f1: 90, dur: 0.22, vol: 0.32 });
+    },
+    // the Molten Fist building: a furnace roaring up
+    kragCharge(p) {
+      const d = p.dur || 1.4;
+      noise({ dur: d, vol: 0.3, f0: 200, f1: 1600, q: 0.9, a: d * 0.6 });
+      tone({ type: 'sawtooth', f0: 40, f1: 160, dur: d, vol: 0.1, a: d * 0.5, slide: d });
+      crackle(d, 0.35, { f: 600 });
+    },
+    kragLaunch() {
+      noise({ dur: 0.35, vol: 0.5, type: 'lowpass', f0: 2500, f1: 200 });
+      tone({ type: 'sine', f0: 120, f1: 50, dur: 0.3, vol: 0.5 });
+      crackle(0.3, 0.3, { f: 700 });
+    },
+    kragStomp() {
+      tone({ type: 'sine', f0: 72, f1: 28, dur: 0.6, vol: 0.9 });
+      noise({ dur: 0.6, vol: 0.6, type: 'lowpass', f0: 900, f1: 80, rev: 0.4 });
+      crackle(0.3, 0.2, { f: 300 });
+    },
+    kragStep() {
+      tone({ type: 'sine', f0: 82, f1: 40, dur: 0.18, vol: 0.32 });
+      noise({ dur: 0.1, vol: 0.14, type: 'lowpass', f0: 420 });
+    },
+    // the chain thrown from its hand, and the swing round
+    chain() {
+      for (let i = 0; i < 6; i++) tone({ type: 'square', f0: 1400 + Math.random() * 900, dur: 0.02, vol: 0.03, delay: i * 0.025 });
+      noise({ dur: 0.15, vol: 0.15, type: 'highpass', f0: 4000 });
+    },
+    chainSwing() {
+      noise({ dur: 0.9, vol: 0.3, f0: 300, f1: 1400, q: 1.2, a: 0.4 });
+      for (let i = 0; i < 8; i++) tone({ type: 'square', f0: 1200 + Math.random() * 900, dur: 0.02, vol: 0.02, delay: i * 0.1 });
+    },
+    // a molten vent bursting
+    molten() {
+      noise({ dur: 0.5, vol: 0.45, type: 'lowpass', f0: 3000, f1: 200 });
+      crackle(0.5, 0.35, { f: 600 });
+      tone({ type: 'sine', f0: 110, f1: 40, dur: 0.3, vol: 0.4 });
+    },
+    steam() { noise({ dur: 0.8, vol: 0.25, type: 'highpass', f0: 3000, a: 0.05 }); },
     ui() { tone({ type: 'square', f0: 660, dur: 0.04, vol: 0.05 }); },
     uiHover() { tone({ type: 'sine', f0: 990, dur: 0.02, vol: 0.02 }); },
     gameOver() {
