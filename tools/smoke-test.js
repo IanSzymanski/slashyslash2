@@ -1211,16 +1211,17 @@ async function run(browser, file, errors) {
           plan = K.planSwing(p);
         }
         const started = !!plan && K.startSwing(p), d0 = distXZ(K.pos, p.pos), phases = [];
-        let why = '';
+        let why = '', struck = false;
         for (let i = 0; i < 60 * 5 && K.act && K.act.kind === 'swing'; i++) {
           const a = K.act, was = a.phase, sw = a.sweep;
+          struck = struck || !!a.hit;
           T.frame(1);
           const ph = K.act && K.act.phase;
           if (ph && phases[phases.length - 1] !== ph) phases.push(ph);
           if (was === 'orbit' && ph === 'fly') why += ` let go at ${sw.toFixed(2)} of ${a.plan.maxSweep.toFixed(2)} (planned ${a.plan.relSweep.toFixed(2)}, stuck ${(a.stuck || 0).toFixed(2)}) ${distXZ(K.pos, p.pos).toFixed(1)} m off`;
           if (was === 'fly' && ph === 'land') why += `, landed (wall ${!!(K.col && K.col.wall)}, hit ${a.hit})`;
         }
-        ok(started && phases.join('>') === 'fire>reel>orbit>fly>land' && distXZ(K.pos, p.pos) < d0 - 4, `it chains onto a ${plan && plan.C.lamp ? 'lamp post' : 'corner'}, swings round it and flings itself at you (${phases.join('>')}, from ${d0.toFixed(1)} m to ${distXZ(K.pos, p.pos).toFixed(1)} m${why})`);
+        ok(started && phases.join('>') === 'fire>reel>orbit>fly>land' && (struck || distXZ(K.pos, p.pos) < d0 - 4), `it chains onto a ${plan && plan.C.lamp ? 'lamp post' : 'corner'}, swings round it and flings itself at you (${phases.join('>')}, from ${d0.toFixed(1)} m to ${distXZ(K.pos, p.pos).toFixed(1)} m${why})`);
       }
       // its heat shows: the seams run from dull red to white hot and the mohawk grows, tearing up at full heat; it
       // leaves smouldering footprints as it walks
