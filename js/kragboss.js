@@ -23,8 +23,9 @@
 //   stun it has.
 //   The Molten Fist (its red flash): a long wind-up in bullet time with the arm drawn back and a massive red
 //   cone on the street from its feet, tracking you until halfway through, then held. The fist is driven into
-//   the street and the whole cone splits open into a molten chasm, the split racing out to its end: no parry
-//   or dash saves you anywhere in it, and it's too long to outrun. Get out of it sideways (easiest close in,
+//   the street and the whole cone splits open into a molten chasm, the split racing out to its end and down
+//   off any ledge onto the ground below: no parry or dash saves you anywhere in it, it's too long to outrun,
+//   and dropping off a ledge under it doesn't get you out either. Get out of it sideways (easiest close in,
 //   where it's narrow) or behind it. The chasm erupts in vents for a few seconds after. It hits for a lot,
 //   throws you and leaves you dazed. A miss leaves it venting.
 //   Getting to you: long shoulder charges that end in an explosion, stomps that split glowing cracks in the
@@ -57,8 +58,10 @@ const BLOCK = { MUL: 0.15, COS: 0.34 };
 // that's hit whatever the cone, damage, knock, how long it dazes you, the vent after it, how fast the chasm
 // splits out along the cone, and how high over the street it reaches
 const FIST = { WIND: 1.15, BT: 0.65, LOCK: 0.5, CONE: 26, HALF: 0.86, R: 2.6, DMG: 55, KNOCK: 52, DAZE: 1.5, VENT: 1.9, FRONT: 70, LIFT: 4.5 };
-// the molten chasm it leaves: seconds it lives, the seconds of those it erupts in vents, and vents a second
-const CHASM = { DUR: 6.5, ERUPT: 4.2, RATE: 5 };
+// the molten chasm it leaves: seconds it lives; the seconds of those it erupts in vents, every vent done by then,
+// when it seals (crusts over in a hiss of steam, and nothing in it hurts after); vents a second; how long after
+// the split reaches a spot it still hits there; and how high it reaches someone in the air
+const CHASM = { DUR: 6.2, ERUPT: 4.6, RATE: 5, HIT: 0.2, FLY: 9 };
 // its arm going off in its face: a share of its health, and the stun
 const DETONATE = { DMG: 0.12, STUN: 3.4 };
 // the shoulder charge, the leap onto you (only from far off) and the tether swing (the radii it tries round the
@@ -474,7 +477,7 @@ class Krag extends Boss {
     const reach = d < 6.5 && Math.abs(dy) < 2.6 && this.lineClear(p, d);
     if (this.charged()) {
       // full heat: it wants the Fist on you, from a few strides off with a clear line
-      if (this.cds.punch <= 0 && level && d > 2.6 && d < 20 && this.lineClear(p, d)) { this.startPunch(p, false); return; }
+      if (this.cds.punch <= 0 && (level ? d > 2.6 && d < 20 : this.fistReaches(p, d, dy)) && this.lineClear(p, d)) { this.startPunch(p, false); return; }
       if (reach && this.cds.combo <= 0) { this.startCombo(true); return; }
     } else if (reach && this.cds.combo <= 0) { this.startCombo(false); return; }
     if (near || this.cds.closer > 0) return;
@@ -492,6 +495,12 @@ class Krag extends Boss {
     else if (pickd === 'charge') this.startCharge(p);
     else if (pickd === 'jump') this.startJump(p);
     else if (!this.startSwing(p)) this.cds.swing = 3;
+  }
+  // you on the ground below its ledge, where the Fist's cone falls
+  fistReaches(p, d, dy) {
+    if (dy > -2.2 || dy < -12 || d < 4 || d > FIST.CONE - 3) return false;
+    const u = flat(p.pos.x - this.pos.x, p.pos.z - this.pos.z), lv = fistLevels(this.pos, u);
+    return lv.length > 1 && Math.abs(lv[1] - World.groundAt(p.pos.x, p.pos.z, p.pos.y + 0.5)) < 1;
   }
   lineClear(p, d) {
     const u = flat(p.pos.x - this.pos.x, p.pos.z - this.pos.z);
@@ -995,10 +1004,12 @@ class Krag extends Boss {
   }
   spawnVent(at, delay) {
     const B = Arena.bounds();
-    if (at.x < B.minX + 1 || at.x > B.maxX - 1 || at.z < B.minZ + 1 || at.z > B.maxZ - 1) return;
+    if (at.x < B.minX + 1 || at.x > B.maxX - 1 || at.z < B.minZ + 1 || at.z > B.maxZ - 1) return null;
     const y = World.groundAt(at.x, at.z, at.y + 1.5);
-    if (y === -Infinity || Math.abs(y - at.y) > 1.6) return;
-    Game.hazards.push(new MoltenVent({ x: at.x, y, z: at.z }, delay, this));
+    if (y === -Infinity || Math.abs(y - at.y) > 1.6) return null;
+    const v = new MoltenVent({ x: at.x, y, z: at.z }, delay, this);
+    Game.hazards.push(v);
+    return v;
   }
 
   // ---------- the tether swing ----------
@@ -1446,7 +1457,7 @@ class Krag extends Boss {
     const p = Game.player, u = flat(this.pos.x - p.pos.x, this.pos.z - p.pos.z);
     this.yaw = this.faceYaw = this.yawTo(p.pos);
     this.vel.x = u.x * 8; this.vel.z = u.z * 8; this.vel.y = 7; this.onGround = false;
-    for (const h of Game.hazards) if ((h.kind === 'vent' || h.kind === 'chasm') && h.owner === this) h.dead = true;
+    for (const h of Game.hazards) if ((h.kind === 'vent' || h.kind === 'chasm') && h.owner === this) { if (h.kind === 'chasm') for (const q of h.cracks) KragViews.seal(q, 0.5); h.dead = true; }
     const c = this.chest(), dir = o.dir || { x: u.x, y: 0.3, z: u.z };
     FX.texts = FX.texts.filter((q) => Math.hypot(q.x - this.pos.x, q.z - this.pos.z) > 5);
     const px = -dir.z, pz = dir.x, pl = Math.hypot(px, pz) || 1;
@@ -1551,15 +1562,40 @@ class Krag extends Boss {
   }
 }
 
+// The heights of ground the Fist's cone covers, from apex o along f: its own, and below it the one most of the
+// rest of the cone falls onto (off a ledge, a roof, a platform), if a good part of it does. The molten river's
+// bed doesn't count. The views draw the cone and its chasm on each.
+function fistLevels(o, f) {
+  const tanH = Math.tan(FIST.HALF), counts = new Map();
+  let n = 0;
+  for (let i = 1; i <= 6; i++) {
+    const s = (i / 6) * FIST.CONE;
+    for (let j = -2; j <= 2; j++) {
+      const w = tanH * s * (j / 2.4), x = o.x + f.x * s - f.z * w, z = o.z + f.z * s + f.x * w;
+      const gy = World.groundAt(x, z, o.y + 1.5);
+      if (gy === -Infinity || Foundry.lavaAt(x, z)) continue;
+      n++;
+      if (gy < o.y - 1) { const k = Math.round(gy * 4) / 4; counts.set(k, (counts.get(k) || 0) + 1); }
+    }
+  }
+  let best = null, bc = 0;
+  for (const [k, c] of counts) if (c > bc) { bc = c; best = k; }
+  return best !== null && bc >= n * 0.25 ? [o.y, best] : [o.y];
+}
+
 // The Molten Fist's chasm: the street split open across the whole cone in front of KRAG. The split races out
-// from the fist to the cone's end, throwing fire, stone and lamps up as it goes, and hits anyone in the cone
-// on the street (or jumping off it) as it reaches them: no parry, no dash, and no outrunning it. Then the
-// chasm's floor erupts in vents for a few seconds before it cools and closes.
+// from the fist to the cone's end, and down off any ledge in it onto the ground below, throwing fire, stone
+// and lamps up as it goes, and hits anyone in the cone as it reaches them, at its level or anywhere below it
+// (and jumping over it doesn't help): no parry, no dash, no outrunning it and no dropping off a ledge out of
+// it. It hits only as it passes: step in after and only its vents can hurt you. Then the chasm's floor erupts in
+// vents for a few seconds, every one done before it seals at once, crusting over dark in a hiss of steam, and
+// nothing in it hurts after that as it cools and closes.
 class MoltenChasm {
   constructor(owner, apex, f, fist) {
     this.kind = 'chasm'; this.owner = owner; this.o = { x: apex.x, y: apex.y, z: apex.z }; this.f = { x: f.x, z: f.z }; this.yaw = yawOf(f.x, f.z);
-    this.fist = { x: fist.x, z: fist.z };
-    this.t = 0; this.front = 0; this.s = 1; this.n = 0; this.ventT = 0.4; this.hit = false; this.dodged = false; this.dead = false;
+    this.fist = { x: fist.x, z: fist.z }; this.levels = fistLevels(this.o, this.f);
+    this.t = 0; this.front = 0; this.s = 1; this.n = 0; this.ventT = 0.4; this.hit = false; this.dodged = false; this.sealed = false; this.dead = false;
+    this.cracks = [];
   }
   // along the cone and how far off its middle line q is
   local(q) { const rx = q.x - this.o.x, rz = q.z - this.o.z, F = this.f; return { along: rx * F.x + rz * F.z, side: rx * -F.z + rz * F.x }; }
@@ -1574,10 +1610,11 @@ class MoltenChasm {
     this.t += dt;
     const P = Game.player, K = this.owner, o = this.o;
     this.front = Math.min(FIST.CONE, this.front + FIST.FRONT * dt);
-    // the hit: the split reaching you, on its street or over it (a jump doesn't clear the fire)
+    // the hit: the split reaching you, on its street, below it or over it (a jump doesn't clear the fire), only as
+    // it passes
     if (!this.hit && !P.dead && K && !K.dead) {
-      const L = this.local(P.pos), level = P.pos.y > o.y - 3 && P.pos.y < o.y + FIST.LIFT;
-      if (level && this.inCone(P.pos) && L.along <= this.front + 0.6) {
+      const L = this.local(P.pos), level = P.pos.y < o.y + (P.onGround ? FIST.LIFT : CHASM.FLY);
+      if (level && this.inCone(P.pos) && L.along <= this.front + 0.6 && this.t <= Math.max(0, L.along) / FIST.FRONT + CHASM.HIT) {
         this.hit = true;
         const from = { x: P.pos.x - this.f.x * 2, y: o.y + 0.4, z: P.pos.z - this.f.z * 2 };
         const res = P.takeHit({ dmg: FIST.DMG * K.dmgMul, from, kind: 'melee', source: K, knock: FIST.KNOCK, unparryable: true, pierce: true, through: true, daze: FIST.DAZE });
@@ -1594,15 +1631,15 @@ class MoltenChasm {
       const s = this.s, n = Math.max(1, Math.round((Math.tan(FIST.HALF) * s * 2) / 4.5));
       for (let i = 0; i < n; i++) {
         const q = this.at(s, n === 1 ? 0 : lerp(-0.92, 0.92, (i + rand(0.2, 0.8)) / n)), y = World.groundAt(q.x, q.z, o.y + 1.5);
-        if (y === -Infinity || Math.abs(y - o.y) > 1.5) continue;
+        if (y === -Infinity) continue;
         q.y = y;
         FX.sparks({ x: q.x, y: y + 0.3, z: q.z }, 6, { x: this.f.x * 0.4, y: 1, z: this.f.z * 0.4 }, 0.6, 6, 20, Object.assign({ life: 1.1 }, KRAG_FIRE));
         if (Math.random() < 0.5) FX.dust(q, 2, { c: '#2a2026', smax: 4, rise: 2.6, life: 1.4 });
         if (Math.random() < 0.4) FX.debris(q, 2, KRAG_STONE, 14);
         if (this.n++ % 4 === 1) { KragViews.fireball({ x: q.x, y: y + 0.9, z: q.z }, rand(1.8, 2.8), 0.42); FX.light({ x: q.x, y: y + 1, z: q.z }, '#ff8a2a', 5, 9, 0.3); }
-        if (this.n % 3 === 0) KragViews.crack(q, { r: rand(2.2, 3.6), life: CHASM.DUR + 1, grow: 0.12 });
+        if (this.n % 3 === 0) { const c = KragViews.crack(q, { r: rand(2.2, 3.6), life: CHASM.DUR + 1, grow: 0.12, hot: true }); if (c) this.cracks.push(c); }
       }
-      for (const L of Props.standing()) { const l = this.local(L); if (l.along >= s - 2 && l.along < s && this.inCone(L) && Math.abs(L.y0 - o.y) < 1.5) Props.cut(L, L.y0 + 0.8, this.f); }
+      for (const L of Props.standing()) { const l = this.local(L); if (l.along >= s - 2 && l.along < s && this.inCone(L) && L.y0 < o.y + 1.5) Props.cut(L, L.y0 + 0.8, this.f); }
       this.s += 2;
     }
     if (this.front >= FIST.CONE && !this.boomed) {
@@ -1610,17 +1647,34 @@ class MoltenChasm {
       Sound.play('kragRumble', {}, this.at(FIST.CONE * 0.6, 0));
       Game.shake(0.35);
     }
-    // its floor erupting: vents up through the chasm, never right under you while you're dazed
-    if (this.front >= FIST.CONE && this.t < CHASM.ERUPT && K && !K.dead && !K.dying && (this.ventT -= dt) <= 0) {
+    // its floor erupting: vents up through the chasm, never right under you while you're dazed, the last of them
+    // done erupting as it seals
+    const lastVent = CHASM.ERUPT - Math.max(0.2, VENT.TELL * S.enemies.telegraph) - VENT.ERUPT;
+    if (this.front >= FIST.CONE && this.t < lastVent && K && !K.dead && !K.dying && (this.ventT -= dt) <= 0) {
       this.ventT = (1 / CHASM.RATE) * rand(0.7, 1.3);
       for (let tries = 0; tries < 4; tries++) {
         const q = this.at(rand(3, FIST.CONE - 1), rand(-0.9, 0.9));
-        if (P.dazeT > 0 && distXZ(q, P.pos) < 3.5) continue;
-        K.spawnVent(q, VENT.TELL);
+        q.y = World.groundAt(q.x, q.z, o.y + 1.5);
+        if (q.y === -Infinity || Foundry.lavaAt(q.x, q.z) || (P.dazeT > 0 && distXZ(q, P.pos) < 3.5)) continue;
+        const v = K.spawnVent(q, VENT.TELL);
+        if (v && v.crack) this.cracks.push(v.crack);
         break;
       }
     }
+    if (this.t >= CHASM.ERUPT && !this.sealed) this.seal();
     if (this.t >= CHASM.DUR) this.dead = true;
+  }
+  // crusting over all at once in a hiss of steam: nothing in it hurts from here
+  seal() {
+    this.sealed = true;
+    for (const q of this.cracks) KragViews.seal(q, 0.5);
+    for (let s = 2.5; s < FIST.CONE; s += 3.5) for (let u = -0.75; u <= 0.76; u += 0.5) {
+      const q = this.at(s, u + rand(-0.12, 0.12)), y = World.groundAt(q.x, q.z, this.o.y + 1.5);
+      if (y === -Infinity) continue;
+      FX.dust({ x: q.x, y, z: q.z }, 2, { c: KRAG_STEAM, smax: 4.5, rise: 3.5, life: 1.8 });
+    }
+    Sound.play('chasmSeal', {}, this.at(FIST.CONE * 0.4, 0));
+    Game.shake(0.15);
   }
 }
 
@@ -1635,7 +1689,7 @@ class MoltenVent {
     this.delay = Math.max(0.2, delay * (this.harmless ? 1 : S.enemies.telegraph));
     this.t = 0; this.phase = 'tell'; this.dead = false; this.hit = false;
     FX.decal('crack', { x: pos.x, y: pos.y, z: pos.z }, { len: 2.4 * (this.R / VENT.R), dur: 3 });
-    KragViews.crack(pos, { r: this.R * 1.7, life: this.delay + 3, grow: Math.min(0.4, this.delay * 0.6) });
+    this.crack = KragViews.crack(pos, { r: this.R * 1.7, life: this.delay + 3, grow: Math.min(0.4, this.delay * 0.6) });
   }
   update(dt) {
     this.t += dt;
