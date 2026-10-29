@@ -249,6 +249,7 @@ const Render = {
     BossViews.pushLights();
     AegisViews.pushLights();
     KragViews.pushLights();
+    FoundryViews.pushLights();
     Views.pushLights();
     FX.pushLights();
     Gfx.endFrame();
@@ -417,6 +418,9 @@ const Render = {
       this.drawCrosshair(ctx, p);
     }
     if (G.mode === 'training') Training.drawHud(ctx, t);
+    // the way to an open portal, when it's out of view
+    const pt = Director.portal;
+    if (pt && !pt.dead && !pt.exit && !pt.free && G.state === 'playing') this.drawEdgeArrow(ctx, pt.center(), '#ffb040', t);
     if (p.ult && G.state === 'playing') SawView.drawHud(ctx, p, t);
     this.drawUltMeter(ctx, x + 9, y2 + 31, p, t);
   },
@@ -449,7 +453,7 @@ const Render = {
   },
   // ---------- the bosses ----------
   // Its health along the bottom of the screen: the rival's with the half-health mark of phase 1 and its shield,
-  // KRAG's in orange with its heat in a strip underneath that pulses once it's full.
+  // KRAG's in orange (its heat and its arm show only on its body).
   drawBossBar(ctx, b, t) {
     const w = 220, x = Math.round(VIEW_W / 2 - w / 2), y = VIEW_H - 18;
     drawText(ctx, b.name, x, y - 9, { color: b.barName || '#bfd4ff' });
@@ -465,12 +469,25 @@ const Render = {
       for (let i = 0; i < w; i += 2) if (((i + ((t * 20) | 0)) >> 1) % 3) ctx.fillRect(x + i, y, 1, 4);
       ctx.globalAlpha = 1;
     }
-    if (b.heatK) {
-      const h = b.heatK(), full = h >= 1, fl = ((t * 8) | 0) % 2;
-      ctx.fillStyle = '#0b0910'; ctx.fillRect(x - 1, y + 5, w + 2, 3);
-      ctx.fillStyle = '#2a120a'; ctx.fillRect(x, y + 6, w, 1);
-      ctx.fillStyle = full ? (fl ? '#fff0c8' : '#ff8a2a') : b.ventT > 0 ? '#5a2a1a' : '#ff6a1a'; ctx.fillRect(x, y + 6, Math.round(w * h), 1);
-    }
+  },
+  // an arrow at the screen's edge toward a point when it's out of view
+  drawEdgeArrow(ctx, at, color, t) {
+    const q = this.project(at);
+    if (q && !q.off) return;
+    const v = this._v.set(at.x, at.y, at.z).applyMatrix4(Gfx.camera.matrixWorldInverse);
+    let ax = v.x, ay = -v.y;
+    const l = Math.hypot(ax, ay) || 1;
+    ax /= l; ay /= l;
+    const cx = VIEW_W / 2, cy = VIEW_H / 2, k = Math.min((VIEW_W / 2 - 16) / Math.max(1e-3, Math.abs(ax)), (VIEW_H / 2 - 16) / Math.max(1e-3, Math.abs(ay)));
+    const x = cx + ax * k, y = cy + ay * k, bob = Math.sin(t * 6) * 1.5;
+    ctx.save();
+    ctx.translate(Math.round(x - ax * bob), Math.round(y - ay * bob));
+    ctx.rotate(Math.atan2(ay, ax));
+    ctx.fillStyle = '#0b0910';
+    ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-6, -7); ctx.lineTo(-3, 0); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(-4, -5); ctx.lineTo(-2, 0); ctx.lineTo(-4, 5); ctx.closePath(); ctx.fill();
+    ctx.restore();
   },
   // Its riposte (gold) or red flash (red) in bullet time: a reticle on its eye closes as the flash nears.
   drawParryCue(ctx, k, t) {

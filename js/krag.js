@@ -6,6 +6,8 @@
 // the shoulders has a dark face plate with three glowing slits; a mohawk of flame rises off its crest
 // (kragviews.js feeds it with the heat). A hexagonal core burns in the chest, a spike juts from the right knee,
 // and its feet glow at the toes and soles.
+// The onyx arm's plates are tagged so kragboss.js can show its wear, and fracture lines hidden in its plates
+// (two sets, the second for when it's nearly gone) light up as it cracks.
 // KragPose turns its state (kragboss.js) into bone rotations, with IK for the limbs.
 
 const KRAG_COL = {
@@ -15,6 +17,9 @@ const KRAG_COL = {
   vein: '#ff6a1a', hot: '#ffb03a', white: '#fff0c8', dim: '#8a2a0a', off: '#2a1410',
 };
 const KRAG_SCALE = 1.45;
+// the onyx arm's plate colours and the tags they're recoloured by as it wears
+const KRAG_ONYX = { on1: KRAG_COL.O1, on2: KRAG_COL.O2, on3: KRAG_COL.O3, onS: KRAG_COL.OS };
+const KRAG_ARM_BONES = new Set(['armL', 'foreL', 'handL']);
 // the humanoid skeleton broadened: wide shoulders, the left arm longer and heavier, the head sunk forward
 // between the shoulders, and a bone on the crest for the mohawk
 const KRAG_BONES = [
@@ -33,7 +38,8 @@ const KRAG_FOOT = 0.11;
 
 function kragModel() {
   const C = KRAG_COL, parts = [], R = mulberry32(5150);
-  const P = (bone, size, at, color, o = {}) => parts.push(Object.assign({ bone, size, at, color }, o));
+  const onyxTag = { [C.O1]: 'on1', [C.O2]: 'on2', [C.O3]: 'on3', [C.OS]: 'onS' };
+  const P = (bone, size, at, color, o = {}) => parts.push(Object.assign({ bone, size, at, color }, KRAG_ARM_BONES.has(bone) && onyxTag[color] ? { tag: onyxTag[color] } : {}, o));
   // fullbright lights; tag names the group kragboss.js recolours with the heat
   const L = (bone, size, at, tag, color = C.vein, o = {}) => parts.push(Object.assign({ bone, size, at, color, glow: true, plain: true, tag }, o));
   const rust = () => [C.R1, C.R1, C.R2, C.R3, C.R4][(R() * 5) | 0];
@@ -142,6 +148,18 @@ function kragModel() {
     spike('handL', 0.14, 0.06, [x, -0.38, -0.05], [Math.PI, 0, 0]);
   }
   P('handL', [0.1, 0.16, 0.12], [0.22, -0.1, -0.06], C.O2, { plain: 0.6 });
+  // fractures through the plates, dark until the arm cracks: the first set as it wears, the second near the end
+  crack('armL', 'z', -0.318, [[-0.05, 0.27], [-0.13, 0.17], [-0.06, 0.07], [-0.16, -0.03], [-0.1, -0.12]], 'frac1');
+  crack('armL', 'x', -0.405, [[0.26, 0.02], [0.12, 0.1], [0.03, -0.04], [-0.14, 0.03], [-0.26, -0.08]], 'frac1');
+  crack('armL', 'z', 0.318, [[-0.3, 0.26], [-0.18, 0.11], [-0.26, -0.04], [-0.12, -0.12]], 'frac1');
+  crack('foreL', 'z', -0.252, [[0.17, -0.03], [0.06, -0.12], [0.13, -0.23], [0.03, -0.31]], 'frac1');
+  crack('handL', 'z', -0.218, [[-0.19, -0.01], [-0.09, -0.07], [-0.13, -0.13]], 'frac1');
+  crack('armL', 'z', -0.318, [[0.16, 0.26], [0.05, 0.12], [0.13, 0.01], [0.01, -0.11]], 'frac2');
+  crack('armL', 'x', -0.405, [[-0.05, 0.28], [0.06, 0.18], [0.0, 0.08], [0.15, -0.02]], 'frac2');
+  crack('armL', 'z', 0.318, [[0.06, 0.28], [0.13, 0.13], [0.02, 0.0], [0.1, -0.12]], 'frac2');
+  crack('foreL', 'x', -0.232, [[-0.2, -0.04], [-0.06, -0.17], [0.05, -0.12], [0.18, -0.26]], 'frac2');
+  crack('foreL', 'z', -0.252, [[-0.17, -0.2], [-0.06, -0.27], [-0.12, -0.33]], 'frac2');
+  crack('handL', 'x', -0.222, [[-0.16, -0.04], [-0.02, -0.14], [0.12, -0.09]], 'frac2');
   // ---------- legs: block thighs and shins over molten cores, a spike off the right knee, glowing boots ----------
   for (const [s, x] of [['L', -1], ['R', 1]]) {
     P('thigh' + s, [0.24, 0.42, 0.24], [0, -0.21, 0], C.D, { shape: 'hex', plain: 0.6 });
@@ -443,11 +461,12 @@ const KragPose = {
       o.lean = 0.3 * k; o.twist = 0.95 * k; o.head = -0.1; o.tremble = 0.4 + 0.8 * k;
       o.armL = { D: this.dir(e, -0.85, -0.25, -0.45), reach: 0.95 };
       o.armR = { D: this.dir(e, 0.9, 0.1, 0.2), reach: 0.7 };
-    } else if (a.phase === 'lunge' || (a.phase === 'vent' && a.t < 0.25)) {
-      const d = a.dirV || this.dir(e, 1, 0, 0);
-      o.legs = a.phase === 'lunge' ? 'dash' : 'plant'; o.fR = [0.3, 0, -0.7]; o.fL = [-0.28, 0, 0.6]; o.drop = 0.3;
-      o.lean = 0.6; o.twist = -0.6; o.head = -0.2;
-      o.armL = { D: { x: d.x, y: -0.05, z: d.z }, reach: 1 }; o.armR = { rot: [0.6, 0.6, 0.8] };
+    } else if (a.phase === 'strike' || (a.phase === 'vent' && a.t < 0.45)) {
+      // the onyx fist driven down into the street ahead, the body thrown down after it
+      const k = a.phase === 'strike' ? easeOutCubic(clamp(a.t / 0.07, 0, 1)) : 1;
+      o.legs = 'plant'; o.fR = [0.32, 0, -0.75]; o.fL = [-0.3, 0, 0.62]; o.drop = lerp(0.42, 0.62, k) * S * 0.7;
+      o.lean = lerp(0.3, 0.85, k); o.twist = lerp(0.95, -0.35, k); o.head = -0.25;
+      o.armL = { at: e.local(-0.25, lerp(1.2, 0.15, k), lerp(-0.2, 1.45, k)), pole: [-0.6, 0.3, 0.6] }; o.armR = { rot: [0.5, 0.7, 0.9] };
     } else {
       // venting: hunched over the smoking arm, the right hand braced on the knee
       o.legs = 'plant'; o.fR = [0.28, 0, -0.4]; o.fL = [-0.28, 0, 0.35]; o.drop = 0.3;

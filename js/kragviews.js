@@ -3,13 +3,13 @@
 // its head at full heat), the smouldering footprints it leaves, the glowing cracks its stomps, slams and
 // landings split in the street (white hot, cooling through orange to nothing), fireballs, the halo round a
 // limb winding a stopper (gold) or the arm coming up to guard (blue), the chain from its right hand when it
-// swings on a post or a corner, the Molten Fist's red shell and the wedge of street it will blow apart, the
-// mark where a leap will land, and the molten vents its stomps raise (through Views). Every material is made
+// swings on a post or a corner, the Molten Fist's red shell and the cone of street it will split open, the
+// molten chasm it leaves, the mark where a leap will land, and the molten vents its stomps raise (through Views). Every material is made
 // once here or shares a shader with one that is, and compiled in Render.prewarm.
 
 const KragViews = {
   ready: false, kinds: new Set(['vent']), prints: [], PRINTS: 28, _gt: 0, cracks: [], balls: [],
-  CRACKS: { burst: 20, burst2: 20, line: 14 }, BALLS: 6,
+  CRACKS: { burst: 24, burst2: 24, line: 14 }, BALLS: 10, CHASMS: 2,
 
   init() {
     const add = BossViews.add, G = BossViews.geos;
@@ -26,6 +26,10 @@ const KragViews = {
       const mat = new THREE.MeshBasicMaterial({ map: this.crackTexture(k), color: '#ffffff', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
       this.crackMesh[k] = this.instanced(geo, mat, this.CRACKS[k], 1);
     }
+    // the Fist's chasm: the cone of street split open, fissures fanning out over a molten floor (instanced, so
+    // it shares the cracks' shader)
+    this.chasmMat = new THREE.MeshBasicMaterial({ map: this.chasmTexture(), color: '#ffffff', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    this.chasm = this.instanced(this.fanUVGeo(FIST.HALF, 24), this.chasmMat, this.CHASMS, 1);
     // fireballs: an outer shell and a white core, swelling and burning out
     this.ballPool = [];
     for (let i = 0; i < this.BALLS; i++) {
@@ -38,12 +42,11 @@ const KragViews = {
     this.haloCore = new THREE.Mesh(G.sphere, add('#ffffff', { opacity: 0.6, side: THREE.FrontSide }));
     this.chain = FX.stripMesh(16);
     this.chain.visible = false;
-    // the Fist: the red shell closing on it, rings closing on its feet, the lane it lunges down and the wedge
+    // the Fist: the red shell closing on it, rings closing on its feet, and the cone it will split open
     this.aura = new THREE.Mesh(G.sphere, add('#ff2a3a', { opacity: 0.2, side: THREE.FrontSide }));
     this.auraRings = [0, 1, 2].map(() => new THREE.Mesh(G.flatRing, add('#ff2a3a', { opacity: 0.9 })));
     this.wedge = new THREE.Mesh(this.wedgeGeo, add('#ff2a3a', { opacity: 0.35 }));
     this.wedgeEdge = new THREE.Mesh(this.fanEdgeGeo(FIST.HALF, 18), add('#ff2a3a', { opacity: 0.9 }));
-    this.lane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2).translate(0, 0, -0.5), add('#ff2a3a', { opacity: 0.3 }));
     // a leap's landing: a ring and a cross on the street
     this.mark = new THREE.Group();
     const mr = new THREE.Mesh(G.flatRing, add(KRAG_ORANGE, { opacity: 0.9 })), mx1 = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.02, 0.14), add(KRAG_ORANGE, { opacity: 0.9 })), mx2 = mx1.clone();
@@ -55,7 +58,7 @@ const KragViews = {
     for (const o of this.shows()) { o.visible = false; o.renderOrder = 2; Gfx.scene.add(o); }
     this.ready = true;
   },
-  shows() { return [this.halo, this.haloCore, this.aura, ...this.auraRings, this.wedge, this.wedgeEdge, this.lane, this.mark, this.circle]; },
+  shows() { return [this.halo, this.haloCore, this.aura, ...this.auraRings, this.wedge, this.wedgeEdge, this.mark, this.circle]; },
   instanced(geo, mat, n, order) {
     const M = new THREE.InstancedMesh(geo, mat, n);
     M.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
@@ -73,6 +76,44 @@ const KragViews = {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(idx);
     return g;
+  },
+  // the fan with texture coordinates: across it in u, out from the apex in v
+  fanUVGeo(h, n) {
+    const pos = [0, 0, 0], uv = [0.5, 0], idx = [];
+    for (let i = 0; i <= n; i++) { const a = lerp(-h, h, i / n); pos.push(Math.sin(a), 0, -Math.cos(a)); uv.push(i / n, 1); }
+    // wound to face up, like the cracks' quads, so it shares their shader
+    for (let i = 1; i <= n; i++) idx.push(0, i + 1, i);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    return g;
+  },
+  // The chasm in the fan's own space (the apex along the bottom edge, its end along the top): fissures running
+  // out from the apex and branching, splits across them, molten pools, all over a faint glowing floor.
+  chasmTexture() {
+    const W = 128, H = 256, c = makeCanvas(W, H), g = c.ctx, R = mulberry32(2711), segs = [];
+    g.fillStyle = '#000000'; g.fillRect(0, 0, W, H);
+    for (let y = 0; y < H; y += 4) for (let x = 0; x < W; x += 4) { const a = 0.04 + 0.07 * R() * R(); g.fillStyle = `rgba(255,255,255,${a.toFixed(2)})`; g.fillRect(x, y, 4, 4); }
+    const walk = (x, y, a, L, w0, depth, bend = 0.45) => {
+      for (let s = 0; s < L; s += 1.5) {
+        a += (R() - 0.5) * bend;
+        x += Math.cos(a) * 1.5; y += Math.sin(a) * 1.5;
+        if (x < 1 || y < 1 || x > W - 2 || y > H - 2) return;
+        const u = s / L;
+        segs.push([x, y, lerp(w0, 1.2, u), lerp(1, 0.6, u)]);
+        if (depth < 2 && R() < 0.03) walk(x, y, a + (R() < 0.5 ? -1 : 1) * (0.6 + R() * 0.7), L * (0.2 + R() * 0.3), Math.max(1, lerp(w0, 1, u) * 0.7), depth + 1);
+      }
+    };
+    for (let i = 0; i < 8; i++) walk(8 + (i / 7) * (W - 16) + (R() - 0.5) * 8, H - 2, -Math.PI / 2 + (R() - 0.5) * 0.2, H - 6, 6, 0, 0.3);
+    for (let i = 0; i < 18; i++) walk(R() * W, 10 + R() * (H - 20), (R() < 0.5 ? 0 : Math.PI) + (R() - 0.5) * 0.5, 14 + R() * 30, 3, 1);
+    for (let i = 0; i < 26; i++) { const x = R() * W, y = R() * H, r = 2 + R() * 4; g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(Math.round(x - r), Math.round(y - r / 2), Math.round(r * 2), Math.round(r)); }
+    for (const [x, y, w] of segs) { g.fillStyle = 'rgba(255,255,255,0.1)'; const d = Math.round(w + 6); g.fillRect(Math.round(x - d / 2), Math.round(y - d / 2), d, d); }
+    for (const [x, y, w, a] of segs) { g.fillStyle = `rgba(255,255,255,${a.toFixed(2)})`; const d = Math.max(1, Math.round(w)); g.fillRect(Math.round(x - d / 2), Math.round(y - d / 2), d, d); }
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = THREE.NearestFilter;
+    return t;
   },
   // the fan's rim and sides as a thin band, so the wedge's edge reads hard against the street
   fanEdgeGeo(h, n) {
@@ -142,12 +183,12 @@ const KragViews = {
   },
   prewarmShow(group) {
     if (!this.ready) this.init();
-    for (const M of [this.foot, ...Object.values(this.crackMesh)]) { M.setMatrixAt(0, this._m.makeTranslation(0, 0, 0)); M.setColorAt(0, this._c.setRGB(1, 0.5, 0.2)); M.instanceMatrix.needsUpdate = true; M.instanceColor.needsUpdate = true; }
+    for (const M of [this.foot, this.chasm, ...Object.values(this.crackMesh)]) { M.setMatrixAt(0, this._m.makeTranslation(0, 0, 0)); M.setColorAt(0, this._c.setRGB(1, 0.5, 0.2)); M.instanceMatrix.needsUpdate = true; M.instanceColor.needsUpdate = true; }
     for (const b of this.ballPool) b.outer.visible = b.core.visible = true;
     for (const o of [this.chain, ...this.shows()]) o.visible = true;
   },
   prewarmHide() {
-    for (const M of [this.foot, ...Object.values(this.crackMesh)]) { M.setMatrixAt(0, this._m.makeScale(0, 0, 0)); M.instanceMatrix.needsUpdate = true; }
+    for (const M of [this.foot, this.chasm, ...Object.values(this.crackMesh)]) { M.setMatrixAt(0, this._m.makeScale(0, 0, 0)); M.instanceMatrix.needsUpdate = true; }
     for (const b of this.ballPool) b.outer.visible = b.core.visible = false;
     for (const o of [this.chain, ...this.shows()]) o.visible = false;
   },
@@ -241,6 +282,7 @@ const KragViews = {
     for (const o of [this.chain, ...this.shows()]) o.visible = false;
     this.syncPrints();
     this.syncCracks(t);
+    this.syncChasms(t);
     this.syncBalls(t);
     const r = Game.enemies.find((e) => e.type === 'krag' && !e.dead), R = r && r.model;
     if (!r || !R) return;
@@ -262,8 +304,8 @@ const KragViews = {
       this.circle.scale.setScalar(a.plan.R);
       this.circle.material.opacity = 0.25 + 0.35 * hot;
     }
-    // the Fist winding up: a red shell closing on it, rings closing on its feet, and the street it will blow
-    // apart: the lane its lunge takes and the wedge beyond, hard-edged, white once its visor flashes
+    // the Fist winding up: a red shell closing on it, rings closing on its feet, and the street it will split
+    // open: one massive hard-edged cone from its feet, turning with it until it locks, white as its visor flashes
     if (a && a.kind === 'punch' && a.phase === 'wind') {
       const k = r.cueProgress(), c = r.chest(), flash = k >= 1, p = r.rp || r.pos, beat = 0.5 + 0.5 * Math.sin(t * (8 + 22 * k));
       this.aura.visible = true;
@@ -279,25 +321,20 @@ const KragViews = {
         m.material.color.set(flash ? '#ffffff' : '#ff2a3a');
         m.material.opacity = flash ? 0.9 : 0.3 + 0.6 * u;
       });
-      const yaw = a.locked ? a.lockYaw : r.yaw, d = Math.hypot(a.tx - p.x, a.tz - p.z), L = clamp(d - 1.4, 0, FIST.LUNGE), show = clamp((a.t / a.wind - 0.15) / 0.3, 0, 1);
+      const yaw = a.locked ? a.lockYaw : r.yaw, show = clamp((a.t / a.wind - 0.08) / 0.2, 0, 1);
       if (show > 0) {
-        const ax = p.x + fwdX(yaw) * (L - 0.5), az = p.z + fwdZ(yaw) * (L - 0.5), col = flash && ((t * 24) | 0) % 2 ? '#ffffff' : '#ff2a3a';
+        // its apex sits back so its edges match the hit's (KragViews and MoltenChasm agree on the cone)
+        const back = 0.6 + this.apexBack(), ax = p.x - fwdX(yaw) * back, az = p.z - fwdZ(yaw) * back;
+        const col = flash && ((t * 24) | 0) % 2 ? '#ffffff' : a.locked && ((t * 10) | 0) % 2 ? '#ff6a6a' : '#ff2a3a';
         for (const w of [this.wedge, this.wedgeEdge]) {
           w.visible = true;
           w.position.set(ax, p.y + (w === this.wedge ? 0.07 : 0.075), az);
           w.rotation.y = yaw;
-          w.scale.setScalar(FIST.CONE * (w === this.wedge ? 1 : lerp(0.92, 1, beat)));
+          w.scale.setScalar((FIST.CONE + this.apexBack()) * (w === this.wedge ? lerp(0.25, 1, show) : 1));
           w.material.color.set(col);
         }
-        this.wedge.material.opacity = (0.14 + 0.26 * k) * show;
-        this.wedgeEdge.material.opacity = (0.4 + 0.5 * k) * show;
-        if (L > 0.6) {
-          this.lane.visible = true;
-          this.lane.position.set(p.x, p.y + 0.065, p.z);
-          this.lane.rotation.y = yaw;
-          this.lane.scale.set(1.8, 1, L);
-          this.lane.material.color.set(col); this.lane.material.opacity = (0.12 + 0.22 * k) * show;
-        }
+        this.wedge.material.opacity = (0.12 + 0.22 * k) * show + (a.locked ? 0.06 * beat : 0);
+        this.wedgeEdge.material.opacity = (0.45 + 0.5 * k) * show;
       }
     }
     // a stopper winding: gold rings closing in on its feet
@@ -380,6 +417,28 @@ const KragViews = {
     if (n0 || this.prints.length) { M.instanceMatrix.needsUpdate = true; M.instanceColor.needsUpdate = true; }
     this._n = this.prints.length;
   },
+  // how far behind the cone's apex the drawn fan's point sits, so its edges pass 0.9 m either side of the apex
+  apexBack() { return 0.9 / Math.tan(FIST.HALF); },
+  // Each chasm: the fan swelling out with the split, white hot, then molten orange heaving while its floor
+  // erupts, then cooling to a dull red and closing.
+  syncChasms(t) {
+    const M = this.chasm, list = Game.hazards.filter((h) => h.kind === 'chasm' && !h.dead);
+    for (let i = 0; i < this.CHASMS; i++) {
+      const h = list[i];
+      if (!h) { M.setMatrixAt(i, this._m.makeScale(0, 0, 0)); continue; }
+      const b = this.apexBack(), R = Math.min(h.front, FIST.CONE) + b, F = h.f;
+      this._q.setFromAxisAngle(this._y, h.yaw);
+      this._p.set(h.o.x - F.x * b, h.o.y + 0.03, h.o.z - F.z * b); this._s.set(R, 1, R);
+      M.setMatrixAt(i, this._m.compose(this._p, this._q, this._s));
+      const u = h.t, heave = 0.85 + 0.15 * Math.sin(t * 6 + i) * Math.sin(t * 2.3);
+      let r, g, bl;
+      if (u < 0.35) { const k = u / 0.35; r = 1.8; g = lerp(1.5, 0.8, k); bl = lerp(1, 0.25, k); }
+      else if (u < CHASM.ERUPT) { r = 1.5 * heave; g = 0.55 * heave; bl = 0.1 * heave; }
+      else { const k = clamp((u - CHASM.ERUPT) / (CHASM.DUR - CHASM.ERUPT), 0, 1), f = Math.pow(1 - k, 1.3); r = lerp(1.5, 0.7, k) * f; g = lerp(0.55, 0.08, k) * f; bl = 0.06 * f; }
+      M.setColorAt(i, this._c.setRGB(r, g, bl));
+    }
+    M.instanceMatrix.needsUpdate = true; M.instanceColor.needsUpdate = true;
+  },
   // the colour of a crack u of the way through its life: white hot, orange, a dull red, gone
   crackColor(q, u, t, out) {
     const fl = 0.86 + 0.14 * Math.sin(t * 7 + q.ph) * Math.sin(t * 3.1 + q.ph * 2);
@@ -441,6 +500,13 @@ const KragViews = {
     let n = 0;
     for (let i = this.cracks.length - 1; i >= 0 && n < 1; i--) { const q = this.cracks[i], age = now - q.t0; if (age >= 0 && age < 0.9) { Gfx.light(q.x, q.y + 0.5, q.z, q.red ? '#ff2a1a' : '#ff8a2a', 4 * (1 - age / 0.9), 6 + q.sz * 0.4); n++; } }
     for (const b of this.balls) { const k = (Game.realTime - b.t0) / b.dur; Gfx.light(b.x, b.y, b.z, '#ffa040', 8 * (1 - k), b.r * 4); break; }
+    // a chasm lights the street it splits
+    for (const h of Game.hazards) {
+      if (h.kind !== 'chasm' || h.dead) continue;
+      const k = h.t < CHASM.ERUPT ? 1 : clamp(1 - (h.t - CHASM.ERUPT) / (CHASM.DUR - CHASM.ERUPT), 0, 1);
+      for (const s of [0.35, 0.75]) { const q = h.at(Math.min(h.front, FIST.CONE * s), 0); Gfx.light(q.x, q.y + 1.5, q.z, '#ff6a1a', 5 * k, 16); }
+      break;
+    }
     n = 0;
     for (const h of Game.hazards) {
       if (h.kind !== 'vent' || h.phase !== 'erupt' || n >= 2) continue;

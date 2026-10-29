@@ -121,7 +121,7 @@ const UI = {
     document.getElementById('over-title').textContent = victory ? (duel ? 'Duel won' : boss ? 'Rival defeated' : krag ? 'KRAG defeated' : 'Demo complete') : 'Signal lost';
     let sub;
     if (victory && krag) sub = 'KRAG is down, and the street stops shaking.';
-    else if (krag) sub = 'KRAG still stands. Dodge its strings, parry the big blow, and hit its arm when it guards at full heat.';
+    else if (krag) sub = 'KRAG still stands. Dodge its strings, parry the gold blow, crack its arm, and hit the arm when it guards at full heat.';
     else if (victory && duel) sub = 'You beat AEGIS-07 blade to blade. Practice only: the full Rival Fight is the one that counts.';
     else if (victory && !boss && !Director.rivalBuilt()) sub = 'All six demo waves cleared. AEGIS-07 joins the demo as its last wave in a later build.';
     else if (victory) sub = boss ? 'AEGIS-07 is down.' : 'All demo waves cleared, rival included.';
@@ -198,8 +198,9 @@ const UI = {
       ['AEGIS-07 red flash: no parry stops it; dash through to its back', actionLabel('dash')],
       ['AEGIS-07 strike rings: get out before the light erupts', 'Move · ' + actionLabel('dash')],
       ['KRAG strings drive through a parry: dodge them; parry the blow that winds up in gold at the end to stagger it', `${actionLabel('dash')} · ${actionLabel('sheathe')}`],
-      ['KRAG guarding (a blue flash, then the arm up): blows on its arm build its heat; at full heat, hit the arm to blow it up in its face and stun it', actionLabel('attack')],
-      ['KRAG Molten Fist (red): no parry stops it; dash out of the red wedge on the flash', actionLabel('dash')],
+      ['KRAG guarding (a blue flash, then the arm up): blows on its arm crack it until the guard breaks; at full heat (seams white, mohawk torn up), hit the arm to blow it up in its face and stun it', actionLabel('attack')],
+      ['KRAG Molten Fist (red): no parry or dash saves you in the red cone; get out of it sideways (easiest close in) or behind it before it splits open', actionLabel('dash')],
+      ['The Foundry: knock enemies into the molten river; hit a hanging ladle, or yank it on the tether, to pour it on whatever is under it', `${actionLabel('attack')} · ${actionLabel('tether')}`],
       ['Pause (training: spawn panel)', actionLabel('pause')],
       ['Skip a cutscene you have seen', `Hold ${actionLabel('sheathe')}`],
       ['Pick an endless upgrade', touch ? 'Tap a card' : 'Click, or 1 / 2 / 3'],

@@ -78,7 +78,7 @@ class Boss extends Enemy {
   pathTo(p, spd) {
     const dx = p.pos.x - this.pos.x, dz = p.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1e-3;
     const level = Math.abs(p.pos.y - this.pos.y) < 1.2, knee = { x: this.pos.x, y: this.pos.y + 0.6, z: this.pos.z };
-    if (level && !World.raycast(knee, { x: dx / d, y: 0, z: dz / d }, d, 0.25)) { this.want = { x: dx / d, z: dz / d, spd }; return; }
+    if (level && !World.raycast(knee, { x: dx / d, y: 0, z: dz / d }, d, 0.25) && !Foundry.crosses(this.pos, p.pos)) { this.want = { x: dx / d, z: dz / d, spd }; return; }
     const s = this.onGround ? Nav.steer(this, 99) : null;
     if (s) {
       if (s.kind === Nav.JUMP && this.cds.leap <= 0) { this.leapTo(s.to); return; }

@@ -510,13 +510,14 @@ const Nav = {
 // What the Director, props and training need from a level, so waves.js never reads level geometry.
 const Arena = {
   id: null,
-  // Builds an arena's collision, nav graph, light bake and meshes; returns false if it was already loaded.
+  // Builds an arena's collision, nav graph, light bake and meshes (the Foundry's molten metal too); returns false
+  // if it was already loaded.
   load(id) {
     if (this.id === id) return false;
     const def = ARENAS[id];
     World.blackout = false;
     World.build(def);
-    if (typeof Gfx !== 'undefined' && Gfx.renderer) Gfx.buildLevel(def);
+    if (typeof Gfx !== 'undefined' && Gfx.renderer) { Gfx.buildLevel(def); FoundryViews.build(def); }
     this.id = id;
     if (typeof Props !== 'undefined') Props.reset();
     return true;
@@ -861,6 +862,8 @@ const CROSSROADS = (() => {
     ambient: [0.022, 0.018, 0.032], sky: [0.05, 0.04, 0.075],
     bounds: { minX: -E, maxX: E, minZ: -E, maxZ: E },
     playerStart: { x: 0, y: 0.15, z: 6, yaw: 0 },
+    // where a portal from the Foundry lets you out, and where the one to it opens (endless)
+    arrival: { x: 0, y: 0.15, z: 6, yaw: 0 }, portalAt: { x: 0, y: 0.15, z: -2 },
     spawn: { ground, high }, perches, barrelSpots,
     clearance: {
       streets: [{ min: { x: -E, z: -9 }, max: { x: E, z: 9 } }, { min: { x: -9, z: -E }, max: { x: 9, z: E } }],

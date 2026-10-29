@@ -22,6 +22,11 @@ const TEX_STYLES = {
   stripe: ['#e8b820', '#1a1a1e', '#f4d050'],
   // the football field's worn turf
   turf: ['#4a8a3e', '#3a6e30', '#5ea24e'],
+  // the Foundry: diamond-plate floor, riveted iron walls, the furnace's fire brick, catwalk grating, rusted
+  // machine housings, stacked ingots, conveyor belts, plain dark iron
+  plate: ['#3a3436', '#242022', '#56504e'], ironwall: ['#2e2a2e', '#1c181c', '#48424a'], brickfire: ['#5a2a20', '#3a1812', '#7a3e2a'],
+  grate: ['#3e3c42', '#121014', '#62606a'], rust: ['#5a3a2a', '#3a2418', '#7a5038'], ingot: ['#4a4446', '#2a2628', '#6a6466'],
+  belt: ['#242226', '#121014', '#3c3a3e'], belt2: ['#242226', '#121014', '#3c3a3e'], iron: ['#34303a', '#221e26', '#4c4652'],
 };
 // grid-lined styles: a line every metre, with a lit edge beside it
 const GRID_STYLES = new Set(['tile', 'wall', 'ceiling', 'wallDark', 'mat', 'block', 'block2', 'block3']);
@@ -144,6 +149,42 @@ const Gfx = {
           for (let x = (y / 4) % 2 ? 4 : 0; x < W; x += 8) g.fillRect(x, y + 1, 1, 3);
         }
         speckle(W);
+      } else if (style === 'plate') {
+        // diamond tread in staggered rows, plate seams, rust blooms
+        speckle(160);
+        for (let y = 0; y < Ht; y += 4) for (let x = (y / 4) % 2 ? 2 : 0; x < W; x += 4) { g.fillStyle = light; g.fillRect(x, y, 2, 1); g.fillStyle = dark; g.fillRect(x, y + 1, 2, 1); }
+        g.fillStyle = dark; g.fillRect(0, 31, W, 1); g.fillRect(31, 0, 1, Ht);
+        g.fillStyle = '#5a3424';
+        for (let i = 0; i < 4; i++) { const x = (R() * 56) | 0, y = (R() * 56) | 0; for (let j = 0; j < 14; j++) g.fillRect(x + ((R() * 8) | 0), y + ((R() * 8) | 0), 1, 1); }
+      } else if (style === 'ironwall') {
+        // tall riveted plates, streaks of soot running down them
+        speckle(200);
+        g.fillStyle = dark;
+        for (let x = 15; x < W; x += 16) g.fillRect(x, 0, 1, Ht);
+        g.fillRect(0, 31, W, 1);
+        g.fillStyle = light;
+        for (let x = 2; x < W; x += 16) for (const y of [2, 29, 34, 61]) { g.fillRect(x, y, 1, 1); g.fillRect(x + 11, y, 1, 1); }
+        g.fillStyle = '#141014';
+        for (let i = 0; i < 6; i++) { const x = (R() * 64) | 0; for (let y = 0; y < 64; y += 1 + ((R() * 3) | 0)) g.fillRect(x, y, 1, 1); }
+      } else if (style === 'grate') {
+        // a grid of slots between bars
+        for (let y = 0; y < Ht; y += 4) for (let x = 0; x < W; x += 4) { g.fillStyle = dark; g.fillRect(x + 1, y + 1, 2, 2); }
+        g.fillStyle = light; for (let y = 0; y < Ht; y += 16) g.fillRect(0, y, W, 1);
+      } else if (style === 'rust') {
+        speckle(320);
+        g.fillStyle = light;
+        for (let i = 0; i < 10; i++) { const x = (R() * 64) | 0; for (let y = (R() * 30) | 0, L = 10 + R() * 30; y < L; y++) g.fillRect(x, y, 1, 1); }
+        g.fillStyle = dark; g.fillRect(0, 0, 64, 1); g.fillRect(0, 31, 64, 1);
+        for (const [x, y] of [[3, 3], [60, 3], [3, 28], [60, 28], [3, 35], [60, 35], [3, 60], [60, 60]]) g.fillRect(x, y, 2, 2);
+      } else if (style === 'ingot') {
+        // stacked bars, their ends showing
+        speckle(120);
+        for (let y = 0; y < Ht; y += 8) for (let x = (y / 8) % 2 ? 8 : 0; x < W; x += 16) { g.fillStyle = dark; g.fillRect(x, y, 16, 1); g.fillRect(x, y, 1, 8); g.fillStyle = light; g.fillRect(x + 1, y + 1, 14, 1); }
+      } else if (style === 'belt' || style === 'belt2') {
+        // slats across the belt (foundry.js runs them)
+        speckle(80);
+        for (let x = 0; x < W; x += 8) { g.fillStyle = dark; g.fillRect(x, 0, 2, Ht); g.fillStyle = light; g.fillRect(x + 2, 0, 1, Ht); }
+        g.fillStyle = '#c8a020'; g.fillRect(0, 0, W, 2); g.fillRect(0, Ht - 2, W, 2);
       } else if (style === 'asphalt' || style === 'roof') {
         speckle(420);
         g.fillStyle = dark;
