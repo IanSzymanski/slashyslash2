@@ -9,7 +9,7 @@
 
 const KragViews = {
   ready: false, kinds: new Set(['vent']), prints: [], PRINTS: 28, _gt: 0, cracks: [], balls: [],
-  CRACKS: { burst: 24, burst2: 24, line: 14 }, BALLS: 10, CHASMS: 2,
+  CRACKS: { burst: 24, burst2: 24, line: 14 }, BALLS: 10, CHASMS: 4,
 
   init() {
     const add = BossViews.add, G = BossViews.geos;
@@ -47,6 +47,8 @@ const KragViews = {
     this.auraRings = [0, 1, 2].map(() => new THREE.Mesh(G.flatRing, add('#ff2a3a', { opacity: 0.9 })));
     this.wedge = new THREE.Mesh(this.wedgeGeo, add('#ff2a3a', { opacity: 0.35 }));
     this.wedgeEdge = new THREE.Mesh(this.fanEdgeGeo(FIST.HALF, 18), add('#ff2a3a', { opacity: 0.9 }));
+    // the same cone again on the ground below, where it falls off a ledge
+    this.wedge2 = new THREE.Mesh(this.wedgeGeo, this.wedge.material); this.wedgeEdge2 = new THREE.Mesh(this.wedgeEdge.geometry, this.wedgeEdge.material);
     // a leap's landing: a ring and a cross on the street
     this.mark = new THREE.Group();
     const mr = new THREE.Mesh(G.flatRing, add(KRAG_ORANGE, { opacity: 0.9 })), mx1 = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.02, 0.14), add(KRAG_ORANGE, { opacity: 0.9 })), mx2 = mx1.clone();
@@ -58,7 +60,7 @@ const KragViews = {
     for (const o of this.shows()) { o.visible = false; o.renderOrder = 2; Gfx.scene.add(o); }
     this.ready = true;
   },
-  shows() { return [this.halo, this.haloCore, this.aura, ...this.auraRings, this.wedge, this.wedgeEdge, this.mark, this.circle]; },
+  shows() { return [this.halo, this.haloCore, this.aura, ...this.auraRings, this.wedge, this.wedgeEdge, this.wedge2, this.wedgeEdge2, this.mark, this.circle]; },
   instanced(geo, mat, n, order) {
     const M = new THREE.InstancedMesh(geo, mat, n);
     M.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
@@ -326,13 +328,18 @@ const KragViews = {
         // its apex sits back so its edges match the hit's (KragViews and MoltenChasm agree on the cone)
         const back = 0.6 + this.apexBack(), ax = p.x - fwdX(yaw) * back, az = p.z - fwdZ(yaw) * back;
         const col = flash && ((t * 24) | 0) % 2 ? '#ffffff' : a.locked && ((t * 10) | 0) % 2 ? '#ff6a6a' : '#ff2a3a';
-        for (const w of [this.wedge, this.wedgeEdge]) {
-          w.visible = true;
-          w.position.set(ax, p.y + (w === this.wedge ? 0.07 : 0.075), az);
-          w.rotation.y = yaw;
-          w.scale.setScalar((FIST.CONE + this.apexBack()) * (w === this.wedge ? lerp(0.25, 1, show) : 1));
-          w.material.color.set(col);
+        // on its own level, and on the ground below where the cone falls off a ledge
+        const lv = fistLevels({ x: p.x - fwdX(yaw) * 0.6, y: p.y, z: p.z - fwdZ(yaw) * 0.6 }, { x: fwdX(yaw), z: fwdZ(yaw) });
+        for (const [w, e, y] of [[this.wedge, this.wedgeEdge, lv[0]], [this.wedge2, this.wedgeEdge2, lv[1]]]) {
+          if (y === undefined) continue;
+          for (const m of [w, e]) {
+            m.visible = true;
+            m.position.set(ax, y + (m === w ? 0.07 : 0.075), az);
+            m.rotation.y = yaw;
+            m.scale.setScalar((FIST.CONE + this.apexBack()) * (m === w ? lerp(0.25, 1, show) : 1));
+          }
         }
+        this.wedge.material.color.set(col); this.wedgeEdge.material.color.set(col);
         this.wedge.material.opacity = (0.12 + 0.22 * k) * show + (a.locked ? 0.06 * beat : 0);
         this.wedgeEdge.material.opacity = (0.45 + 0.5 * k) * show;
       }
@@ -420,15 +427,16 @@ const KragViews = {
   // how far behind the cone's apex the drawn fan's point sits, so its edges pass 0.9 m either side of the apex
   apexBack() { return 0.9 / Math.tan(FIST.HALF); },
   // Each chasm: the fan swelling out with the split, white hot, then molten orange heaving while its floor
-  // erupts, then cooling to a dull red and closing.
+  // erupts, then cooling to a dull red and closing; drawn on each level of ground the cone covers.
   syncChasms(t) {
-    const M = this.chasm, list = Game.hazards.filter((h) => h.kind === 'chasm' && !h.dead);
+    const M = this.chasm, list = [];
+    for (const h of Game.hazards) if (h.kind === 'chasm' && !h.dead) for (const y of h.levels || [h.o.y]) list.push([h, y]);
     for (let i = 0; i < this.CHASMS; i++) {
-      const h = list[i];
+      const [h, ly] = list[i] || [];
       if (!h) { M.setMatrixAt(i, this._m.makeScale(0, 0, 0)); continue; }
       const b = this.apexBack(), R = Math.min(h.front, FIST.CONE) + b, F = h.f;
       this._q.setFromAxisAngle(this._y, h.yaw);
-      this._p.set(h.o.x - F.x * b, h.o.y + 0.03, h.o.z - F.z * b); this._s.set(R, 1, R);
+      this._p.set(h.o.x - F.x * b, ly + 0.03, h.o.z - F.z * b); this._s.set(R, 1, R);
       M.setMatrixAt(i, this._m.compose(this._p, this._q, this._s));
       const u = h.t, heave = 0.85 + 0.15 * Math.sin(t * 6 + i) * Math.sin(t * 2.3);
       let r, g, bl;

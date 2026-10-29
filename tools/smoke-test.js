@@ -1238,6 +1238,40 @@ async function run(browser, file, errors) {
         T.press('KeyW'); T.tap('Mouse0'); T.frame(8); T.release('KeyW');
         ok(dz0 > 0 && !p.attack && distXZ(p.pos, at0) < 0.8, `dazed by the Fist, moving and swinging do nothing (${dz0.toFixed(2)} s left, moved ${distXZ(p.pos, at0).toFixed(2)} m)`);
       }
+      // from a ledge: KRAG up on the overpass (top 7 m, x 27..33), the Fist's cone falls off it onto the street below
+      // and splits there too. Standing below, or dropping off the ledge after the lock, doesn't get you out; getting
+      // under and behind it does. At full heat it picks the Fist on you below.
+      {
+        const up = (px, py, pz, choose) => {
+          Game.toMenu(); UI.act('test'); T.frame(2);
+          p = Game.player; S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0;
+          p.pos.x = p.prev.x = px; p.pos.y = p.prev.y = World.groundAt(px, pz, py + 0.5); p.pos.z = p.prev.z = pz; p.vel.x = p.vel.y = p.vel.z = 0;
+          const k = new Krag({ x: 30, y: 7, z: 0 }, {});
+          k.spawning = false; k.pos.y = k.prev.y = World.groundAt(30, 0, 8);
+          for (const c in k.cds) k.cds[c] = 99;
+          if (!choose) k.chooseAct = () => {};
+          k.react = () => {}; k.navigate = () => {};
+          k.yaw = k.faceYaw = k.yawTo(p.pos);
+          Game.enemies.push(k); T.frame(1);
+          return k;
+        };
+        const ledgeFist = (k, after) => {
+          k.heat = HEAT.MAX; k.startPunch(p, false);
+          for (let i = 0; i < 60 * 4 && k.act && !k.act.locked; i++) T.frame(1);
+          if (after) after(k);
+          for (let i = 0; i < 60 * 3 && k.act && k.act.kind === 'punch' && k.act.phase !== 'vent'; i++) T.frame(1);
+          T.frame(30);
+          const ch = Game.hazards.find((h) => h.kind === 'chasm');
+          return { hurt: PC.MAX_HP - p.hp, levels: ch ? ch.levels : [] };
+        };
+        const below = ledgeFist(up(18, 0, 0));
+        const dropped = ledgeFist(up(27.6, 7, 0), () => { p.pos.x = p.prev.x = 21; p.pos.y = p.prev.y = 2; p.pos.z = p.prev.z = 0; p.vel.y = -2; });
+        const under = ledgeFist(up(22, 0, 0), () => { p.pos.x = p.prev.x = 34; });
+        const k = up(16, 0, 0, true);
+        k.heat = HEAT.MAX; k.cds.punch = 0; k.chooseAct(p);
+        const picked = !!(k.act && k.act.kind === 'punch');
+        ok(below.hurt >= 45 && below.levels.length === 2 && Math.abs(below.levels[1]) < 0.3 && dropped.hurt >= 45 && under.hurt === 0 && picked, `from the 7 m overpass the Fist's chasm cascades onto the street below (levels ${below.levels.map((y) => y.toFixed(1)).join(' / ')}): standing below (${below.hurt}) or dropping off after the lock (${dropped.hurt}) doesn't get you out, getting under and behind it does (${under.hurt}), and at full heat it picks the Fist on you below (${picked})`);
+      }
       // getting to you: the shoulder charge crosses the street into you; the leap lands on you with a shockwave and
       // a ring of vents; a stomp sends a shockwave out and raises vents along the street toward you
       K = krag(0, -16);
