@@ -9,7 +9,8 @@
 //   is under the pour and leaving a pool; it hangs empty until the next wave fills it again.
 //   Embers rise off the river all over the hall.
 // Endless travels between the regions: when a region's boss falls, a portal opens to the other one, and
-// stepping into it takes the run there (Director, waves.js).
+// stepping into it takes the run there (Director, waves.js). In Free Roam a portal always stands in each,
+// leading to the other.
 
 // the river: damage to you and to an enemy, how hard it throws a body up and out
 const LAVA = { DMG: 14, EDMG: 42, UP: 15, OUT: 9 };
@@ -140,16 +141,17 @@ const Foundry = {
   },
 
   // ---------- travelling between the regions ----------
-  // A portal opens at the arena's portal spot, leading to `to`.
-  openPortal(to) {
+  // A portal opens at the arena's portal spot, leading to `to`. free: Free Roam's standing portal, opened
+  // quietly with no arrow pointing to it.
+  openPortal(to, free = false) {
     const at = World.def.portalAt || World.def.playerStart, y = World.groundAt(at.x, at.z, at.y + 1);
-    const pt = new Portal({ x: at.x, y: y > -Infinity ? y : at.y, z: at.z }, to);
+    const pt = new Portal({ x: at.x, y: y > -Infinity ? y : at.y, z: at.z }, to, free);
     Game.hazards.push(pt);
     return pt;
   },
   // Through the portal: the run goes on in the other region (score, wave, upgrades, health, shield and the
-  // ultimate's charge all carry over); everything else is left behind.
-  travel(to) {
+  // ultimate's charge all carry over); everything else is left behind. free: in Free Roam.
+  travel(to, free = false) {
     const P = Game.player;
     if (P.tether) P.releaseTether();
     P.stopAllLoops();
@@ -171,7 +173,8 @@ const Foundry = {
     Game.shake(0.4);
     Game.announcements = [];
     Sound.play('portalEnter');
-    Game.announce(World.def.name.toUpperCase(), to === 'foundry' ? 'KRAG WAITS IN THE FORGE' : 'BACK TO THE STREETS', to === 'foundry' ? '#ff9a5a' : '#4af0ff', 2.6);
+    const sub = free ? 'FREE ROAM' : to === 'foundry' ? 'KRAG WAITS IN THE FORGE' : 'BACK TO THE STREETS';
+    Game.announce(World.def.name.toUpperCase(), sub, to === 'foundry' ? '#ff9a5a' : '#4af0ff', 2.6);
   },
 };
 
@@ -329,10 +332,10 @@ class SlagPool {
 // A portal between the regions: a ring of molten light standing on the street that opens over a second;
 // step into it to go through. An exit portal (the one you came out of) only closes.
 class Portal {
-  constructor(pos, to) {
-    this.kind = 'portal'; this.pos = { x: pos.x, y: pos.y, z: pos.z }; this.to = to;
+  constructor(pos, to, free = false) {
+    this.kind = 'portal'; this.pos = { x: pos.x, y: pos.y, z: pos.z }; this.to = to; this.free = free;
     this.t = 0; this.open = 0; this.entered = false; this.dead = false; this.exit = false;
-    if (to) { Sound.play('portalOpen', {}, this.pos); FX.flash('#ffb070', 0.3); Game.shake(0.3); }
+    if (to && !free) { Sound.play('portalOpen', {}, this.pos); FX.flash('#ffb070', 0.3); Game.shake(0.3); }
   }
   center() { return { x: this.pos.x, y: this.pos.y + 2.1, z: this.pos.z }; }
   update(dt) {
@@ -431,7 +434,8 @@ const FoundryViews = {
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(L, W).rotateX(-Math.PI / 2), m);
       mesh.position.set((R.min.x + R.max.x) / 2, R.surface, (R.min.z + R.max.z) / 2);
       grp.add(mesh);
-      this.flows.push({ tex: m.map, u: 0.12, v: 0, mat: m });
+      // downstream is east, away from the furnace (a rising offset moves the pattern toward -x)
+      this.flows.push({ tex: m.map, u: -0.12, v: 0, mat: m });
     }
     for (const Q of def.pours || []) {
       const dx = Q.b[0] - Q.a[0], dy = Q.b[1] - Q.a[1], dz = Q.b[2] - Q.a[2], len = Math.hypot(dx, dy, dz);
@@ -442,7 +446,8 @@ const FoundryViews = {
         o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx / len, dy / len, dz / len));
         grp.add(o);
       }
-      this.flows.push({ tex: m.map, u: 0, v: 1.6, mat: m });
+      // falling: the cylinder's v runs from 0 at the tap to 1 at the river, so the offset falls for it to pour down
+      this.flows.push({ tex: m.map, u: 0, v: -1.6, mat: m });
     }
   },
   prewarmShow(group) {

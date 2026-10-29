@@ -420,7 +420,7 @@ const Render = {
     if (G.mode === 'training') Training.drawHud(ctx, t);
     // the way to an open portal, when it's out of view
     const pt = Director.portal;
-    if (pt && !pt.dead && !pt.exit && G.state === 'playing') this.drawEdgeArrow(ctx, pt.center(), '#ffb040', t);
+    if (pt && !pt.dead && !pt.exit && !pt.free && G.state === 'playing') this.drawEdgeArrow(ctx, pt.center(), '#ffb040', t);
     if (p.ult && G.state === 'playing') SawView.drawHud(ctx, p, t);
     this.drawUltMeter(ctx, x + 9, y2 + 31, p, t);
   },

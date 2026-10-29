@@ -20,6 +20,9 @@ if (process.argv.includes('--dist')) pages.push(path.join(root, 'dist', 'slashys
 
 // Runs in the page: one 60 Hz frame of the main loop, and key helpers.
 const HARNESS = () => {
+  // the scripted checks use Free Roam as a test bench: its standing portal stays out of the way except where a
+  // check turns it on
+  Director.freePortal = false;
   window.T = {
     frame(n = 1) {
       for (let i = 0; i < n; i++) {
@@ -1419,6 +1422,23 @@ async function run(browser, file, errors) {
         e.pos.x = e.prev.x = pool ? pool.pos.x : 0; e.pos.z = e.prev.z = pool ? pool.pos.z : 0;
         for (let i = 0; i < 90; i++) { T.frame(1); e.vel.x = e.vel.z = 0; }
         ok(cr.dead && pool && (e.dead || after - e.hp >= 9), `a crucible bursts (${cr.dead}) into a pool of slag (${!!pool}) that burns an enemy standing in it (${e.dead ? 'dead' : after - e.hp})`);
+      }
+      // Free Roam: a portal stands on the plaza leading to the Foundry, and one there leads back to the city
+      {
+        Director.freePortal = true;
+        Game.toMenu(); UI.act('test'); T.frame(2); p = Game.player; S.gameplay.invincible = true;
+        const step = (pt) => { const P = Game.player; P.pos.x = P.prev.x = pt.pos.x; P.pos.z = P.prev.z = pt.pos.z; P.pos.y = P.prev.y = pt.pos.y; P.vel.x = P.vel.y = P.vel.z = 0; };
+        const pt = Director.portal, there = !!(pt && pt.free && pt.to === 'foundry' && Arena.id === 'crossroads');
+        for (let i = 0; i < 80; i++) T.frame(1);
+        step(pt);
+        for (let i = 0; i < 20 && Arena.id !== 'foundry'; i++) T.frame(1);
+        const inF = Arena.id === 'foundry';
+        for (let i = 0; i < 160; i++) T.frame(1);
+        const back = Director.portal, backOk = !!(back && back.free && back.to === 'crossroads');
+        if (back) step(back);
+        for (let i = 0; i < 20 && Arena.id !== 'crossroads'; i++) T.frame(1);
+        ok(there && inF && backOk && Arena.id === 'crossroads' && !Game.enemies.length, `Free Roam: a portal on the plaza leads to the Foundry (${inF}), and one there leads back to the city (${backOk}, now in ${Arena.id})`);
+        Director.freePortal = false;
       }
       Game.enemies = []; Game.props = []; Game.hazards = []; Game.projectiles = [];
     }

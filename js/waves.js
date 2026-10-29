@@ -5,7 +5,8 @@
 // (kragboss.js) is the whole of the KRAG fight, in the Foundry. Endless travels between two regions: it starts
 // in the crossroads, where the eighth wave is AEGIS-07; when it falls a portal opens, and stepping into it
 // takes the run to the Foundry (foundry.js), where after three waves KRAG comes; when KRAG falls a portal
-// opens back to the crossroads, where after three waves AEGIS-07 comes again, and so on round.
+// opens back to the crossroads, where after three waves AEGIS-07 comes again, and so on round. Free Roam
+// keeps a portal standing in each region, leading to the other (freePortal: false leaves it out).
 
 // Each wave introduces one problem that a specific move solves, so the rival tests practised skills.
 const DEMO_WAVES = [
@@ -37,11 +38,12 @@ const ENDLESS_NAMES = ['STREET SWEEP', 'RUST TIDE', 'NIGHT SHIFT', 'SCRAPYARD', 
 const Director = {
   mode: 'demo', wave: 0, state: 'idle', queue: [], spawnT: 0, breakT: 0, waveName: '', total: 0, scale: { hp: 1, dmg: 1 }, bossWave: false, bossType: 'aegis', modifier: null,
   // endless's region, how many stints it has been through, the waves so far in this one, an open portal
-  region: 'crossroads', stint: 0, regionWave: 0, portal: null,
+  region: 'crossroads', stint: 0, regionWave: 0, portal: null, freePortal: true, freeT: 0,
 
   start(mode) {
     this.mode = mode; this.wave = 0; this.state = mode === 'training' ? 'training' : mode === 'test' || mode === 'street' ? 'idle' : 'intro'; this.breakT = 1.4; this.queue = []; this.modifier = null;
     this.region = mode === 'krag' ? 'foundry' : 'crossroads'; this.stint = 0; this.regionWave = 0; this.portal = null;
+    if (mode === 'test' && this.freePortal) this.portal = Foundry.openPortal('foundry', true);
   },
   // the wave of this stint that brings its region's boss (and after which the portal opens)
   stintLen() { return this.stint === 0 ? BOSS_EVERY : REGION_ROUNDS + 1; },
@@ -122,6 +124,16 @@ const Director = {
   remaining() { return this.queue.length + this.alive(); },
   update(dt) {
     if (this.state === 'training') return;
+    // Free Roam: through the standing portal to the other region, where one stands leading back
+    if (this.mode === 'test' && this.freePortal) {
+      if (this.portal && this.portal.entered) {
+        const to = this.portal.to;
+        this.portal = null;
+        Foundry.travel(to, true);
+        this.region = to; this.freeT = 1;
+      } else if (!this.portal && (this.freeT -= dt) <= 0) this.portal = Foundry.openPortal(Arena.id === 'foundry' ? 'crossroads' : 'foundry', true);
+      return;
+    }
     if (this.state === 'intro' || this.state === 'break') {
       this.breakT -= dt;
       if (this.breakT <= 0) {
