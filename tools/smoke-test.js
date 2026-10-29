@@ -1146,20 +1146,46 @@ async function run(browser, file, errors) {
         hurtEnemy(K, 30, { cause: 'slash', dir: { x: -fr.x, y: 0.2, z: -fr.z } });
         ok(blue === '#2a9aff' || blue === '#bfe8ff', `a blue flash (${blue}) comes off its arm before its guard is up, and a blow in it lands in full (${h0 - K.hp} of 30)`);
       }
-      // the guard: from the front a blow does a fraction of its damage and builds heat; from behind it lands in full
+      // the guard: from the front a blow does a fraction of its damage and wears the arm, with no heat; from behind
+      // it lands in full
       K = krag(0, -3); K.heat = 30; K.raiseGuard(9, 'range'); T.frame(upF());
       const fr = K.fwd(), front = { x: -fr.x, y: 0.2, z: -fr.z }, back = { x: fr.x, y: 0.2, z: fr.z };
-      let h0 = K.hp, heat0 = K.heat;
+      let h0 = K.hp, heat0 = K.heat, arm0 = K.arm;
       hurtEnemy(K, 30, { cause: 'slash', dir: front });
-      const frontTook = h0 - K.hp, heatUp = K.heat - heat0;
+      const frontTook = h0 - K.hp, heatUp = K.heat - heat0, worn = arm0 - K.arm;
       h0 = K.hp; hurtEnemy(K, 30, { cause: 'slash', dir: back });
       const backTook = h0 - K.hp;
-      T.aimAt(K.center()); h0 = K.hp; heat0 = K.heat; T.tap('Mouse0'); T.frame(20);
-      ok(frontTook > 0 && frontTook <= 5 && heatUp > 15 && backTook === 30 && K.heat > heat0 && h0 - K.hp <= 3, `its guard takes a blow from the front for ${frontTook} of 30 and ${heatUp.toFixed(0)} heat; from behind ${backTook} of 30; your slash on it ${h0 - K.hp} and ${(K.heat - heat0).toFixed(0)} heat`);
-      // filled to full heat on its guard, it drops the guard straight into the Molten Fist in bullet time
-      K = krag(0, -3); K.heat = HEAT.MAX - 4; K.raiseGuard(9, 'range'); T.frame(upF());
-      hurtEnemy(K, 20, { cause: 'slash', dir: { x: -K.fwd().x, y: 0.2, z: -K.fwd().z } });
-      ok(K.act && K.act.kind === 'punch' && Game.btKind === 'peril', `filled to full heat on its guard, it answers with the Molten Fist in bullet time (${K.act && K.act.kind})`);
+      T.aimAt(K.center()); h0 = K.hp; arm0 = K.arm; T.tap('Mouse0'); T.frame(20);
+      ok(frontTook > 0 && frontTook <= 5 && heatUp === 0 && worn > 15 && backTook === 30 && K.arm < arm0 && h0 - K.hp <= 3, `its guard takes a blow from the front for ${frontTook} of 30, wearing the arm ${worn.toFixed(0)} with ${heatUp.toFixed(1)} heat; from behind ${backTook} of 30; your slash on it ${h0 - K.hp} and ${(arm0 - K.arm).toFixed(0)} wear`);
+      // its heat builds from fighting on its own, and the HUD shows neither heat nor the arm
+      {
+        K = krag(0, -9); K.heat = 0;
+        T.frame(120);
+        const bar = Render.drawBossBar.toString();
+        ok(K.heat >= 3.5 && !/heat/i.test(bar) && !/arm/.test(bar), `its heat builds from fighting on its own (${K.heat.toFixed(1)} in 2 s), and the boss bar shows neither its heat nor its arm`);
+      }
+      // reaching full heat behind its guard, it drops the guard straight into the Molten Fist in bullet time
+      K = krag(0, -3); K.heat = HEAT.MAX - 0.3; K.raiseGuard(9, 'range'); T.frame(upF() + 12);
+      ok(K.act && K.act.kind === 'punch' && Game.btKind === 'peril', `reaching full heat behind its guard, it answers with the Molten Fist in bullet time (${K.act && K.act.kind})`);
+      // the arm wears and shows it (ashen plates, fractures lit through them), then breaks: the guard shatters, it
+      // reels, it can't guard until the arm re-forms, part worn
+      {
+        K = krag(0, -3); K.heat = 20; K.raiseGuard(30, 'range'); T.frame(upF());
+        const fr2 = K.fwd(), front2 = { x: -fr2.x, y: 0.2, z: -fr2.z }, whole = Object.assign({}, K.tints());
+        let mid = null, hits = 0;
+        const hp0 = K.hp;
+        for (; hits < 30 && K.armDown <= 0; hits++) {
+          if (!(K.act && K.act.kind === 'guard')) { K.raiseGuard(30, 'range'); T.frame(upF()); }
+          hurtEnemy(K, 24, { cause: 'slash', dir: front2 });
+          if (!mid && K.arm < ARM.MAX * 0.4) mid = Object.assign({}, K.tints());
+          T.frame(2);
+        }
+        const broke = K.armDown > 0, reeled = !!(K.act && K.act.kind === 'flinch' && K.act.broke), lost = hp0 - K.hp;
+        for (let i = 0; i < 90 && K.act && K.act.kind === 'flinch'; i++) T.frame(1);
+        const noGuard = !K.raiseGuard(2, 'range') && !(K.act && K.act.kind === 'guard');
+        K.armDown = 0.05; T.frame(4);
+        ok(broke && reeled && noGuard && lost >= K.maxHp * ARM.BREAK && mid && mid.on1 !== whole.on1 && whole.frac1 === '#1a161e' && mid.frac1 !== whole.frac1 && K.arm === ARM.BACK, `its arm wears (plates ${whole.on1} to ${mid && mid.on1}, fractures ${whole.frac1} to ${mid && mid.frac1}) and breaks after ${hits} blows (${lost} damage): it reels (${reeled}), can't guard (${noGuard}) and re-forms at ${K.arm}`);
+      }
       // baited into guarding at full heat, a blow on the arm sets it off in its face: big damage and the stun
       K = krag(0, -3); K.heat = HEAT.MAX; K.raiseGuard(9, 'stagger'); T.frame(upF());
       const outl = K.outline();
@@ -1177,29 +1203,35 @@ async function run(browser, file, errors) {
       };
       const coldG = beamGuard(20), hotG = beamGuard(HEAT.MAX);
       ok(coldG && !hotG, `from range it guards against a sword beam charging (${coldG}); at full heat it doesn't for a part charge (${hotG})`);
-      // the Molten Fist: it tracks you until its visor flashes, then holds the line. Standing in front, a parry does
-      // nothing: it hits hard and dazes you. Running out sideways after the flash doesn't clear it; a dash does.
-      const fist = (after) => {
-        const k = krag(0, -6); k.heat = HEAT.MAX;
+      // The Molten Fist: it tracks you for the first half of its wind-up, then holds its line. Its cone splits
+      // open into a molten chasm: in front, a parry does nothing; far off, running and dashing sideways from the
+      // lock doesn't get you out; close in, it does, and so does getting behind it. Vents erupt in the chasm after.
+      const fist = (dz, after) => {
+        const k = krag(0, dz); k.heat = HEAT.MAX;
         k.startPunch(p, false);
         for (let i = 0; i < 60 * 4 && k.act && !k.act.locked; i++) T.frame(1);
         const lockY = k.yaw;
         after(k);
         let turned = 0;
         for (let i = 0; i < 60 * 3 && k.act && k.act.kind === 'punch' && k.act.phase !== 'vent'; i++) { T.frame(1); if (k.act && k.act.phase === 'wind') turned = Math.max(turned, Math.abs(angDiff(lockY, k.yaw))); }
-        k.waveSeen = Game.hazards.some((h) => h.kind === 'fistwave') && KragViews.cracks.some((q) => q.kind === 'line');
+        T.frame(30);
         for (const c of ['KeyE', 'KeyD', 'ShiftLeft']) T.release(c);
-        T.frame(2);
-        return { hurt: PC.MAX_HP - p.hp, daze: p.dazeT, turned, wave: !!k.waveSeen };
+        const ch = Game.hazards.find((h) => h.kind === 'chasm'), daze = p.dazeT, hurt = PC.MAX_HP - p.hp;
+        let vents = 0;
+        if (ch) for (let i = 0; i < 90; i++) { T.frame(1); vents = Math.max(vents, Game.hazards.filter((h) => h.kind === 'vent' && ch.inCone(h.pos)).length); }
+        return { hurt, daze, turned, chasm: !!ch, vents };
       };
-      const fParry = fist(() => T.press('KeyE'));
-      const fRun = fist((k) => { Camera.yaw = yawOf(k.pos.x - p.pos.x, k.pos.z - p.pos.z); T.press('KeyD'); });
-      const fDash = fist((k) => { Camera.yaw = yawOf(k.pos.x - p.pos.x, k.pos.z - p.pos.z); T.press('KeyD'); T.tap('ShiftLeft'); });
-      ok(fParry.hurt >= 45 && fParry.daze > 0.8 && fParry.wave && fRun.hurt > 0 && fDash.hurt === 0 && fParry.turned < 0.01, `the Molten Fist goes through a parry (${fParry.hurt} damage, dazed ${fParry.daze.toFixed(2)} s, its blast rolling on down the split street ${fParry.wave}) and holds its line once it flashes; running out sideways after the flash doesn't clear it (${fRun.hurt}), a dash does (${fDash.hurt})`);
+      const sideways = (k) => { Camera.yaw = yawOf(k.pos.x - p.pos.x, k.pos.z - p.pos.z); T.press('KeyD'); T.frame(4); T.tap('ShiftLeft'); };
+      const fParry = fist(-6, () => T.press('KeyE'));
+      const fFar = fist(-18, sideways);
+      const fClose = fist(-4, sideways);
+      const fBehind = fist(-5, (k) => { const f = k.fwd(); p.pos.x = p.prev.x = k.pos.x - f.x * 3; p.pos.z = p.prev.z = k.pos.z - f.z * 3; });
+      ok(fParry.hurt >= 45 && fParry.daze > 0.8 && fParry.chasm && fParry.vents >= 2 && fFar.hurt > 0 && fClose.hurt === 0 && fBehind.hurt === 0 && fParry.turned < 0.01, `the Molten Fist splits a molten chasm across its cone: through a parry (${fParry.hurt} damage, dazed ${fParry.daze.toFixed(2)} s, ${fParry.vents} vents erupting in it after), it holds its line once locked, and from 18 m running and dashing sideways doesn't get you out (${fFar.hurt}); from 4 m it does (${fClose.hurt}), and so does getting behind it (${fBehind.hurt})`);
       // dazed, nothing you press does anything
       {
         const k = krag(0, -6); k.heat = HEAT.MAX; k.startPunch(p, false);
         for (let i = 0; i < 60 * 4 && k.act && k.act.kind === 'punch' && k.act.phase !== 'vent'; i++) T.frame(1);
+        for (let i = 0; i < 60 && p.dazeT <= 0; i++) T.frame(1);
         // thrown clear, it lands and settles while still dazed
         for (let i = 0; i < 60 * 1.5 && !(p.onGround && Controller.hspeed(p) < 1.5); i++) T.frame(1);
         const dz0 = p.dazeT, at0 = { x: p.pos.x, z: p.pos.z };

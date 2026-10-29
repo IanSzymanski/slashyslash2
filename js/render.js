@@ -449,7 +449,7 @@ const Render = {
   },
   // ---------- the bosses ----------
   // Its health along the bottom of the screen: the rival's with the half-health mark of phase 1 and its shield,
-  // KRAG's in orange with its heat in a strip underneath that pulses once it's full.
+  // KRAG's in orange (its heat and its arm show only on its body).
   drawBossBar(ctx, b, t) {
     const w = 220, x = Math.round(VIEW_W / 2 - w / 2), y = VIEW_H - 18;
     drawText(ctx, b.name, x, y - 9, { color: b.barName || '#bfd4ff' });
@@ -464,12 +464,6 @@ const Render = {
       ctx.fillStyle = '#9cc4ff';
       for (let i = 0; i < w; i += 2) if (((i + ((t * 20) | 0)) >> 1) % 3) ctx.fillRect(x + i, y, 1, 4);
       ctx.globalAlpha = 1;
-    }
-    if (b.heatK) {
-      const h = b.heatK(), full = h >= 1, fl = ((t * 8) | 0) % 2;
-      ctx.fillStyle = '#0b0910'; ctx.fillRect(x - 1, y + 5, w + 2, 3);
-      ctx.fillStyle = '#2a120a'; ctx.fillRect(x, y + 6, w, 1);
-      ctx.fillStyle = full ? (fl ? '#fff0c8' : '#ff8a2a') : b.ventT > 0 ? '#5a2a1a' : '#ff6a1a'; ctx.fillRect(x, y + 6, Math.round(w * h), 1);
     }
   },
   // Its riposte (gold) or red flash (red) in bullet time: a reticle on its eye closes as the flash nears.

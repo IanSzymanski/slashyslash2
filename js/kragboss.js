@@ -1,9 +1,13 @@
 'use strict';
 // KRAG, the Molten Fist: a hulking cyborg brawler (its body is in krag.js). Violent, rough and brutal, and
 // unrelenting: it always presses in and fights with everything it has, fists, knees and feet.
-//   Heat. It runs hot: exertion, pain, landing blows and above all blows it blocks build heat, shown on the
-//   body (seams glowing from dull red to white, steam, embers, the mohawk of flame growing). At full heat the
-//   mohawk tears up off its head with an orange pulse, and it can throw the Molten Fist.
+//   Heat. It runs hot: fighting, throwing blows and above all landing them builds heat (blows on its guard add
+//   none), shown only on the body (seams glowing from dull red to white, steam, embers, the mohawk of flame
+//   growing). At full heat the mohawk tears up off its head with an orange pulse, and it can throw the Molten
+//   Fist. The onyx arm's durability is its own thing, worn down by blows on its guard and shown only on the arm
+//   and in how a blow on it sounds: the plates go ashen, fractures split and glow through them, it smokes and
+//   sheds chips, and the solid clang of a blocked blow turns to cracking and then splintering. Break it and the
+//   guard shatters: it reels, can't guard for a while, and the arm re-forms in molten seams.
 //   Combos. Fast strings of jabs, hooks, elbows, knees and kicks that drive straight through a parry: you take
 //   no damage but you're shoved back, it isn't staggered, and you get no counter. Dodging leads it on. Each
 //   string ends on a stopper (a haymaker, an uppercut, a hammer fist, a spinning backfist, a flying knee) with a
@@ -12,15 +16,17 @@
 //   It stays on you through a string: it turns with you, steps in after you and lunges into each blow.
 //   The block. It only guards when you're a threat: at range (a charging sword beam, gunfire, AEGIS's beam) or
 //   right after you've staggered it. A blue flash comes off the arm first; then the onyx arm is up and takes
-//   blows from the front for a fraction of
-//   their damage, and every blow it blocks builds heat. Fill it to full heat while it guards and it drops the
-//   guard straight into the Molten Fist. It knows a charged arm is a liability, so at full heat it only guards
-//   when you bait it: stagger it, or come at it from range with something big. Hit the arm then and all of it
-//   goes off in its face: big damage, a blast that throws it back, and a stun. That's the only stun it has.
-//   The Molten Fist (its red flash): a long wind-up in bullet time with the arm drawn back, a red wedge on the
-//   street along the line it will drive, tracking you until its visor flashes; then it lunges and the fist
-//   explodes along that line. No parry stops it and a dash's protection doesn't save you in front of it: dash
-//   out of the wedge on the flash. It hits for a lot, throws you and leaves you dazed. A miss leaves it venting.
+//   blows from the front for a fraction of their damage, wearing the arm. Reach full heat while it guards and
+//   it drops the guard straight into the Molten Fist. It knows a charged arm is a liability, so at full heat
+//   it only guards when you bait it: stagger it, or come at it from range with something big. Hit the arm then
+//   and all of it goes off in its face: big damage, a blast that throws it back, and a stun. That's the only
+//   stun it has.
+//   The Molten Fist (its red flash): a long wind-up in bullet time with the arm drawn back and a massive red
+//   cone on the street from its feet, tracking you until halfway through, then held. The fist is driven into
+//   the street and the whole cone splits open into a molten chasm, the split racing out to its end: no parry
+//   or dash saves you anywhere in it, and it's too long to outrun. Get out of it sideways (easiest close in,
+//   where it's narrow) or behind it. The chasm erupts in vents for a few seconds after. It hits for a lot,
+//   throws you and leaves you dazed. A miss leaves it venting.
 //   Getting to you: long shoulder charges that end in an explosion, stomps that split glowing cracks in the
 //   street, send a shockwave round and raise molten vents, and from far off a leap that lands on you or its
 //   tether: a chain from the right hand onto a lamp post or a corner that it swings round in a wide circle, off
@@ -36,16 +42,23 @@ const KRAG_STEAM = '#9a9296';
 const KRAG_ORANGE = '#ff7a2a';
 PALETTES.molten = [[255, 248, 220], [255, 190, 80], [255, 96, 24], [120, 24, 6]];
 PAL_LIN.molten = PALETTES.molten.map((c) => c.map(_lin));
-// Heat, 0 to MAX: per second of fighting, per blow it lands on you or that you parry, per stomp, per point of
-// damage it takes; no heat for VENT seconds after it discharges
-const HEAT = { MAX: 100, EXERT: 1.0, LAND: 5, PARRIED: 3, STOMP: 4, PAIN: 0.1, VENT: 3.5 };
+// Heat, 0 to MAX: per second of fighting, per blow it throws, per blow it lands on you or that you parry, per
+// stomp, per point of damage it takes (blows on its guard add none); no heat for VENT seconds after it discharges
+const HEAT = { MAX: 100, EXERT: 2.2, THROW: 1.5, LAND: 10, PARRIED: 6, STOMP: 6, PAIN: 0.08, VENT: 3.5 };
+// The onyx arm's durability, 0 to MAX: worn by blows on its guard (WEAR per point of a blow, at most CAP a
+// blow; less from gunfire and beams), mending MEND a second once it's gone REST seconds without one. Broken, it
+// can't guard for DOWN seconds and re-forms at BACK; the break costs it BREAK of its health.
+const ARM = { MAX: 100, WEAR: 0.9, CAP: 28, MEND: 2.5, REST: 4, DOWN: 8, BACK: 55, BREAK: 0.04 };
 // The block: the share of a blow's damage that gets through, the cosine of its half-width, and the first
 // seconds of a guard after a stagger in which it won't shove you off
 const BLOCK = { MUL: 0.15, COS: 0.34 };
-// The Molten Fist: wind-up (s, before the telegraph setting), its bullet time's speed, the lunge's speed and
-// longest length, the blast's cone (length and half-angle) and its radius round the fist, damage, knock, how
-// long it dazes you, and the vent after it
-const FIST = { WIND: 1.1, BT: 0.65, SPEED: 46, LUNGE: 10, CONE: 17, HALF: 0.68, R: 4.8, DMG: 55, KNOCK: 52, DAZE: 1.5, VENT: 1.8 };
+// The Molten Fist: wind-up (s, before the telegraph setting), its bullet time's speed, how far into the wind-up
+// it stops tracking you, the cone (length and half-angle, from just behind its feet), the radius round the fist
+// that's hit whatever the cone, damage, knock, how long it dazes you, the vent after it, how fast the chasm
+// splits out along the cone, and how high over the street it reaches
+const FIST = { WIND: 1.15, BT: 0.65, LOCK: 0.5, CONE: 26, HALF: 0.86, R: 2.6, DMG: 55, KNOCK: 52, DAZE: 1.5, VENT: 1.9, FRONT: 70, LIFT: 4.5 };
+// the molten chasm it leaves: seconds it lives, the seconds of those it erupts in vents, and vents a second
+const CHASM = { DUR: 6.5, ERUPT: 4.2, RATE: 5 };
 // its arm going off in its face: a share of its health, and the stun
 const DETONATE = { DMG: 0.12, STUN: 3.4 };
 // the shoulder charge, the leap onto you (only from far off) and the tether swing (the radii it tries round the
@@ -99,6 +112,7 @@ class Krag extends Boss {
     this.cds = { combo: 0.6, closer: 0, stomp: 3, charge: 2, jump: 4, swing: 5, punch: 0, guard: 0, leap: 0 };
     this.lastDir = 1; this.dying = false; this.ko = null; this.koT = 0; this.intro = null; this.husk = null; this.tilt = 0;
     this.steamT = 0;
+    this.arm = ARM.MAX; this.armRest = 0; this.armDown = 0; this.reformT = 0; this.armCreak = 2;
   }
   // it waits under the street until it bursts up out of it
   cinematicIntro() {
@@ -120,6 +134,8 @@ class Krag extends Boss {
   showModel() { return !this.spawning || (!!this.intro && this.intro.stage !== 'quake'); }
   charged() { return this.heat >= HEAT.MAX; }
   heatK() { return clamp(this.heat / HEAT.MAX, 0, 1); }
+  // the onyx arm's wear: 0 whole, 1 about to break (1 while broken)
+  wearK() { return this.armDown > 0 ? 1 : clamp(1 - this.arm / ARM.MAX, 0, 1); }
   // 0 at full health, 1 near death; later it recovers faster
   rageK() { return clamp(1 - this.hp / this.maxHp, 0, 1); }
   rageGap() { return lerp(1, 0.65, this.rageK()); }
@@ -157,8 +173,9 @@ class Krag extends Boss {
   // arm runs a step hotter, and white while its charge is up to guard or winding into the Fist. Dark knocked out.
   tints() {
     const P = this._tint || (this._tint = {}), C = KRAG_COL, a = this.act, k = this.heatK();
+    this.armTints(P);
     if (this.dying && this.ko && (this.ko.stage === 'collapse' || this.ko.stage === 'down' || (this.ko.stage === 'kneel' && ((this.t * 10) | 0) % 3 === 0))) {
-      for (const t of ['vein', 'avein', 'visor', 'core', 'toe', 'knuck']) P[t] = C.off;
+      for (const t of ['vein', 'avein', 'visor', 'core', 'toe', 'knuck', 'frac1', 'frac2']) P[t] = C.off;
       return P;
     }
     const ramp = ['#5a1606', '#8a2a0a', '#b8400e', '#e05414', '#ff6a1a', '#ff8a2a', '#ffa840', '#ffc460', '#ffd890'];
@@ -173,6 +190,20 @@ class Krag extends Boss {
     P.core = intro ? C.dim : max ? (flick ? '#ffffff' : '#ffd060') : at(0.55 + 0.45 * k);
     P.toe = intro ? C.dim : at(0.4 + 0.5 * k);
     return P;
+  }
+  // The arm's wear on its plates: glossy onyx going ashen and chalky as it's worn; fractures splitting open,
+  // dull red at first, then orange, then white hot as it's about to go; broken, the plates hang dark with the
+  // fractures smouldering; re-formed, molten seams flare through them as they close.
+  armTints(P) {
+    const w = this.wearK(), broken = this.armDown > 0, q = (k) => Math.round(clamp(k, 0, 1) * 20) / 20;
+    const plate = broken ? 0.85 : q(w * 0.95), ash = broken ? '#3a302e' : '#8a7a70';
+    for (const t in KRAG_ONYX) P[t] = plate > 0 ? mixHex(KRAG_ONYX[t], ash, plate) : KRAG_ONYX[t];
+    const hid = '#1a161e', glow = (k) => (k <= 0 ? hid : k < 0.35 ? mixHex(hid, '#b02a08', q(k / 0.35)) : k < 0.75 ? mixHex('#b02a08', '#ff6a1a', q((k - 0.35) / 0.4)) : mixHex('#ff6a1a', '#ffd890', q((k - 0.75) / 0.25)));
+    const reform = this.reformT > 0 && ((this.t * 16) | 0) % 2;
+    if (broken) { P.frac1 = P.frac2 = ((this.t * 3) | 0) % 2 ? '#5a1a0a' : '#3a1006'; return; }
+    P.frac1 = reform ? '#ffd070' : glow((w - 0.15) / 0.45);
+    P.frac2 = reform ? '#ffd070' : glow((w - 0.5) / 0.4);
+    if (w > 0.85 && ((this.t * 12) | 0) % 3 === 0) { P.frac1 = '#fff0c0'; P.frac2 = '#ffffff'; }
   }
   laser() { return 0; }
   stopLoops() {}
@@ -205,6 +236,8 @@ class Krag extends Boss {
     if (o.ranged) this.rangedHurt += d;
     this.addHeat(d * HEAT.PAIN);
   }
+  // the guard can't come up while the arm is broken
+  canGuard() { return this.armDown <= 0; }
   // Adds heat; true when this takes it to full.
   addHeat(n) {
     if (this.ventT > 0 || this.dying || this.spawning || n <= 0) return false;
@@ -229,34 +262,72 @@ class Krag extends Boss {
     const a = this.act;
     if (!this.stunT && (!a || a.kind === 'recover')) this.act = { kind: 'flare', t: 0 };
   }
-  // A blow on the guard: most of it is stopped and it all goes into the arm as heat. Filled to full on the
-  // guard, it drops it straight into the Molten Fist; already full when it raised it, the arm goes off.
+  // A blow on the guard: most of it is stopped and it wears the arm (no heat). How it lands tells you how worn
+  // the arm is: a solid clang and sparks off whole onyx; cracking, chips and smoke as it wears; splintering,
+  // shards and a white crack of light near the end. At full heat the arm goes off instead.
   blockHit(o, dmg) {
     const a = this.act, p = Game.player;
-    if (a.charged) { this.detonate(o); return; }
+    if (this.charged()) { this.detonate(o); return; }
     const small = o.cause === 'round', beam = o.cause === 'laser';
-    const heat = small ? 1.6 + dmg * 0.15 : beam ? 2 + dmg * 0.3 : clamp(4 + dmg * 0.7, 4, o.heavy ? 36 : 28);
-    const d = Math.max(1, Math.round(dmg * BLOCK.MUL));
+    this.arm = Math.max(0, this.arm - Math.min(ARM.CAP, dmg * ARM.WEAR * (small ? 0.6 : beam ? 0.5 : 1)));
+    this.armRest = 0;
+    const d = Math.max(1, Math.round(dmg * BLOCK.MUL)), w = this.wearK();
     this.hp = Math.max(1, this.hp - d);
     this.hitT = 0.15; a.hitT = 0.15; a.blocked = (a.blocked || 0) + 1;
-    const at = this.fistPos(), u = flat(p.pos.x - this.pos.x, p.pos.z - this.pos.z);
+    const at = this.fistPos(), u = flat(p.pos.x - this.pos.x, p.pos.z - this.pos.z), face = { x: at.x + u.x * 0.4, y: at.y, z: at.z + u.z * 0.4 };
     FX.text(String(d), { x: at.x, y: this.pos.y + this.h + 0.4, z: at.z }, { c: '#a8a0a8' });
     Game.registerHit(d, o.cause);
     if (!small || !this._blkT || Game.time > this._blkT) {
       this._blkT = Game.time + 0.1;
-      FX.sparks({ x: at.x + u.x * 0.4, y: at.y, z: at.z + u.z * 0.4 }, small ? 4 : o.heavy ? 22 : 12, { x: u.x, y: 0.3, z: u.z }, 1.5, 5, 18, KRAG_SPARK);
+      const n = small ? 0.35 : o.heavy ? 1.6 : 1;
+      FX.sparks(face, Math.round((12 - 6 * w) * n), { x: u.x, y: 0.3, z: u.z }, 1.5, 5, 18, KRAG_SPARK);
+      if (w > 0.2) FX.debris(face, Math.round((2 + 10 * w) * n), ['#2e2834', '#1e1a24', '#463c50', '#7a6a62'], 6 + 8 * w);
+      if (w > 0.45) FX.dust(face, Math.round(3 * w * n + 1), { c: '#4a4248', smax: 2, rise: 1.5, life: 1 });
+      if (w > 0.7 && !small) { FX.bolt(this.local(-0.7, 2.2, 0.3), this.local(-0.7, 1.1, 0.5), 0.08, { outer: '#ff8a2a', core: '#ffffff', jag: 0.3, w: 0.05 }); FX.light(at, '#ffd0a0', 4, 6, 0.1); }
       FX.light(at, '#ff8a2a', small ? 1.5 : 4, 6, 0.12);
-      Sound.play('kragBlock', { heavy: !!o.heavy }, at);
+      Sound.play('kragBlock', { heavy: !!o.heavy, wear: w }, at);
       if (!small) { Game.hitstop(0.03); Game.shake(o.heavy ? 0.2 : 0.08); }
     }
     this.vel.x -= u.x * (small ? 0.3 : o.heavy ? 4 : 2); this.vel.z -= u.z * (small ? 0.3 : o.heavy ? 4 : 2);
-    if (this.addHeat(heat)) this.startPunch(p, true);
+    if (this.arm <= 0) this.breakArm();
+  }
+  // The arm gives out: the guard shatters in a burst of onyx shards, it reels open, and the arm hangs broken.
+  breakArm() {
+    const at = this.fistPos(), c = this.chest(), d = Math.round(this.maxHp * ARM.BREAK);
+    this.arm = 0; this.armDown = ARM.DOWN;
+    this.hp = Math.max(1, this.hp - d); this.hitFlash = 0.1;
+    FX.text(String(d), { x: c.x, y: this.pos.y + this.h + 0.6, z: c.z }, { c: '#ffd070', scale: 1.5 });
+    Game.registerHit(d, 'armbreak');
+    FX.debris(at, 40, ['#2e2834', '#1e1a24', '#463c50', '#7a6a62', '#ff7a1a'], 20);
+    FX.sparks(at, 50, null, TAU, 6, 26, KRAG_FIRE);
+    FX.sparks(at, 20, null, TAU, 4, 14, { c0: '#ffffff', c1: '#d0c8d0', c2: '#5a5060' });
+    FX.dust(at, 18, { c: '#3a3036', smax: 6, rise: 2, life: 1.6 });
+    FX.ring(at, 0.3, 5.5, 0.4, { c: '#ffd0a0', flat: false });
+    FX.light(at, '#ffb040', 9, 12, 0.4);
+    FX.flash('#ffe0c0', 0.3);
+    Sound.play('armBreak', {}, at);
+    Game.shake(0.6); Game.hitstop(0.09);
+    this.attack = null; this.lunge = null; this.drive = null;
+    this.act = { kind: 'flinch', t: 0, dur: 0.95, broke: true };
+    const u = flat(this.pos.x - Game.player.pos.x, this.pos.z - Game.player.pos.z);
+    this.vel.x = u.x * 5; this.vel.z = u.z * 5;
+  }
+  // the broken arm re-forms: molten seams run through it and close, and it comes back part worn
+  armReform() {
+    this.armDown = 0; this.arm = ARM.BACK; this.armRest = 0; this.reformT = 0.6;
+    const at = this.fistPos();
+    FX.sparks(at, 24, { x: 0, y: 1, z: 0 }, 1.4, 3, 10, Object.assign({ g: -3, life: 1 }, KRAG_FIRE));
+    FX.dust(at, 8, { c: KRAG_STEAM, smax: 2, rise: 3, life: 1.3 });
+    FX.light(at, '#ffb040', 5, 7, 0.4);
+    Sound.play('armReform', {}, at);
   }
   // The charged arm takes a blow on the guard and all its heat goes off in its face: big damage, a blast that
   // throws it back, and the only stun it has.
   detonate(o) {
     const p = Game.player, at = this.fistPos(), c = this.chest(), f = this.fwd();
     this.heat = 0; this.ventT = HEAT.VENT + 1; this.flared = false; this.pulseT = 0;
+    // the blast cracks the arm too, though it holds
+    this.arm = Math.max(1, this.arm - 35); this.armRest = 0;
     const d = Math.round(this.maxHp * DETONATE.DMG * (Game.has('glass') ? 1.35 : 1));
     this.hp -= d; this.hitFlash = 0.12;
     FX.text(String(d), { x: c.x, y: this.pos.y + this.h + 0.6, z: c.z }, { c: '#ffd070', scale: 2 });
@@ -323,7 +394,10 @@ class Krag extends Boss {
       return;
     }
     for (const k in this.cds) this.cds[k] -= dt * (k === 'leap' ? 1 : S.enemies.aggression);
-    for (const k of ['transT', 'ventT', 'perilFlash', 'hitT']) if (this[k] > 0) this[k] = Math.max(0, this[k] - dt);
+    for (const k of ['transT', 'ventT', 'perilFlash', 'hitT', 'reformT']) if (this[k] > 0) this[k] = Math.max(0, this[k] - dt);
+    // the arm mends when it's left alone, and a broken one re-forms
+    if (this.armDown > 0) { this.armDown -= dt; if (this.armDown <= 0) this.armReform(); }
+    else if ((this.armRest += dt) > ARM.REST) this.arm = Math.min(ARM.MAX, this.arm + ARM.MEND * dt);
     this.rangedHurt = Math.max(0, this.rangedHurt - dt * 14);
     // the Fist's bullet time lasts exactly as long as its wind-up
     const a0 = this.act;
@@ -342,7 +416,20 @@ class Krag extends Boss {
       this.react(p);
     }
     this.heatFX(dt);
+    this.armFX(dt);
     this.physics(dt);
+  }
+  // A worn arm shows it all the time: smoke off it, chips falling, and near the end crackling light and the
+  // creak of stone giving. A broken one hangs smoking, dripping sparks.
+  armFX(dt) {
+    const w = this.wearK(), broken = this.armDown > 0;
+    if (w < 0.3 && !broken) return;
+    const f = this.local(-0.75, rand(1.2, 2.3), rand(-0.1, 0.4));
+    if (Math.random() < (broken ? 0.7 : (w - 0.3) * 0.6)) FX.dust(f, 1, { c: broken ? '#2a2428' : '#5a5258', smax: 0.6, rise: 1.6 + w, life: 1.2 });
+    if ((w > 0.55 || broken) && Math.random() < (broken ? 0.12 : (w - 0.55) * 0.25)) FX.debris(f, 1, ['#2e2834', '#463c50', '#7a6a62'], 2);
+    if (broken && Math.random() < 0.3) FX.sparks(this.fistPos(), 1, { x: 0, y: -1, z: 0 }, 0.6, 1, 3, Object.assign({ life: 0.8 }, KRAG_FIRE));
+    if (!broken && w > 0.75 && Math.random() < (w - 0.75) * 0.4) { const a = this.local(-0.7, rand(1.4, 2.3), 0.3); FX.bolt(a, { x: a.x + rand(-0.4, 0.4), y: a.y - rand(0.2, 0.6), z: a.z + rand(-0.4, 0.4) }, 0.06, { outer: '#ff8a2a', core: '#fff0c0', jag: 0.25, w: 0.035 }); }
+    if (!broken && w > 0.55 && (this.armCreak -= dt) <= 0) { this.armCreak = lerp(3.2, 1.1, (w - 0.55) / 0.45) * rand(0.8, 1.2); Sound.play('armCreak', { wear: w }, this.fistPos()); }
   }
   // steam, embers and sparks off the body by its heat; at full heat an orange pulse every so often
   heatFX(dt) {
@@ -387,7 +474,7 @@ class Krag extends Boss {
     const reach = d < 6.5 && Math.abs(dy) < 2.6 && this.lineClear(p, d);
     if (this.charged()) {
       // full heat: it wants the Fist on you, from a few strides off with a clear line
-      if (this.cds.punch <= 0 && level && d > 2.6 && d < 13 && this.lineClear(p, d)) { this.startPunch(p, false); return; }
+      if (this.cds.punch <= 0 && level && d > 2.6 && d < 20 && this.lineClear(p, d)) { this.startPunch(p, false); return; }
       if (reach && this.cds.combo <= 0) { this.startCombo(true); return; }
     } else if (reach && this.cds.combo <= 0) { this.startCombo(false); return; }
     if (near || this.cds.closer > 0) return;
@@ -426,7 +513,7 @@ class Krag extends Boss {
   // bait it), out of an idle moment, a walk or a recovery.
   react(p) {
     const a = this.act;
-    if ((a && a.kind !== 'recover') || this.cds.guard > 0 || !this.onGround) return;
+    if ((a && a.kind !== 'recover') || this.cds.guard > 0 || !this.onGround || !this.canGuard()) return;
     const th = this.threat(p, distXZ(p.pos, this.pos));
     if (!th) return;
     if (this.charged() && !(th === 'big' && chance(0.7))) { this.cds.guard = 0.8; return; }
@@ -436,7 +523,7 @@ class Krag extends Boss {
   // The guard: a blue flash off the onyx arm as it comes up (blows still land until it's up), then the arm
   // is raised before its face.
   raiseGuard(dur, why) {
-    if (this.stunT > 0 || this.dying) return;
+    if (this.stunT > 0 || this.dying || !this.canGuard()) return false;
     this.attack = null; this.lunge = null; this.drive = null;
     const rise = GUARD_RISE * clamp(S.enemies.telegraph, 0.6, 1.4);
     this.act = { kind: 'guard', t: 0, dur: dur + rise, rise, up: false, why, charged: this.charged(), hitT: 0, closeT: 0, blocked: 0, noShove: (why === 'stagger' ? 0.9 : 0.35) + rise };
@@ -448,6 +535,7 @@ class Krag extends Boss {
     FX.sparks(f, 16, null, TAU, 3, 11, { c0: '#ffffff', c1: '#7ad0ff', c2: '#1a4a9a', g: 0, life: 0.7 });
     FX.light(f, '#3aa8ff', 6, 9, rise);
     Sound.play('kragGuardCue', {}, this.center());
+    return true;
   }
 
   runAct(dt, p) {
@@ -458,7 +546,7 @@ class Krag extends Boss {
       case 'flare': this.face(p.pos, 4); if (a.t > 0.6) this.act = null; return;
       case 'recover': if (a.t > a.dur) this.act = null; return;
       case 'flinch':
-        if (a.t > a.dur) this.raiseGuard(rand(1.4, 1.9), 'stagger');
+        if (a.t > a.dur && !this.raiseGuard(rand(1.4, 1.9), 'stagger')) { this.act = null; this.cds.combo = 0.1; }
         return;
       case 'guard': this.runGuard(dt, a, p); return;
       case 'melee': this.runMelee(dt, a, p); return;
@@ -487,6 +575,12 @@ class Krag extends Boss {
       FX.sparks(f, 10, { x: 0, y: 1, z: 0 }, 1.2, 3, 9, KRAG_SPARK);
       Sound.play('kragGuard', {}, f);
       Game.shake(0.06);
+    }
+    // full heat reached behind the guard: a guard it raised on instinct holds, charged; otherwise it knows the
+    // arm's a liability and drops the guard straight into the Molten Fist
+    if (this.charged() && !a.charged) {
+      if (a.why === 'stagger') a.charged = true;
+      else { this.startPunch(p, true); return; }
     }
     this.face(p.pos, a.up ? 3.2 : 8);
     if (d > 3.2) this.steerTo(p.pos, 2.4);
@@ -612,6 +706,7 @@ class Krag extends Boss {
   }
   beginBlow(a, m, p) {
     a.phase = 'swing'; a.t = 0; a.hit = false; a.quaked = false;
+    this.addHeat(HEAT.THROW);
     const c = this.chest(), pc = p.chest(), d = distXZ(p.pos, this.pos), f = this.fwd();
     const pa = clamp(Math.atan2(pc.y - c.y, Math.max(1.2, d)), -0.5, 0.5);
     a.aim = { x: f.x * Math.cos(pa), y: Math.sin(pa), z: f.z * Math.cos(pa) };
@@ -640,11 +735,11 @@ class Krag extends Boss {
   }
 
   // ---------- the Molten Fist ----------
-  // overflow: its guard just filled it, and it answers at once
+  // overflow: it reached full heat behind its guard, and answers at once
   startPunch(p, overflow) {
     this.attack = null; this.lunge = null; this.drive = null;
     const wind = this.fistWind();
-    this.act = { kind: 'punch', phase: 'wind', t: 0, wind, tx: p.pos.x, tz: p.pos.z, locked: false, lockYaw: this.yawTo(p.pos), overflow: !!overflow, dirV: null };
+    this.act = { kind: 'punch', phase: 'wind', t: 0, wind, lockAt: wind * FIST.LOCK, locked: false, flashed: false, lockYaw: this.yawTo(p.pos), overflow: !!overflow, dirV: null };
     this.yaw = this.faceYaw = this.yawTo(p.pos);
     this.perilFlash = 0.16;
     this.cds.punch = 99;
@@ -652,7 +747,7 @@ class Krag extends Boss {
     Sound.play('peril', { dur: Math.max(0.1, (wind - CUE_LEAD) / FIST.BT) });
     Sound.play('kragCharge', { dur: wind / FIST.BT }, this.chest());
     const g = { x: this.pos.x, y: this.pos.y + 0.06, z: this.pos.z }, c = this.chest();
-    FX.ring(g, 0.5, 10, 0.4, { c: '#ff2a3a' });
+    FX.ring(g, 0.5, 12, 0.45, { c: '#ff2a3a' });
     FX.ring(c, 0.4, 6, 0.35, { c: '#ffd0d4', flat: false });
     FX.sparks(c, 40, { x: 0, y: 1, z: 0 }, 1.2, 6, 22, { c0: '#ffffff', c1: '#ff5a6a', c2: '#781e2a' });
     FX.debris(g, 14, KRAG_STONE, 9);
@@ -662,7 +757,7 @@ class Krag extends Boss {
     KragViews.crack(g, { r: 5.5, red: true, grow: wind * 0.9, life: wind + 3 });
     Game.shake(0.35);
   }
-  // 0..1 through the wind-up, reaching 1 as the visor flashes (the HUD's cue reads it)
+  // 0..1 through the wind-up, reaching 1 as its visor flashes white just before the blow (the HUD's cue reads it)
   cueProgress() {
     const a = this.act;
     if (!a || a.kind !== 'punch' || a.phase !== 'wind') return 1;
@@ -670,21 +765,28 @@ class Krag extends Boss {
   }
   runPunch(dt, a, p) {
     if (a.phase === 'wind') {
-      const lockAt = a.wind - CUE_LEAD, fist = this.fistPos(), k = clamp(a.t / Math.max(0.05, lockAt), 0, 1);
-      // it tracks you until its visor flashes, then holds that line to the end
-      if (a.t < lockAt) { this.face(p.pos, 6); a.tx = p.pos.x; a.tz = p.pos.z; a.lockYaw = this.faceYaw; }
+      const fist = this.fistPos(), k = clamp(a.t / Math.max(0.05, a.wind - CUE_LEAD), 0, 1);
+      // it tracks you for the first half of the wind-up, then holds that line: the red flash off its visor
+      if (a.t < a.lockAt) { this.face(p.pos, 6); a.lockYaw = this.faceYaw; }
       else {
         if (!a.locked) {
           a.locked = true;
-          this.yaw = this.faceYaw = a.lockYaw = yawOf(a.tx - this.pos.x, a.tz - this.pos.z);
+          this.yaw = this.faceYaw = a.lockYaw;
           this.eyeGlint('#ff2a3a', 3);
-          FX.ring(this.visorPos(), 0.3, 4, 0.25, { c: '#ffffff', flat: false });
-          FX.light(fist, '#ffffff', 8, 12, 0.25);
+          FX.ring(this.visorPos(), 0.3, 4, 0.25, { c: '#ff8a8a', flat: false });
+          FX.ring({ x: this.pos.x, y: this.pos.y + 0.07, z: this.pos.z }, 0.5, 8, 0.3, { c: '#ff2a3a' });
           FX.flash('#ff2a3a', 0.16);
-          Sound.play('glint', {}, this.chest());
+          Sound.play('kragLock', {}, this.chest());
           Game.shake(0.3);
         }
         this.yaw = this.faceYaw = a.lockYaw;
+      }
+      // and just before the blow its visor flashes white
+      if (!a.flashed && a.t >= a.wind - CUE_LEAD) {
+        a.flashed = true;
+        this.eyeGlint('#ffffff', 3);
+        FX.light(fist, '#ffffff', 8, 12, 0.25);
+        Sound.play('glint', {}, this.chest());
       }
       // red energy and fire stream into the drawn-back fist
       for (let i = 0; i < 3; i++) {
@@ -700,79 +802,49 @@ class Krag extends Boss {
       if (Math.random() < 0.4) { const ang = rand(0, TAU), R = rand(0.8, 4.5); FX.sparks({ x: this.pos.x + Math.cos(ang) * R, y: this.pos.y + 0.05, z: this.pos.z + Math.sin(ang) * R }, 1, { x: 0, y: 1, z: 0 }, 0.4, 2, 6, { c0: '#ffffff', c1: '#ff4a3a', c2: '#781e1a', g: -2, life: 0.9 }); }
       if (Math.random() < 0.6) Game.shake(0.05 + 0.1 * k);
       if (a.t >= a.wind) {
-        a.phase = 'lunge'; a.t = 0;
+        // a short heavy step in as the fist comes down into the street
+        a.phase = 'strike'; a.t = 0;
         if (Game.btOwner === this) Game.endBulletTime();
-        const f = this.fwd(), d = Math.hypot(a.tx - this.pos.x, a.tz - this.pos.z);
-        const L = Math.min(clamp(d - 1.4, 0, FIST.LUNGE), this.legRoom(f, FIST.LUNGE));
+        const f = this.fwd();
         a.dirV = { x: f.x, y: 0, z: f.z };
-        const V = FIST.SPEED;
-        this.drive = { vx: f.x * V, vz: f.z * V, vy: 0, t: 0, dur: Math.max(0.03, L / V), g: 0 };
-        a.from = { x: this.pos.x, y: this.pos.y, z: this.pos.z };
-        a.gouge = FX.decal('gouge', this.pos, { w: 1.1, len: 0.4, yaw: this.yaw, dur: 10 });
-        Sound.play('kragLaunch', {}, this.center());
-        this.burst(this.local(0, 0.3, -0.3), 0.6);
+        const L = Math.min(1.2, this.legRoom(f, 1.2));
+        this.lunge = { t: 0, dur: 0.08, vx: f.x * (2 * L / 0.08), vz: f.z * (2 * L / 0.08) };
+        Sound.play('kragSwing', { heavy: true }, this.center());
       }
       return;
     }
-    if (a.phase === 'lunge') {
-      // its feet tear the street the length of the lunge, until the fist meets you or the lunge runs out
-      if (a.gouge) FX.stretchDecal(a.gouge, a.from, this.pos);
-      FX.sparks(this.local(rand(-0.4, 0.4), rand(0.2, 2), -0.4), 3, { x: -a.dirV.x, y: 0.2, z: -a.dirV.z }, 0.5, 3, 10, Object.assign({ life: 0.8 }, KRAG_FIRE));
-      const fp = this.local(-0.2, 1.7, 1.4), pc = p.chest();
-      if (!this.drive || (!p.dead && dist3(fp, pc) < 1.4)) { this.drive = null; this.fistBlast(a, p); }
+    if (a.phase === 'strike') {
+      if (a.t >= 0.07) this.fistBlast(a, p);
       return;
     }
     // venting after it: the arm smokes, the rest of it heaves
     if (Math.random() < 0.6) FX.dust(this.fistPos(), 1, { c: KRAG_STEAM, smax: 1, rise: 2.6, life: 1.2 });
     if (a.t >= FIST.VENT * this.rageGap()) { this.act = null; this.cds.combo = 0.3; this.cds.punch = 1.5; }
   }
-  // Where the Fist goes off: a cone along its locked line and a ball round the fist.
-  fistZone(p) {
-    const f = this.act && this.act.dirV ? this.act.dirV : this.fwd(), c = this.chest(), pc = p.chest();
-    const fist = { x: this.pos.x + f.x * 1.5, y: c.y - 0.3, z: this.pos.z + f.z * 1.5 };
-    if (dist3(fist, pc) < FIST.R) return true;
-    if (Math.abs(pc.y - c.y) > 3.2) return false;
-    const ox = this.pos.x - f.x * 0.5, oz = this.pos.z - f.z * 0.5, rx = pc.x - ox, rz = pc.z - oz;
-    const along = rx * f.x + rz * f.z, side = Math.abs(rx * -f.z + rz * f.x);
-    return along > 0 && along < FIST.CONE && Math.atan2(side, along) < FIST.HALF;
-  }
+  // the cone's apex, just behind its feet, along its line
+  fistApex(f) { return { x: this.pos.x - f.x * 0.6, y: this.pos.y, z: this.pos.z - f.z * 0.6 }; }
+  // The fist goes into the street and the whole cone splits open into a molten chasm (MoltenChasm does the
+  // rest: the split racing out, the hit, the vents after).
   fistBlast(a, p) {
     a.phase = 'vent'; a.t = 0;
-    const f = a.dirV || this.fwd(), c = this.chest(), fist = { x: this.pos.x + f.x * 1.5, y: c.y - 0.3, z: this.pos.z + f.z * 1.5 };
+    const f = a.dirV || this.fwd(), g = { x: this.pos.x + f.x * 1.6, y: this.pos.y, z: this.pos.z + f.z * 1.6 }, fist = { x: g.x, y: g.y + 0.5, z: g.z };
     this.heat = 0; this.ventT = HEAT.VENT; this.flared = false;
-    let landed = false;
-    if (!p.dead && this.fistZone(p)) {
-      landed = p.takeHit({ dmg: FIST.DMG * this.dmgMul, from: c, kind: 'melee', source: this, knock: FIST.KNOCK, unparryable: true, pierce: true, through: true, daze: FIST.DAZE }) === 'hit';
-      if (landed) {
-        p.vel.y = Math.max(p.vel.y, 18); p.onGround = false;
-        FX.sparks(p.chest(), 40, { x: f.x, y: 0.3, z: f.z }, 1.6, 11, 42, KRAG_FIRE);
-        FX.flash('#ff3010', 0.6);
-        Game.hitstop(0.18);
-        Game.slowmo(0.3, 0.45, true);
-      }
-    } else if (!p.dead && distXZ(p.pos, this.pos) < FIST.CONE) p.perilDodge(this);
-    // the blast: a fireball off the fist, the street split open down the wedge and a run of explosions along it
-    const g = { x: fist.x, y: this.pos.y, z: fist.z };
-    KragViews.fireball(fist, 5.5, 0.6);
-    KragViews.fireball({ x: fist.x + f.x * 2.5, y: fist.y + 0.4, z: fist.z + f.z * 2.5 }, 3.8, 0.5);
-    FX.ring(fist, 0.4, 10, 0.5, { c: '#ffb040', flat: false });
-    FX.ring({ x: g.x, y: g.y + 0.06, z: g.z }, 0.5, 13, 0.55, { c: '#ff2a3a' });
-    FX.ring({ x: g.x, y: g.y + 0.07, z: g.z }, 0.3, 6.5, 0.35, { c: '#ffffff' });
-    FX.sparks(fist, 90, { x: f.x, y: 0.2, z: f.z }, 1.1, 12, 46, KRAG_FIRE);
+    Game.hazards.push(new MoltenChasm(this, this.fistApex(f), f, g));
+    KragViews.fireball(fist, 5, 0.55);
+    FX.ring({ x: g.x, y: g.y + 0.06, z: g.z }, 0.5, 14, 0.55, { c: '#ff2a3a' });
+    FX.ring({ x: g.x, y: g.y + 0.07, z: g.z }, 0.3, 7, 0.35, { c: '#ffffff' });
+    FX.ring(fist, 0.4, 9, 0.45, { c: '#ffb040', flat: false });
+    FX.sparks(fist, 70, { x: f.x, y: 0.5, z: f.z }, 1.2, 10, 40, KRAG_FIRE);
     FX.sparks(fist, 40, null, TAU, 6, 22, KRAG_FIRE);
     FX.embers(fist, 40);
-    FX.debris(fist, 30, KRAG_STONE, 22);
+    FX.debris(fist, 34, KRAG_STONE, 22);
     FX.dust(fist, 26, { c: '#2a2026', smax: 10, rise: 2, life: 1.8 });
     FX.decal('scorch', g, { r: 3.4, dur: 14 });
-    FX.decal('crack', g, { len: 6, dur: 12 });
-    KragViews.crack(g, { r: 6, life: 10 });
-    KragViews.crack({ x: this.pos.x + f.x * 1.2, y: this.pos.y, z: this.pos.z + f.z * 1.2 }, { kind: 'line', yaw: yawOf(f.x, f.z), len: FIST.CONE, w: 9, life: 11, grow: 0.32 });
     FX.light(fist, '#ffa040', 14, 26, 0.6);
-    FX.flash('#ffb070', 0.4);
+    FX.flash('#ffb070', 0.45);
     Props.blast(fist, 5);
-    Game.hazards.push(new FistWave(this, f, g));
     Sound.play('kragPunch', {}, fist);
-    Game.shake(landed ? 1 : 0.9); Game.hitstop(landed ? 0 : 0.06);
+    Game.shake(1); Game.hitstop(0.06);
   }
 
   // ---------- getting to you ----------
@@ -1374,7 +1446,7 @@ class Krag extends Boss {
     const p = Game.player, u = flat(this.pos.x - p.pos.x, this.pos.z - p.pos.z);
     this.yaw = this.faceYaw = this.yawTo(p.pos);
     this.vel.x = u.x * 8; this.vel.z = u.z * 8; this.vel.y = 7; this.onGround = false;
-    for (const h of Game.hazards) if (h.kind === 'vent' && h.owner === this) h.dead = true;
+    for (const h of Game.hazards) if ((h.kind === 'vent' || h.kind === 'chasm') && h.owner === this) h.dead = true;
     const c = this.chest(), dir = o.dir || { x: u.x, y: 0.3, z: u.z };
     FX.texts = FX.texts.filter((q) => Math.hypot(q.x - this.pos.x, q.z - this.pos.z) > 5);
     const px = -dir.z, pz = dir.x, pl = Math.hypot(px, pz) || 1;
@@ -1479,36 +1551,76 @@ class Krag extends Boss {
   }
 }
 
-// The Molten Fist's blast rolling on down the street along its wedge: a run of explosions out to the cone's
-// end, each throwing fire and grit up out of the split street. It only shows; the blow is the blast's own.
-class FistWave {
-  constructor(owner, f, at) {
-    this.kind = 'fistwave'; this.owner = owner; this.f = { x: f.x, z: f.z }; this.o = { x: at.x, y: at.y, z: at.z };
-    this.t = 0; this.s = 1.2; this.n = 0; this.dead = false; this.boomed = false;
+// The Molten Fist's chasm: the street split open across the whole cone in front of KRAG. The split races out
+// from the fist to the cone's end, throwing fire, stone and lamps up as it goes, and hits anyone in the cone
+// on the street (or jumping off it) as it reaches them: no parry, no dash, and no outrunning it. Then the
+// chasm's floor erupts in vents for a few seconds before it cools and closes.
+class MoltenChasm {
+  constructor(owner, apex, f, fist) {
+    this.kind = 'chasm'; this.owner = owner; this.o = { x: apex.x, y: apex.y, z: apex.z }; this.f = { x: f.x, z: f.z }; this.yaw = yawOf(f.x, f.z);
+    this.fist = { x: fist.x, z: fist.z };
+    this.t = 0; this.front = 0; this.s = 1; this.n = 0; this.ventT = 0.4; this.hit = false; this.dodged = false; this.dead = false;
   }
+  // along the cone and how far off its middle line q is
+  local(q) { const rx = q.x - this.o.x, rz = q.z - this.o.z, F = this.f; return { along: rx * F.x + rz * F.z, side: rx * -F.z + rz * F.x }; }
+  inCone(q, pad = 0) {
+    const L = this.local(q);
+    if (L.along < -0.6 || L.along > FIST.CONE + pad) return false;
+    return Math.abs(L.side) < Math.tan(FIST.HALF) * Math.max(0, L.along) + 0.9 + pad || distXZ(q, this.fist) < FIST.R + pad;
+  }
+  // a point in the cone: s along it, u across it (-1 to 1)
+  at(s, u) { const w = Math.tan(FIST.HALF) * s * u, F = this.f; return { x: this.o.x + F.x * s - F.z * w, y: this.o.y, z: this.o.z + F.z * s + F.x * w }; }
   update(dt) {
     this.t += dt;
-    const reach = Math.min(FIST.CONE, 1.2 + this.t * 50), F = this.f;
-    while (this.s < reach) {
-      const s = this.s, w = Math.tan(FIST.HALF) * s * 0.75, n = s < 5 ? 1 : 2;
+    const P = Game.player, K = this.owner, o = this.o;
+    this.front = Math.min(FIST.CONE, this.front + FIST.FRONT * dt);
+    // the hit: the split reaching you, on its street or over it (a jump doesn't clear the fire)
+    if (!this.hit && !P.dead && K && !K.dead) {
+      const L = this.local(P.pos), level = P.pos.y > o.y - 3 && P.pos.y < o.y + FIST.LIFT;
+      if (level && this.inCone(P.pos) && L.along <= this.front + 0.6) {
+        this.hit = true;
+        const from = { x: P.pos.x - this.f.x * 2, y: o.y + 0.4, z: P.pos.z - this.f.z * 2 };
+        const res = P.takeHit({ dmg: FIST.DMG * K.dmgMul, from, kind: 'melee', source: K, knock: FIST.KNOCK, unparryable: true, pierce: true, through: true, daze: FIST.DAZE });
+        if (res === 'hit') {
+          P.vel.y = Math.max(P.vel.y, 18); P.onGround = false;
+          FX.sparks(P.chest(), 40, { x: this.f.x, y: 0.6, z: this.f.z }, 1.6, 11, 42, KRAG_FIRE);
+          FX.flash('#ff3010', 0.6);
+          Game.hitstop(0.18); Game.slowmo(0.3, 0.45, true);
+        }
+      } else if (!this.dodged && this.front >= FIST.CONE && distXZ(P.pos, o) < FIST.CONE + 4) { this.dodged = true; P.perilDodge(K); }
+    }
+    // the split racing out: fire and stone thrown up right across the cone, lamps in it torn down
+    while (this.s < this.front) {
+      const s = this.s, n = Math.max(1, Math.round((Math.tan(FIST.HALF) * s * 2) / 4.5));
       for (let i = 0; i < n; i++) {
-        const side = n === 1 ? 0 : (i ? 1 : -1) * rand(0.25, 1) * w, x = this.o.x + F.x * s - F.z * side, z = this.o.z + F.z * s + F.x * side;
-        const y = World.groundAt(x, z, this.o.y + 1.5);
-        if (y === -Infinity || Math.abs(y - this.o.y) > 1.5) continue;
-        const q = { x, y, z };
-        FX.sparks({ x, y: y + 0.3, z }, 9, { x: F.x * 0.5, y: 1, z: F.z * 0.5 }, 0.7, 6, 18, Object.assign({ life: 1 }, KRAG_FIRE));
-        FX.dust(q, 3, { c: '#2a2026', smax: 4, rise: 2.4, life: 1.4 });
-        if (Math.random() < 0.5) FX.debris(q, 3, KRAG_STONE, 13);
-        if (this.n++ % 3 === 1) { KragViews.fireball({ x, y: y + 0.9, z }, rand(1.8, 2.8), 0.42); FX.light({ x, y: y + 1, z }, '#ff8a2a', 5, 9, 0.3); }
+        const q = this.at(s, n === 1 ? 0 : lerp(-0.92, 0.92, (i + rand(0.2, 0.8)) / n)), y = World.groundAt(q.x, q.z, o.y + 1.5);
+        if (y === -Infinity || Math.abs(y - o.y) > 1.5) continue;
+        q.y = y;
+        FX.sparks({ x: q.x, y: y + 0.3, z: q.z }, 6, { x: this.f.x * 0.4, y: 1, z: this.f.z * 0.4 }, 0.6, 6, 20, Object.assign({ life: 1.1 }, KRAG_FIRE));
+        if (Math.random() < 0.5) FX.dust(q, 2, { c: '#2a2026', smax: 4, rise: 2.6, life: 1.4 });
+        if (Math.random() < 0.4) FX.debris(q, 2, KRAG_STONE, 14);
+        if (this.n++ % 4 === 1) { KragViews.fireball({ x: q.x, y: y + 0.9, z: q.z }, rand(1.8, 2.8), 0.42); FX.light({ x: q.x, y: y + 1, z: q.z }, '#ff8a2a', 5, 9, 0.3); }
+        if (this.n % 3 === 0) KragViews.crack(q, { r: rand(2.2, 3.6), life: CHASM.DUR + 1, grow: 0.12 });
       }
-      this.s += 1.6;
+      for (const L of Props.standing()) { const l = this.local(L); if (l.along >= s - 2 && l.along < s && this.inCone(L) && Math.abs(L.y0 - o.y) < 1.5) Props.cut(L, L.y0 + 0.8, this.f); }
+      this.s += 2;
     }
-    if (!this.boomed && reach >= FIST.CONE * 0.6) {
+    if (this.front >= FIST.CONE && !this.boomed) {
       this.boomed = true;
-      Sound.play('kragRumble', {}, { x: this.o.x + F.x * FIST.CONE * 0.6, y: this.o.y, z: this.o.z + F.z * FIST.CONE * 0.6 });
-      Game.shake(0.3);
+      Sound.play('kragRumble', {}, this.at(FIST.CONE * 0.6, 0));
+      Game.shake(0.35);
     }
-    if (reach >= FIST.CONE) this.dead = true;
+    // its floor erupting: vents up through the chasm, never right under you while you're dazed
+    if (this.front >= FIST.CONE && this.t < CHASM.ERUPT && K && !K.dead && !K.dying && (this.ventT -= dt) <= 0) {
+      this.ventT = (1 / CHASM.RATE) * rand(0.7, 1.3);
+      for (let tries = 0; tries < 4; tries++) {
+        const q = this.at(rand(3, FIST.CONE - 1), rand(-0.9, 0.9));
+        if (P.dazeT > 0 && distXZ(q, P.pos) < 3.5) continue;
+        K.spawnVent(q, VENT.TELL);
+        break;
+      }
+    }
+    if (this.t >= CHASM.DUR) this.dead = true;
   }
 }
 

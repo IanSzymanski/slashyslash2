@@ -6,7 +6,7 @@ const Sound = (() => {
   let comp, master, lowpass, sfxBus, musicBus, reverbIn, noiseBuf, crackleBuf;
   let focusMute = 1;
   const last = {};
-  const GAP = { aegisGun: 0.03, probePulse: 0.08, dryFire: 0.1, hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08, scrape: 0.12, grab: 0.1, kragStep: 0.12, molten: 0.06, kragBlock: 0.04, kragStomp: 0.05, kragGrunt: 0.08, kragHit: 0.05, chainWhoosh: 0.15, kragSwing: 0.06 };
+  const GAP = { aegisGun: 0.03, probePulse: 0.08, dryFire: 0.1, hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08, scrape: 0.12, grab: 0.1, kragStep: 0.12, molten: 0.06, kragBlock: 0.04, kragStomp: 0.05, kragGrunt: 0.08, kragHit: 0.05, chainWhoosh: 0.15, kragSwing: 0.06, armCreak: 0.5 };
 
   function makeNoise(sec) {
     const n = (ac.sampleRate * sec) | 0, b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0);
@@ -776,13 +776,46 @@ const Sound = (() => {
       tone({ type: 'sine', f0: 140, f1: 34, dur: 0.6, vol: 0.85 });
       crackle(1.0, 0.5, { f: 900 });
     },
-    // a blow meeting the onyx arm: stone and metal
+    // A blow meeting the onyx arm, telling you how worn it is: whole, a deep solid clang with a ring to it; worn,
+    // the ring dies, the clang goes dull and stone cracks under it; nearly gone, a dry splintering crunch and the
+    // snap of plates giving.
     kragBlock(p) {
-      const h = p.heavy ? 1.4 : 1;
-      tone({ type: 'triangle', f0: 420, f1: 260, dur: 0.14, vol: 0.08 * h });
-      tone({ type: 'square', f0: 1250, f1: 900, dur: 0.05, vol: 0.03 * h });
-      noise({ dur: 0.14, vol: 0.36 * h, f0: 900, q: 1.2 });
-      tone({ type: 'sine', f0: 100, f1: 44, dur: 0.2 * h, vol: 0.55 * h });
+      const h = p.heavy ? 1.4 : 1, w = clamp(p.wear || 0, 0, 1), solid = 1 - w;
+      tone({ type: 'sine', f0: 100 + 40 * w, f1: 44 + 30 * w, dur: 0.2 * h, vol: (0.55 - 0.25 * w) * h });
+      tone({ type: 'triangle', f0: 420, f1: 260, dur: 0.14 + 0.25 * solid, vol: 0.08 * h * solid, rev: 0.4 * solid });
+      tone({ type: 'square', f0: 1250, f1: 900, dur: 0.05 + 0.2 * solid, vol: 0.03 * h * solid });
+      noise({ dur: 0.14, vol: 0.36 * h, f0: 900 + 1400 * w, q: 1.2 });
+      if (w > 0.25) crackle(0.12 + 0.25 * w, 0.2 + 0.45 * w, { f: 900 + 1500 * w });
+      if (w > 0.55) { noise({ dur: 0.18, vol: 0.4 * w, type: 'highpass', f0: 3200, delay: 0.02 }); tone({ type: 'sawtooth', f0: 320, f1: 110, dur: 0.18, vol: 0.05 * w, delay: 0.03 }); }
+    },
+    // a worn arm creaking on its own: stone grinding and a dry crack, sharper the worse it is
+    armCreak(p) {
+      const w = clamp(p.wear || 0.6, 0, 1);
+      tone({ type: 'sawtooth', f0: 140 + 120 * w, f1: 70, dur: 0.3, vol: 0.04 });
+      crackle(0.25 + 0.2 * w, 0.18 + 0.25 * w, { f: 1400 + 1200 * w });
+      noise({ dur: 0.08, vol: 0.18 * w, type: 'highpass', f0: 3500, delay: 0.12 });
+    },
+    // the arm giving out: plates splitting with a crack like a shot, shards scattering, a deep thump under it
+    armBreak() {
+      noise({ dur: 0.1, vol: 0.8, type: 'highpass', f0: 2500 });
+      tone({ type: 'square', f0: 1600, f1: 200, dur: 0.12, vol: 0.06 });
+      tone({ type: 'sine', f0: 140, f1: 30, dur: 0.7, vol: 0.9 });
+      noise({ dur: 0.8, vol: 0.6, type: 'lowpass', f0: 3000, f1: 150, rev: 0.5 });
+      for (let i = 0; i < 9; i++) tone({ type: 'triangle', f0: 1800 + Math.random() * 1600, dur: 0.03, vol: 0.04, delay: 0.08 + i * 0.05 + Math.random() * 0.03 });
+      crackle(0.7, 0.55, { f: 1800 });
+    },
+    // the broken arm re-forming: molten stone hissing into the cracks and a heavy clank as the plates seat
+    armReform() {
+      noise({ dur: 0.7, vol: 0.3, type: 'highpass', f0: 2500, a: 0.1 });
+      crackle(0.6, 0.35, { f: 700 });
+      tone({ type: 'sine', f0: 110, f1: 60, dur: 0.3, vol: 0.5, delay: 0.5 });
+      tone({ type: 'triangle', f0: 520, f1: 400, dur: 0.3, vol: 0.06, delay: 0.5, rev: 0.4 });
+    },
+    // the Fist's line locking: a heavy clunk and a rising whine of the chasm about to open
+    kragLock() {
+      tone({ type: 'sine', f0: 90, f1: 45, dur: 0.35, vol: 0.8 });
+      noise({ dur: 0.12, vol: 0.4, type: 'lowpass', f0: 1800, f1: 300 });
+      tone({ type: 'sawtooth', f0: 220, f1: 880, dur: 0.5, vol: 0.05, a: 0.2, rev: 0.4 });
     },
     // the onyx arm thrown up into its guard
     kragGuard() {
