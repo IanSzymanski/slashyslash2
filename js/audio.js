@@ -6,7 +6,7 @@ const Sound = (() => {
   let comp, master, lowpass, sfxBus, musicBus, reverbIn, noiseBuf, crackleBuf;
   let focusMute = 1;
   const last = {};
-  const GAP = { aegisGun: 0.03, probePulse: 0.08, dryFire: 0.1, hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08, scrape: 0.12, grab: 0.1, kragStep: 0.12, molten: 0.06, kragBlock: 0.04, kragStomp: 0.05, kragGrunt: 0.08, kragHit: 0.05, chainWhoosh: 0.15, kragSwing: 0.06, armCreak: 0.5 };
+  const GAP = { aegisGun: 0.03, probePulse: 0.08, dryFire: 0.1, hit: 0.025, step: 0.09, sawHit: 0.045, spark: 0.03, enemyShoot: 0.04, shieldHit: 0.05, land: 0.06, barrelHit: 0.05, kill: 0.02, enemyWindup: 0.05, glint: 0.06, thud: 0.08, scrape: 0.12, grab: 0.1, kragStep: 0.12, molten: 0.06, kragBlock: 0.04, kragStomp: 0.05, kragGrunt: 0.08, kragHit: 0.05, chainWhoosh: 0.15, kragSwing: 0.06, armCreak: 0.5, lavaBurn: 0.15, slagHiss: 0.3 };
 
   function makeNoise(sec) {
     const n = (ac.sampleRate * sec) | 0, b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0);
@@ -958,6 +958,50 @@ const Sound = (() => {
       noise({ dur: 0.55 * b, vol: 0.55, type: 'lowpass', f0: 3200, f1: 180 });
       crackle(0.55 * b, 0.4, { f: 600 });
       tone({ type: 'sine', f0: 110, f1: 36, dur: 0.35 * b, vol: 0.5 });
+    },
+    // ---------- the Foundry ----------
+    // something in the molten river: a hiss and a splash of metal, a thump under it
+    lavaBurn() {
+      noise({ dur: 0.5, vol: 0.45, type: 'highpass', f0: 2200, a: 0.02 });
+      crackle(0.45, 0.4, { f: 900 });
+      tone({ type: 'sine', f0: 120, f1: 50, dur: 0.25, vol: 0.45 });
+    },
+    // standing in slag: a short sizzle
+    slagHiss() {
+      noise({ dur: 0.25, vol: 0.25, type: 'highpass', f0: 3000 });
+      crackle(0.2, 0.2, { f: 1200 });
+    },
+    // a ladle swung over: chains rattling, the pot grinding round on its trunnions, metal sloshing
+    ladleTip() {
+      for (let i = 0; i < 6; i++) tone({ type: 'square', f0: 900 + Math.random() * 700, dur: 0.02, vol: 0.03, delay: i * 0.04 });
+      tone({ type: 'sawtooth', f0: 90, f1: 60, dur: 0.5, vol: 0.08, rev: 0.4 });
+      noise({ dur: 0.5, vol: 0.25, type: 'lowpass', f0: 600, f1: 300, a: 0.15 });
+    },
+    // the pour: a roaring hiss as the stream lands, spatter over it
+    slagPour() {
+      noise({ dur: 2.2, vol: 0.45, type: 'lowpass', f0: 1800, f1: 900, a: 0.1, rev: 0.4 });
+      noise({ dur: 2.2, vol: 0.2, type: 'highpass', f0: 3500, a: 0.1 });
+      crackle(2.2, 0.4, { f: 800, a: 0.1 });
+      tone({ type: 'sine', f0: 70, f1: 50, dur: 2, vol: 0.35, a: 0.1 });
+    },
+    // a crucible bursting: a heavy splash of slag, a crack, sizzling after
+    crucibleBurst() {
+      tone({ type: 'sine', f0: 130, f1: 30, dur: 0.6, vol: 0.85 });
+      noise({ dur: 0.7, vol: 0.7, type: 'lowpass', f0: 3000, f1: 120, rev: 0.4 });
+      noise({ dur: 1.0, vol: 0.25, type: 'highpass', f0: 2800, delay: 0.1 });
+      crackle(1.0, 0.45, { f: 800 });
+    },
+    // a portal tearing open: a low swell, a rising chord, a rush of air
+    portalOpen() {
+      tone({ type: 'sine', f0: 40, f1: 80, dur: 1.6, vol: 0.6, a: 0.6, slide: 1.6 });
+      for (const f of [220, 277, 330, 440]) tone({ type: 'sawtooth', f0: f * 0.5, f1: f, dur: 1.6, vol: 0.03, a: 0.5, slide: 1.4, rev: 0.6 });
+      noise({ dur: 1.6, vol: 0.35, f0: 300, f1: 2400, q: 0.8, a: 0.8, rev: 0.5 });
+    },
+    // through it: a deep boom and a rush
+    portalEnter() {
+      tone({ type: 'sine', f0: 160, f1: 26, dur: 1.2, vol: 1.0 });
+      noise({ dur: 1.0, vol: 0.6, f0: 3000, f1: 200, q: 0.7, rev: 0.6 });
+      for (const f of [440, 554, 659]) tone({ type: 'triangle', f0: f, f1: f * 2, dur: 0.6, vol: 0.04, rev: 0.6 });
     },
     steam() { noise({ dur: 0.8, vol: 0.25, type: 'highpass', f0: 3000, a: 0.05 }); },
     ui() { tone({ type: 'square', f0: 660, dur: 0.04, vol: 0.05 }); },

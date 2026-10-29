@@ -723,7 +723,7 @@ async function run(browser, file, errors) {
     for (let i = 0; i < 60 * 8 && !acted; i++) { T.frame(1); if (R.act && R.act.kind !== 'intro') acted = R.act.kind; }
     ok(sawIntro && !R.spawning && acted && !Game.cineActive(), `the rival fight opens on its entry cutscene, then it fights (first act: ${acted || 'none'})`);
     Game.toMenu(); UI.act('endless'); T.frame(1);
-    Director.wave = BOSS_EVERY - 1; Director.nextWave(); T.frame(1);
+    Director.wave = BOSS_EVERY - 1; Director.regionWave = BOSS_EVERY - 1; Director.nextWave(); T.frame(1);
     ok(DEMO_WAVES[6].boss && Director.bossWave && Game.enemies.some((e) => e.isBoss), `the demo ends on the rival, and it comes for endless wave ${BOSS_EVERY}`);
     // a rival at (dx, dz) from where the player stands, done arriving, its own choices switched off
     const rival = (dx, dz, o = {}) => {
@@ -1069,10 +1069,7 @@ async function run(browser, file, errors) {
       let kActed = '';
       for (let i = 0; i < 60 * 8 && !kActed; i++) { T.frame(1); if (K.act && K.act.kind !== 'intro') kActed = K.act.kind; }
       ok(kIntro && under && topY > g0 + 1.5 && introCracks >= 3 && !K.spawning && kActed && !Game.cineActive(), `the KRAG fight opens on its entry cutscene, bursting up out of the street (thrown ${(topY - g0).toFixed(1)} m up, ${introCracks} glowing cracks), then it fights (first act: ${kActed || 'none'})`);
-      // endless takes turns between the bosses
-      const bossAt = (n) => { Game.toMenu(); UI.act('endless'); T.frame(1); Director.wave = n - 1; Director.nextWave(); T.frame(1); return Game.enemies.find((e) => e.isBoss); };
-      const b8 = bossAt(BOSS_EVERY), b16 = bossAt(BOSS_EVERY * 2);
-      ok(b8 && b8.type === 'aegis' && b16 && b16.type === 'krag', `endless takes turns between the bosses: wave ${BOSS_EVERY} brings ${b8 ? b8.name : 'nothing'}, wave ${BOSS_EVERY * 2} ${b16 ? b16.name : 'nothing'}`);
+      ok(Arena.id === 'foundry', `the KRAG fight plays in the Foundry (${Arena.id})`);
       // a KRAG at (dx, dz) from the player, done arriving, facing you, its own choices switched off
       const krag = (dx, dz, o = {}) => {
         Game.toMenu(); UI.act('test'); T.frame(2);
@@ -1345,6 +1342,88 @@ async function run(browser, file, errors) {
     }
     S.gameplay.invincible = false;
     // KRAG:END
+    // FOUNDRY:START
+    // ---------- the Foundry ----------
+    {
+      let p = Game.player;
+      // the region flow: AEGIS falls on wave 8, a portal opens, through it to the Foundry with the run going on, three
+      // waves there, then KRAG
+      {
+        Game.toMenu(); UI.act('endless'); T.frame(2); p = Game.player; S.gameplay.invincible = true;
+        Director.wave = 7; Director.regionWave = 7; Director.nextWave(); T.frame(2);
+        const boss = Game.enemies.find((e) => e.isBoss);
+        for (const e of Game.enemies) { if (e.skipCine) e.skipCine(); }
+        T.frame(5);
+        for (const e of Game.enemies) e.dead = true;
+        const score0 = Game.stats.score;
+        for (let i = 0; i < 120 && Director.state !== 'portal'; i++) T.frame(1);
+        const pt = Director.portal, opened = Director.state === 'portal' && pt && Arena.id === 'crossroads';
+        for (let i = 0; i < 90; i++) T.frame(1);
+        if (Game.state === 'pick') Game.chooseUpgrade(UI.pickIds[0]);
+        p = Game.player; p.hp = 70;
+        p.pos.x = p.prev.x = pt.pos.x; p.pos.z = p.prev.z = pt.pos.z; p.pos.y = p.prev.y = pt.pos.y;
+        for (let i = 0; i < 30 && Arena.id !== 'foundry'; i++) T.frame(1);
+        const arrived = Arena.id === 'foundry' && Director.region === 'foundry' && Game.player.hp === 70 && Director.wave === 8;
+        const types = [];
+        for (let w = 0; w < 4; w++) { Game.enemies = []; Director.nextWave(); types.push(Director.bossWave ? Director.bossType : 'wave'); }
+        ok(boss && boss.type === 'aegis' && opened && arrived && types.join(',') === 'wave,wave,wave,krag', `endless: AEGIS-07 on wave 8 (${boss && boss.type}); when it falls a portal opens in the crossroads (${opened}); through it the run goes on in the Foundry (${arrived}: wave and health carried over); then ${types.join(', ')}`);
+        Game.enemies = []; Game.hazards = [];
+      }
+      // the molten river burns you and throws you out onto a bank; an enemy knocked in takes a lot
+      {
+        Game.toMenu(); UI.act('krag'); T.frame(2); p = Game.player;
+        for (const e of Game.enemies) if (e.skipCine) e.skipCine();
+        Game.enemies = []; Director.state = 'idle';
+        S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = 0; p.iframes = 0;
+        p.pos.x = p.prev.x = 10; p.pos.z = p.prev.z = 0.5; p.pos.y = p.prev.y = 1;
+        let minY = 9, outAt = null;
+        for (let i = 0; i < 120; i++) { T.frame(1); minY = Math.min(minY, p.pos.y); }
+        const hurt = PC.MAX_HP - p.hp, out = p.pos.y >= -0.01 && Math.abs(p.pos.z) > 3;
+        const e = T.enemy('scrapper', 0, 0); e.pos.x = e.prev.x = 10; e.pos.z = e.prev.z = -0.5; e.pos.y = e.prev.y = 0.5;
+        const eh0 = e.hp;
+        for (let i = 0; i < 40; i++) T.frame(1);
+        ok(hurt > 0 && minY < -1 && out && (e.dead || eh0 - e.hp >= 30), `the molten river burns you (${hurt} damage) and throws you out onto a bank (z ${p.pos.z.toFixed(1)}); an enemy in it takes ${e.dead ? 'all of it' : eh0 - e.hp}`);
+        Game.enemies = [];
+      }
+      // a conveyor carries you along it
+      {
+        S.gameplay.invincible = true;
+        const C = World.def.conveyors[0];
+        p.pos.x = p.prev.x = 0; p.pos.z = p.prev.z = (C.box.min.z + C.box.max.z) / 2; p.pos.y = p.prev.y = C.box.max.y + 0.1; p.vel.x = p.vel.z = 0;
+        T.frame(10);
+        const x0 = p.pos.x;
+        T.frame(60);
+        ok((p.pos.x - x0) * C.dir.x > 2.5, `a conveyor carries you ${(p.pos.x - x0).toFixed(1)} m in a second`);
+      }
+      // a ladle hit tips and pours on an enemy under it, leaving a pool; it hangs empty after
+      {
+        const la = Game.props.find((q) => q.kind === 'ladle');
+        const e = T.enemy('brute', 0, 0);
+        la.hit(20, { kv: { x: 0, y: 0, z: 1 } });
+        const lip = la.lip();
+        e.pos.x = e.prev.x = la.pos.x + la.dir.x * 1.5; e.pos.z = e.prev.z = la.pos.z + la.dir.z * 1.5; e.pos.y = e.prev.y = 0;
+        const eh0 = e.hp;
+        let pool = false;
+        for (let i = 0; i < 60 * 3.5; i++) { T.frame(1); pool = pool || Game.hazards.some((h) => h.kind === 'slagpool'); }
+        ok(la.state === 'empty' && pool && (e.dead || eh0 - e.hp >= 40), `a ladle tips and pours: the enemy under it took ${e.dead ? 'all of it' : eh0 - e.hp}, a pool spread (${pool}) and it hangs ${la.state}`);
+        Game.enemies = []; Game.hazards = [];
+      }
+      // a crucible bursts into a pool of slag that burns an enemy standing in it
+      {
+        const cr = Game.props.find((q) => q.kind === 'barrel' && q.model === 'crucible' && q.pos.y < 1);
+        const e = T.enemy('brute', 0, 0); e.pos.x = e.prev.x = cr.pos.x + 1.4; e.pos.z = e.prev.z = cr.pos.z; e.pos.y = e.prev.y = cr.pos.y;
+        e.cd = 99;
+        cr.hit(10, { heavy: true });
+        for (let i = 0; i < 20; i++) T.frame(1);
+        const after = e.hp, pool = Game.hazards.find((h) => h.kind === 'slagpool');
+        e.pos.x = e.prev.x = pool ? pool.pos.x : 0; e.pos.z = e.prev.z = pool ? pool.pos.z : 0;
+        for (let i = 0; i < 90; i++) { T.frame(1); e.vel.x = e.vel.z = 0; }
+        ok(cr.dead && pool && (e.dead || after - e.hp >= 9), `a crucible bursts (${cr.dead}) into a pool of slag (${!!pool}) that burns an enemy standing in it (${e.dead ? 'dead' : after - e.hp})`);
+      }
+      Game.enemies = []; Game.props = []; Game.hazards = []; Game.projectiles = [];
+    }
+    S.gameplay.invincible = false;
+    // FOUNDRY:END
 
 
     // ---------- AEGIS-07 as the player ----------
@@ -1780,6 +1859,8 @@ async function run(browser, file, errors) {
     const progs0 = Gfx.renderer.info.programs.length, progSet0 = new Set(Gfx.renderer.info.programs);
     const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'Mouse0', 'KeyE', 'Mouse2', 'KeyF'].concat(char === 'aegis' ? ['KeyQ', 'KeyR'] : []);
     const B = World.def.bounds, PM = Camera.PITCH_MAX + 1e-6;
+    // the lowest a body may stand: the street, or the bed of the Foundry's molten river
+    const floorY = Math.min(World.def.groundY, ...((World.def.lava || []).map((r) => r.y)));
     const inBox = (b) => World.overlap(b.pos.x, b.pos.y + 0.02, b.pos.z, b.r * 0.9, b.h - 0.04);
     let maxEnemies = 0;
     const seen = new Set(), hist = [];
@@ -1819,7 +1900,7 @@ async function run(browser, file, errors) {
       for (const b of [p].concat(Game.enemies.filter((e) => !e.dead && !e.spawning))) {
         const q = b.pos;
         if (![q.x, q.y, q.z].every(isFinite)) fail(`${b.type || 'player'} position not finite at frame ${f}`);
-        else if (q.x < B.minX - 0.01 || q.x > B.maxX + 0.01 || q.z < B.minZ - 0.01 || q.z > B.maxZ + 0.01 || q.y < -0.01) fail(`${b.type || 'player'} outside the arena at frame ${f}: ${q.x.toFixed(2)},${q.y.toFixed(2)},${q.z.toFixed(2)}`);
+        else if (q.x < B.minX - 0.01 || q.x > B.maxX + 0.01 || q.z < B.minZ - 0.01 || q.z > B.maxZ + 0.01 || q.y < floorY - 0.01) fail(`${b.type || 'player'} outside the arena at frame ${f}: ${q.x.toFixed(2)},${q.y.toFixed(2)},${q.z.toFixed(2)}`);
         else if (!b.mantle && inBox(b)) fail(`${b.type || 'player'} inside a box at frame ${f}: ${q.x.toFixed(2)},${q.y.toFixed(2)},${q.z.toFixed(2)}${b === p ? '\n    ' + hist.join('\n    ') : ''}`);
       }
       for (const o of Game.projectiles.concat(Game.props)) if (!o.dead && ![o.pos.x, o.pos.y, o.pos.z].every(isFinite)) fail(`${o.kind} position not finite at frame ${f}`);

@@ -131,7 +131,7 @@ const SETTINGS_SCHEMA = {
     { type: 'toggle', key: 'enemies.crawler', label: 'Armoured crawlers' },
     { type: 'toggle', key: 'enemies.grenadier', label: 'Grenadiers' },
     { type: 'toggle', key: 'enemies.sniper', label: 'Rooftop snipers' },
-    { type: 'toggle', key: 'enemies.bossEndless', label: 'A boss every 8th endless wave (AEGIS-07 and KRAG take turns)' },
+    { type: 'toggle', key: 'enemies.bossEndless', label: 'Bosses in endless (AEGIS-07 ends each stint in the crossroads, KRAG each in the Foundry)' },
     { type: 'heading', label: 'Player' },
     { type: 'range', key: 'gameplay.parryWindow', label: 'Parry window', min: 0.08, max: 0.45, step: 0.01, fmt: 'ms' },
     { type: 'range', key: 'gameplay.ultKills', label: 'Kills to charge ultimate', min: 3, max: 40, step: 1, fmt: 'int' },

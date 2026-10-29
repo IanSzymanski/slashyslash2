@@ -4,7 +4,7 @@
 
 // Style: hits build a meter that ranks you C to SSS. Repeating the same move earns less,
 // and the rank multiplies score and ultimate charge.
-const STYLE_GAIN = { lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, beam: 4, beamFull: 9, round: 1.2, laser: 1.5, burst: 14, strike: 3, detonate: 30, armbreak: 20 };
+const STYLE_GAIN = { lava: 15, lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, beam: 4, beamFull: 9, round: 1.2, laser: 1.5, burst: 14, strike: 3, detonate: 30, armbreak: 20 };
 const STYLE_RANKS = [
   { th: 380, r: 'SSS', c: '#ffffff', mul: 2.5 }, { th: 260, r: 'SS', c: '#ffd070', mul: 2 }, { th: 170, r: 'S', c: '#ffb040', mul: 1.75 },
   { th: 100, r: 'A', c: '#ff5a6a', mul: 1.5 }, { th: 50, r: 'B', c: '#d0a0ff', mul: 1.25 }, { th: 20, r: 'C', c: '#9ab0d0', mul: 1.1 },
@@ -48,8 +48,9 @@ const Game = {
     Sound.stopAll();
     this.mode = mode;
     this.runs[mode] = (this.runs[mode] || 0) + 1;
-    // every mode plays in the crossroads except the 2D street's free roam and Training, in its own hall
-    if (!Arena.load(mode === 'street' ? 'street' : mode === 'training' ? 'training' : 'crossroads')) Props.reset();
+    // every mode starts in the crossroads except the 2D street's free roam, Training in its own hall and the
+    // KRAG fight in the Foundry (endless travels between the crossroads and the Foundry through portals)
+    if (!Arena.load(mode === 'street' ? 'street' : mode === 'training' ? 'training' : mode === 'krag' ? 'foundry' : 'crossroads')) Props.reset();
     Tutorial.active = false; Tutorial.show(null);
     Arena.setBlackout(false);
     this.state = 'playing';
@@ -92,9 +93,12 @@ const Game = {
   resetProps(all) {
     if (all) this.props = [];
     this.props = this.props.filter((p) => !p.dead);
+    // red barrels in the crossroads, crucibles of slag in the Foundry, and the Foundry's ladles full again
+    const Kind = World.def.crucibles ? Crucible : Barrel;
     for (const s of Arena.barrelSpots()) {
-      if (!this.props.some((p) => dist3(p.pos, s) < 2.7)) this.props.push(new Barrel(s));
+      if (!this.props.some((p) => p.kind === 'barrel' && dist3(p.pos, s) < 2.7)) this.props.push(new Kind(s));
     }
+    Foundry.resetProps();
   },
 
   // ---------- feedback hooks ----------
@@ -301,6 +305,7 @@ const Game = {
     for (const b of this.projectiles) b.update(dt);
     for (const h of this.hazards) h.update(dt);
     for (const p of this.props) p.update(dt);
+    Foundry.update(dt);
     Props.update(dt);
     for (const pk of this.pickups) pk.update(dt);
     if (!this.player.dead && !cine) Director.update(dt);

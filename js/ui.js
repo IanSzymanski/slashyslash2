@@ -200,6 +200,7 @@ const UI = {
       ['KRAG strings drive through a parry: dodge them; parry the blow that winds up in gold at the end to stagger it', `${actionLabel('dash')} · ${actionLabel('sheathe')}`],
       ['KRAG guarding (a blue flash, then the arm up): blows on its arm crack it until the guard breaks; at full heat (seams white, mohawk torn up), hit the arm to blow it up in its face and stun it', actionLabel('attack')],
       ['KRAG Molten Fist (red): no parry or dash saves you in the red cone; get out of it sideways (easiest close in) or behind it before it splits open', actionLabel('dash')],
+      ['The Foundry: knock enemies into the molten river; hit a hanging ladle, or yank it on the tether, to pour it on whatever is under it', `${actionLabel('attack')} · ${actionLabel('tether')}`],
       ['Pause (training: spawn panel)', actionLabel('pause')],
       ['Skip a cutscene you have seen', `Hold ${actionLabel('sheathe')}`],
       ['Pick an endless upgrade', touch ? 'Tap a card' : 'Click, or 1 / 2 / 3'],

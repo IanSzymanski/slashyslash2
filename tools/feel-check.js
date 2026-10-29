@@ -11,7 +11,7 @@ const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
 const ctx = vm.createContext({ console, Math, JSON, Object, Array, Set, Map, Infinity, Int32Array, Uint8Array, Int8Array, Float32Array });
-for (const f of ['js/util.js', 'js/world.js', 'js/controller.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+for (const f of ['js/util.js', 'js/world.js', 'js/foundrymap.js', 'js/controller.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
 const run = (code) => vm.runInContext(code, ctx);
 run('var PC = { HEIGHT: MOVE.H }; World.build(STREET);');
 

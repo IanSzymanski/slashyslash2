@@ -156,15 +156,15 @@ class Enemy {
   }
 
   // ---------- getting around ----------
-  // Steer at the player: straight when it's on your level and the way is clear, else along the nav graph,
-  // jumping and dropping between surfaces where the graph says to.
+  // Steer at the player: straight when it's on your level and the way is clear (not across molten metal),
+  // else along the nav graph, jumping and dropping between surfaces where the graph says to.
   groundChase(dt, spd, stopDist) {
     if (this.inHop(dt)) return;
     const p = Game.player, dx = p.pos.x - this.pos.x, dz = p.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1e-3;
     let mx = dx / d, mz = dz / d, go = d > stopDist;
     const level = Math.abs(p.pos.y - this.pos.y) < 1.2;
     const knee = { x: this.pos.x, y: this.pos.y + 0.5, z: this.pos.z };
-    if (!level || (d > 2.5 && World.raycast(knee, { x: mx, y: 0, z: mz }, d))) {
+    if (!level || (d > 2.5 && World.raycast(knee, { x: mx, y: 0, z: mz }, d)) || Foundry.crosses(this.pos, p.pos)) {
       const s = this.onGround ? Nav.steer(this, this.climb) : null;
       if (s) {
         if (s.kind === Nav.JUMP) { this.startHop(s.to, s.via, spd); return; }
