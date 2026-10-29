@@ -30,6 +30,9 @@ const KragViews = {
     // it shares the cracks' shader)
     this.chasmMat = new THREE.MeshBasicMaterial({ map: this.chasmTexture(), color: '#ffffff', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     this.chasm = this.instanced(this.fanUVGeo(FIST.HALF, 24), this.chasmMat, this.CHASMS, 1);
+    // the chasm crusted over once it seals: the street under it darkened, lifting as it cools
+    this.crustMat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, blending: THREE.MultiplyBlending, premultipliedAlpha: true, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    this.crust = this.instanced(this.chasm.geometry, this.crustMat, this.CHASMS, 0);
     // fireballs: an outer shell and a white core, swelling and burning out
     this.ballPool = [];
     for (let i = 0; i < this.BALLS; i++) {
@@ -221,11 +224,22 @@ const KragViews = {
       }
       sx = sz = r * 2;
     }
-    const q = { kind, x: at.x, y: y + 0.02 + (this.cracks.length % 7) * 0.002, z: at.z, yaw, sx, sz, t0: Game.time + (o.delay || 0), life: o.life || 7, grow: o.grow || 0.16, red: !!o.red, ph: rand(0, TAU) };
+    const q = { kind, x: at.x, y: y + 0.02 + (this.cracks.length % 7) * 0.002, z: at.z, yaw, sx, sz, t0: Game.time + (o.delay || 0), life: o.life || 7, grow: o.grow || 0.16, red: !!o.red, hot: !!o.hot, ph: rand(0, TAU) };
     this.cracks.push(q);
     const same = this.cracks.filter((c) => c.kind === kind);
     if (same.length > this.CRACKS[kind]) this.cracks.splice(this.cracks.indexOf(same[0]), 1);
     return q;
+  },
+  // how far through its life a crack looks: a hot one holds at orange until it's sealed; a sealed one drops at once
+  // to a dull red and is gone cool seconds later
+  crackU(q, age) {
+    if (q.hold !== undefined && age >= q.hold) return lerp(q.uHold, 1, clamp((age - q.hold) / (q.life - q.hold), 0, 1));
+    return q.hot ? Math.min(age / 6, 0.3) : age / q.life;
+  },
+  seal(q, cool) {
+    if (!q || q.hold !== undefined) return;
+    const age = Math.max(0, Game.time - q.t0);
+    q.uHold = Math.max(0.9, this.crackU(q, age)); q.hold = age; q.life = age + cool;
   },
   // a fireball swelling to r and burning out over dur
   fireball(at, r, dur = 0.45) {
@@ -427,25 +441,36 @@ const KragViews = {
   // how far behind the cone's apex the drawn fan's point sits, so its edges pass 0.9 m either side of the apex
   apexBack() { return 0.9 / Math.tan(FIST.HALF); },
   // Each chasm: the fan swelling out with the split, white hot, then molten orange heaving while its floor
-  // erupts, then cooling to a dull red and closing; drawn on each level of ground the cone covers.
+  // erupts; sealed, its glow dies in half a second over a dark crust that fades; drawn on each level of ground
+  // the cone covers.
   syncChasms(t) {
-    const M = this.chasm, list = [];
+    const M = this.chasm, C = this.crust, list = [];
     for (const h of Game.hazards) if (h.kind === 'chasm' && !h.dead) for (const y of h.levels || [h.o.y]) list.push([h, y]);
     for (let i = 0; i < this.CHASMS; i++) {
       const [h, ly] = list[i] || [];
+      if (!h || h.t < CHASM.ERUPT) C.setMatrixAt(i, this._m.makeScale(0, 0, 0));
       if (!h) { M.setMatrixAt(i, this._m.makeScale(0, 0, 0)); continue; }
       const b = this.apexBack(), R = Math.min(h.front, FIST.CONE) + b, F = h.f;
       this._q.setFromAxisAngle(this._y, h.yaw);
       this._p.set(h.o.x - F.x * b, ly + 0.03, h.o.z - F.z * b); this._s.set(R, 1, R);
       M.setMatrixAt(i, this._m.compose(this._p, this._q, this._s));
+      if (h.t >= CHASM.ERUPT) {
+        const a = h.t - CHASM.ERUPT, k = clamp(a / (CHASM.DUR - CHASM.ERUPT), 0, 1), d = lerp(lerp(1, 0.2, clamp(a / 0.15, 0, 1)), 1, Math.pow(k, 1.6));
+        C.setMatrixAt(i, this._m); C.setColorAt(i, this._c.setRGB(d, d * 0.94, d * 0.92));
+      }
       const u = h.t, heave = 0.85 + 0.15 * Math.sin(t * 6 + i) * Math.sin(t * 2.3);
       let r, g, bl;
       if (u < 0.35) { const k = u / 0.35; r = 1.8; g = lerp(1.5, 0.8, k); bl = lerp(1, 0.25, k); }
       else if (u < CHASM.ERUPT) { r = 1.5 * heave; g = 0.55 * heave; bl = 0.1 * heave; }
-      else { const k = clamp((u - CHASM.ERUPT) / (CHASM.DUR - CHASM.ERUPT), 0, 1), f = Math.pow(1 - k, 1.3); r = lerp(1.5, 0.7, k) * f; g = lerp(0.55, 0.08, k) * f; bl = 0.06 * f; }
+      else {
+        // sealed: the glow dies in half a second, leaving the crust
+        const a = u - CHASM.ERUPT, f = clamp(1 - a / 0.5, 0, 1) ** 2;
+        r = 1.5 * f; g = 0.55 * f * f; bl = 0.1 * f * f;
+      }
       M.setColorAt(i, this._c.setRGB(r, g, bl));
     }
     M.instanceMatrix.needsUpdate = true; M.instanceColor.needsUpdate = true;
+    C.instanceMatrix.needsUpdate = true; C.instanceColor.needsUpdate = true;
   },
   // the colour of a crack u of the way through its life: white hot, orange, a dull red, gone
   crackColor(q, u, t, out) {
@@ -470,7 +495,7 @@ const KragViews = {
         this._p.set(q.x, q.y, q.z);
         if (kind === 'line') this._s.set(q.sx * lerp(0.4, 1, g), 1, q.sz * g); else this._s.set(q.sx * lerp(0.3, 1, g), 1, q.sz * lerp(0.3, 1, g));
         M.setMatrixAt(i, this._m.compose(this._p, this._q, this._s));
-        M.setColorAt(i, this.crackColor(q, age / q.life, t, this._c));
+        M.setColorAt(i, this.crackColor(q, this.crackU(q, age), t, this._c));
       }
       M.instanceMatrix.needsUpdate = true; M.instanceColor.needsUpdate = true;
     }
@@ -511,7 +536,7 @@ const KragViews = {
     // a chasm lights the street it splits
     for (const h of Game.hazards) {
       if (h.kind !== 'chasm' || h.dead) continue;
-      const k = h.t < CHASM.ERUPT ? 1 : clamp(1 - (h.t - CHASM.ERUPT) / (CHASM.DUR - CHASM.ERUPT), 0, 1);
+      const k = h.t < CHASM.ERUPT ? 1 : clamp(1 - (h.t - CHASM.ERUPT) / 0.5, 0, 1);
       for (const s of [0.35, 0.75]) { const q = h.at(Math.min(h.front, FIST.CONE * s), 0); Gfx.light(q.x, q.y + 1.5, q.z, '#ff6a1a', 5 * k, 16); }
       break;
     }

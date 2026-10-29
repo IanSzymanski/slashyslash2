@@ -959,6 +959,13 @@ const Sound = (() => {
       crackle(0.55 * b, 0.4, { f: 600 });
       tone({ type: 'sine', f0: 110, f1: 36, dur: 0.35 * b, vol: 0.5 });
     },
+    // the Fist's chasm sealing: a long hiss of steam, stone grinding shut under it
+    chasmSeal() {
+      noise({ dur: 1.3, vol: 0.4, type: 'highpass', f0: 2600, a: 0.04 });
+      crackle(0.9, 0.35, { f: 900 });
+      noise({ dur: 0.6, vol: 0.4, type: 'lowpass', f0: 500, f1: 120 });
+      tone({ type: 'sine', f0: 70, f1: 34, dur: 0.5, vol: 0.4 });
+    },
     // ---------- the Foundry ----------
     // something in the molten river: a hiss and a splash of metal, a thump under it
     lavaBurn() {

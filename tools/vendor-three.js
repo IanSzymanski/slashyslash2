@@ -29,7 +29,7 @@ const USED = [
   'AmbientLight', 'HemisphereLight', 'DirectionalLight', 'PointLight',
   // constants
   'NearestFilter', 'LinearFilter', 'LinearMipmapLinearFilter', 'RepeatWrapping', 'ClampToEdgeWrapping',
-  'FrontSide', 'BackSide', 'DoubleSide', 'NormalBlending', 'AdditiveBlending',
+  'FrontSide', 'BackSide', 'DoubleSide', 'NormalBlending', 'AdditiveBlending', 'MultiplyBlending',
   'SRGBColorSpace', 'LinearSRGBColorSpace', 'NoToneMapping', 'RGBAFormat', 'UnsignedByteType', 'FloatType',
   'REVISION',
 ];

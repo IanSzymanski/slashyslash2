@@ -1227,6 +1227,37 @@ async function run(browser, file, errors) {
       const fClose = fist(-4, sideways);
       const fBehind = fist(-5, (k) => { const f = k.fwd(); p.pos.x = p.prev.x = k.pos.x - f.x * 3; p.pos.z = p.prev.z = k.pos.z - f.z * 3; });
       ok(fParry.hurt >= 45 && fParry.daze > 0.8 && fParry.chasm && fParry.vents >= 2 && fFar.hurt > 0 && fClose.hurt === 0 && fBehind.hurt === 0 && fParry.turned < 0.01, `the Molten Fist splits a molten chasm across its cone: through a parry (${fParry.hurt} damage, dazed ${fParry.daze.toFixed(2)} s, ${fParry.vents} vents erupting in it after), it holds its line once locked, and from 18 m running and dashing sideways doesn't get you out (${fFar.hurt}); from 4 m it does (${fClose.hurt}), and so does getting behind it (${fBehind.hurt})`);
+      // the split hits only as it passes: getting behind it, then stepping into the chasm after doesn't hit or daze you;
+      // in the air over it as it passes still does; every vent is done erupting by the time it seals, and sealing cools
+      // every crack in it
+      {
+        const into = (late) => {
+          const k = krag(0, -6); k.heat = HEAT.MAX; k.startPunch(p, false);
+          for (let i = 0; i < 60 * 4 && k.act && !k.act.locked; i++) T.frame(1);
+          const f = k.fwd(); p.pos.x = p.prev.x = k.pos.x - f.x * 3; p.pos.z = p.prev.z = k.pos.z - f.z * 3;
+          let ch = null;
+          for (let i = 0; i < 60 * 4 && !ch; i++) { T.frame(1); ch = Game.hazards.find((h) => h.kind === 'chasm'); }
+          for (let i = 0; i < 600 && ch && ch.t < late; i++) T.frame(1);
+          const at = ch.at(12, 0.5); p.pos.x = p.prev.x = at.x; p.pos.z = p.prev.z = at.z;
+          T.frame(6);
+          return !ch.hit && p.dazeT === 0;
+        };
+        const lateOk = [0.6, 2, 4].map(into);
+        const k = krag(0, -10); k.heat = HEAT.MAX; k.startPunch(p, false);
+        for (let i = 0; i < 60 * 4 && k.act && k.act.kind === 'punch' && k.act.phase === 'wind'; i++) { T.frame(1); if (k.act && k.act.t > k.act.wind - 0.05) { p.pos.y = p.prev.y = 6; p.vel.y = 6; p.onGround = false; } }
+        T.frame(30);
+        const overHurt = PC.MAX_HP - p.hp;
+        const k2 = krag(0, -6, { inv: true }); k2.heat = HEAT.MAX; k2.startPunch(p, false);
+        let ch = null, last = 0, sealT = 0, hot = -1;
+        for (let i = 0; i < 60 * 12; i++) {
+          T.frame(1); ch = ch || Game.hazards.find((h) => h.kind === 'chasm');
+          if (!ch) continue;
+          if (Game.hazards.some((h) => h.kind === 'vent' && h.phase === 'erupt')) last = ch.t;
+          if (ch.sealed && !sealT) { sealT = ch.t; hot = ch.cracks.filter((q) => q.hold === undefined).length + Game.hazards.filter((h) => h.kind === 'vent' && h.phase !== 'fade').length; }
+          if (ch.dead) break;
+        }
+        ok(lateOk.every(Boolean) && overHurt >= 45 && last > 2 && last <= CHASM.ERUPT && sealT > 0 && hot === 0, `the chasm's split hits only as it passes: stepping into it 0.6, 2 and 4 s after doesn't (${lateOk.join(', ')}), in the air 6 m over it as it passes does (${overHurt}); its vents erupt until ${last.toFixed(2)} s and it seals at ${sealT.toFixed(2)} s with ${hot} cracks or vents still hot`);
+      }
       // dazed, nothing you press does anything
       {
         const k = krag(0, -6); k.heat = HEAT.MAX; k.startPunch(p, false);
