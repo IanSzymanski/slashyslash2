@@ -1780,7 +1780,8 @@ async function run(browser, file, errors) {
       T.press('KeyE'); T.frame(2); p.iframes = 0;
       const r = p.takeHit({ dmg: 12, from: c1.center(), kind: 'melee', source: c1, knock: 12 });
       const heat = p.heat;
-      T.frame(Math.ceil(COUNTER.CHARGE * 120 / 2) + 5);
+      // (the parry's slow motion stretches the charge, so wait for it)
+      for (let i = 0; i < 240 && !(p.sheathe && p.sheathe.charge >= 1); i++) T.frame(1);
       const full = p.sheathe && p.sheathe.charge >= 1;
       T.release('KeyE'); T.frame(60);
       ok(r === 'parried' && heat >= KP_HEAT.PARRY && full && 500 - c1.hp > 80 && 500 - c2.hp > 60 && c3.hp === 500, `E on the blow parries (feeding the heat ${heat.toFixed(0)}), and the charged counter burns a cone ahead (${500 - c1.hp}, ${500 - c2.hp} further out) but not behind (${500 - c3.hp})`);
@@ -1818,8 +1819,9 @@ async function run(browser, file, errors) {
       const s1 = T.enemy('scrapper', 5, 0, { frozen: true, hp: 500 });
       T.face(s1.pos.x, s1.pos.z); T.frame(5);
       T.press('KeyW'); T.tap('ShiftLeft'); T.tap('Mouse0');
-      const charged = !!p.shoulder;
-      T.release('KeyW'); T.frame(60);
+      let charged = false;
+      for (let i = 0; i < 60; i++) { T.frame(1); if (p.shoulder) charged = true; }
+      T.release('KeyW');
       ok(charged && 500 - s1.hp >= KP_SHOULDER.DMG, `attack out of a dash is a shoulder charge (${500 - s1.hp})`);
       Game.enemies = [];
     }
