@@ -26,6 +26,14 @@ const UI = {
     try { const t = safeStorageGet('slashyslash3d.tab'); if (t && SETTINGS_SCHEMA[t]) this.tab = t; } catch (e) { /* ignore */ }
     this.refreshBest();
     this.refreshChar();
+    this.bindStage();
+    // the character select: the arrow keys step through the roster, Enter plays as the one shown
+    window.addEventListener('keydown', (e) => {
+      if (this.openPanel() !== 'select') return;
+      const d = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.code];
+      if (d) { e.preventDefault(); this.selStep(d); }
+      else if (e.code === 'Enter' && !(document.activeElement && document.activeElement.tagName === 'BUTTON')) { e.preventDefault(); this.act('sel-confirm'); }
+    });
     window.addEventListener('keydown', (e) => {
       if (Game.state !== 'pick' || !this.pickIds) return;
       const i = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].indexOf(e.code) % 3;
@@ -33,6 +41,8 @@ const UI = {
     });
   },
   show(id) {
+    // leaving the character select takes its stage down
+    if (id !== 'select' && typeof Showroom !== 'undefined' && Showroom.active) Showroom.close();
     if (!id && document.activeElement && document.activeElement.blur) document.activeElement.blur();
     // any panel needs the cursor back (results, upgrade picks, pause)
     if (id) Input.releaseLock();
@@ -60,7 +70,11 @@ const UI = {
   lockHint(on) { const el = document.getElementById('lock-hint'); if (el) el.hidden = !on; },
   act(a, el) {
     switch (a) {
-      case 'char': SaveData.character = SaveData.character === 'aegis' ? 'ronin' : 'aegis'; saveProgress(); this.refreshChar(); break;
+      case 'char': this.openSelect(); break;
+      case 'sel-pick': this.selPick(el.dataset.id); break;
+      case 'sel-skill': this.markSkill(Showroom.play(el.dataset.demo)); break;
+      case 'sel-confirm': SaveData.character = this.selId; saveProgress(); this.refreshChar(); this.show('menu'); break;
+      case 'sel-back': this.show('menu'); break;
       case 'demo': this.startRun('demo'); break;
       case 'endless': this.startRun('endless'); break;
       case 'boss': this.startRun('boss'); break;
@@ -88,13 +102,78 @@ const UI = {
         break;
     }
   },
-  // the character picker on the title screen
+  // the title screen's button for the character select, in the picked character's colours
   refreshChar() {
-    const a = SaveData.character === 'aegis', b = document.getElementById('btn-char');
+    const C = charDef(SaveData.character), b = document.getElementById('btn-char');
     if (!b) return;
-    b.classList.toggle('aegis', a);
-    document.getElementById('char-name').textContent = a ? 'AEGIS-07' : 'RONIN';
-    document.getElementById('char-sub').textContent = a ? 'gun and beam, or blade and block' : 'katana, parry and counter';
+    b.style.setProperty('--c', C.color); b.style.setProperty('--a', C.accent);
+    document.getElementById('char-name').textContent = C.name;
+    document.getElementById('char-sub').textContent = C.role.toLowerCase() + ' · change';
+  },
+
+  // ---------- the character select ----------
+  // The roster down the left, the picked character on the stage in the middle (showroom.js), who it is on the
+  // right: its role and title, its stats, the facts from its movement table and its skills. Picking a skill plays
+  // it on the stage. Everything comes from the roster (roster.js), so a new character needs nothing here.
+  openSelect() {
+    this.selId = charDef(SaveData.character).id;
+    this.show('select');
+    Showroom.onClip = (demo) => this.markSkill(demo);
+    Showroom.open(this.selId);
+    this.renderSelect();
+    const on = document.querySelector('#sel-list .on');
+    if (on) on.focus({ preventScroll: true });
+  },
+  selPick(id) {
+    if (!CHARACTERS[id] || id === this.selId) return;
+    this.selId = id;
+    Showroom.show(id);
+    this.renderSelect();
+  },
+  // step through the roster with the arrow keys
+  selStep(d) {
+    const i = ROSTER.findIndex((C) => C.id === this.selId), C = ROSTER[(i + d + ROSTER.length) % ROSTER.length];
+    this.selPick(C.id);
+    const b = document.querySelector(`#sel-list [data-id="${C.id}"]`);
+    if (b) b.focus({ preventScroll: true });
+  },
+  renderSelect() {
+    const C = charDef(this.selId), esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const root = document.getElementById('select');
+    root.style.setProperty('--c', C.color); root.style.setProperty('--a', C.accent);
+    document.getElementById('sel-list').innerHTML = ROSTER.map((R) => `<button type="button" class="sel-card${R.id === C.id ? ' on' : ''}" data-act="sel-pick" data-id="${R.id}" role="option" aria-selected="${R.id === C.id}" style="--c:${R.color};--a:${R.accent}"><span class="sel-card-name">${esc(R.name)}</span><small>${esc(R.role)}${R.id === SaveData.character ? ' · picked' : ''}</small></button>`).join('');
+    document.getElementById('sel-role').textContent = C.role;
+    document.getElementById('sel-name').textContent = C.name;
+    document.getElementById('sel-title').textContent = C.title;
+    document.getElementById('sel-blurb').textContent = C.blurb;
+    document.getElementById('sel-go-name').textContent = C.name;
+    document.getElementById('sel-stats').innerHTML = STAT_DEFS.map((d) => {
+      const v = clamp(Math.round(C.stats[d.id] || 0), 0, 5);
+      return `<dt>${d.label}</dt><dd aria-label="${v} of 5">${[0, 1, 2, 3, 4].map((i) => `<span class="pip${i < v ? ' on' : ''}"></span>`).join('')}</dd>`;
+    }).join('');
+    const M = C.move;
+    document.getElementById('sel-specs').textContent = `${M.H.toFixed(2)} m · runs ${M.RUN} m/s, sprints ${M.SPRINT} · ${M.DASH_CHARGES} dashes · ${PC.MAX_HP} health, ${PC.MAX_SHIELD} shield`;
+    document.getElementById('sel-skills').innerHTML = C.skills.map((k) => `<li><button type="button" class="sel-skill" data-act="sel-skill" data-demo="${esc(k.demo || '')}"${k.demo ? '' : ' disabled'}><span class="sel-kind" data-kind="${esc(k.kind)}">${esc(k.kind)}</span><span class="sel-sname">${esc(k.name)}</span><kbd>${esc(skillInput(k))}</kbd><span class="sel-sdesc">${esc(k.desc)}</span></button></li>`).join('');
+    this.markSkill(Showroom.demo);
+  },
+  // the skill whose demo is playing on the stage
+  markSkill(demo) {
+    for (const b of document.querySelectorAll('#sel-skills .sel-skill')) {
+      const on = !!demo && b.dataset.demo === demo;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on);
+    }
+  },
+  // the stage turns under a drag and zooms on the wheel
+  bindStage() {
+    const st = document.getElementById('sel-stage');
+    if (!st) return;
+    let last = null;
+    st.addEventListener('pointerdown', (e) => { last = { x: e.clientX, y: e.clientY }; Showroom.dragging = true; st.setPointerCapture(e.pointerId); e.preventDefault(); });
+    st.addEventListener('pointermove', (e) => { if (!last) return; Showroom.drag(e.clientX - last.x, e.clientY - last.y); last = { x: e.clientX, y: e.clientY }; });
+    const end = () => { last = null; Showroom.dragging = false; };
+    st.addEventListener('pointerup', end); st.addEventListener('pointercancel', end);
+    st.addEventListener('wheel', (e) => { e.preventDefault(); Showroom.wheel(e.deltaY); }, { passive: false });
   },
   refreshBest() {
     const el = document.getElementById('best');
@@ -205,7 +284,23 @@ const UI = {
       ['Skip a cutscene you have seen', `Hold ${actionLabel('sheathe')}`],
       ['Pick an endless upgrade', touch ? 'Tap a card' : 'Click, or 1 / 2 / 3'],
     ];
-    const all = rows.concat(SaveData.character === 'aegis' ? aegis : ronin, rival);
+    // KRAG as the player: heat fed by its blows, the onyx arm's guard, a leap and the Molten Fist
+    const kL = (a) => (touch ? touchLabel(a, 'krag') : actionLabel(a));
+    const krag = [
+      ['Dash (2 charges, invulnerable); attack out of it for a shoulder charge that plows through and explodes (hold for a longer one)', `${actionLabel('dash')} + direction, ${actionLabel('attack')}`],
+      ['String: jab, cross, hook, haymaker (toward the crosshair); its fists swat bolts back', `Tap ${actionLabel('attack')}`],
+      ['Heavies: an uppercut that launches, a spinning backfist mid-string, a hammer that ends it in a quake', `Hold ${actionLabel('attack')}`],
+      ['Heat: every blow you land feeds it (a parry most) and it cools when you stop; at full heat blows hit harder and burn, and the hammer erupts in a line of vents', 'Land blows'],
+      ['Furrow: the onyx fist torn through the street (hold to rip up out of it)', `${actionLabel('attack')} while sliding`],
+      ['Meteor: straight down, raising vents after a long fall', `Hold ${actionLabel('attack')} in the air`],
+      ['Onyx guard (no shield cost): blows from the front get through at 15% and wear the arm until it breaks', `Hold ${kL('sheathe')}`],
+      ['Parry as a blow lands, then hold for the molten counter, a cone of fire along the aim', `${kL('sheathe')}, hold, release`],
+      ['Detonation: at full heat, a blow on the guard sets the arm off and blows everything away', `Hold ${kL('sheathe')} at full heat`],
+      ['Leap: a mark follows the crosshair; let go to come down on it with a blast and a ring of vents', `Hold ${kL('utility')}, release`],
+      ['Tether (a chain from the right hand): tap fling, hold zip; grab barrels; reel in and kick grenades', actionLabel('tether')],
+      ['Molten Fist (charged by kills): hold to draw it back in slow motion with the cone shown, then press again or attack to split the street', `Hold ${actionLabel('ultimate')}, then ${actionLabel('ultimate')} or ${actionLabel('attack')}`],
+    ];
+    const all = rows.concat({ aegis, krag }[SaveData.character] || ronin, rival);
     document.getElementById('howto-table').innerHTML = all.map(([a, k]) => `<tr><td>${a}</td><td><kbd>${k}</kbd></td></tr>`).join('');
   },
 

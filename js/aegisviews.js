@@ -148,7 +148,7 @@ const AegisViews = {
     for (const o of this.parts) o.visible = false;
     this.arcLine.visible = false;
     const p = Game.player, R = Render.rigs && Render.rigs.aegis;
-    if (!p || p.charId !== 'aegis' || !R || !R.mesh.visible || p.dead || Game.state === 'menu') return;
+    if (!p || p.charId !== 'aegis' || !R || !R.mesh.visible || p.dead || (Game.state === 'menu' && !Showroom.active)) return;
     const t = Game.realTime, cp = Gfx.camera.position, fp = Camera.fp;
     // jets
     if (p.thrust > 0.04 && !fp) {

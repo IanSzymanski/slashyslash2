@@ -30,7 +30,7 @@
         <p class="tag">Sector 9 went dark three winters ago. The scrap gangs moved in. You still have a blade.</p>
       </div>
       <nav class="stack">
-        <button type="button" id="btn-char" class="char" data-act="char"><span>Play as <b id="char-name">RONIN</b></span> <small id="char-sub">katana, parry and counter</small></button>
+        <button type="button" id="btn-char" class="char" data-act="char"><span>Play as <b id="char-name">RONIN</b></span> <small id="char-sub">choose a fighter</small></button>
         <button type="button" id="btn-demo" data-act="demo">Wave Demo <small>six waves, one problem each</small></button>
         <button type="button" id="btn-endless" data-act="endless">Endless Survival <small>the streets, then the Foundry</small></button>
         <button type="button" id="btn-test" data-act="test">Free Roam <small>the city and the Foundry, no enemies</small></button>
@@ -44,6 +44,33 @@
       </nav>
       <p class="best" id="best"></p>
       <p class="need" id="need">Keyboard and mouse. Starting a mode locks the mouse; Esc releases it and pauses.</p>
+    </section>
+
+    <section id="select" class="overlay select" hidden aria-label="Choose a fighter">
+      <div class="sel-roster">
+        <h2>Choose a fighter</h2>
+        <div class="sel-list" id="sel-list" role="listbox" aria-label="Fighters"></div>
+        <p class="sel-hint" id="sel-hint">Drag the stage to turn it · wheel to zoom · pick a skill to see it</p>
+      </div>
+      <div class="sel-stage" id="sel-stage" aria-hidden="true"></div>
+      <div class="sel-info" id="sel-info">
+        <header>
+          <p class="sel-role" id="sel-role"></p>
+          <h2 id="sel-name"></h2>
+          <p class="sel-title" id="sel-title"></p>
+        </header>
+        <div class="scroll">
+          <p class="sel-blurb" id="sel-blurb"></p>
+          <dl class="sel-stats" id="sel-stats"></dl>
+          <p class="sel-specs" id="sel-specs"></p>
+          <h3>Skills</h3>
+          <ul class="sel-skills" id="sel-skills"></ul>
+        </div>
+        <nav class="sel-actions">
+          <button type="button" class="ghost" data-act="sel-back">Back</button>
+          <button type="button" id="sel-confirm" class="sel-go" data-act="sel-confirm">Play as <b id="sel-go-name"></b></button>
+        </nav>
+      </div>
     </section>
 
     <section id="pause" class="overlay side" hidden>
@@ -136,6 +163,9 @@
 <script src="js/boss.js"></script>
 <script src="js/rival.js"></script>
 <script src="js/kragboss.js"></script>
+<script src="js/kragplayer.js"></script>
+<script src="js/roster.js"></script>
+<script src="js/showroom.js"></script>
 <script src="js/foundry.js"></script>
 <script src="js/training.js"></script>
 <script src="js/upgrades.js"></script>

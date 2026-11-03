@@ -1,14 +1,14 @@
 'use strict';
 // Endless run upgrades and wave modifiers.
 // Upgrades are sidegrades: each changes how one move works and usually costs something elsewhere.
-// One of three is offered after waves 2, 5, 8 and so on; move code checks them with Game.has(id). only: the one
-// character whose move it changes.
+// One of three is offered after waves 2, 5, 8 and so on; move code checks them with Game.has(id). only: the
+// characters whose move it changes; not: characters it does nothing for.
 
 const UPGRADES = {
-  arc: { name: 'Arc Conductor', tag: 'AC', only: 'ronin', desc: 'The parry counter charges to full in half the time.' },
+  arc: { name: 'Arc Conductor', tag: 'AC', only: ['ronin', 'krag'], desc: 'The parry counter charges to full in half the time.' },
   voltHook: { name: 'Volt Hook', tag: 'VH', desc: 'Tether strikes burst for 30 damage around the target. Strikes no longer refund shield.' },
   emberWake: { name: 'Ember Wake', tag: 'EW', desc: 'Dashing through enemies cuts them for 20. Dash charges refill 0.25s slower.' },
-  openGuard: { name: 'Open Guard', tag: 'OG', desc: 'Parry window 60% wider. Parries no longer refund shield.' },
+  openGuard: { name: 'Open Guard', tag: 'OG', not: ['krag'], desc: 'Parry window 60% wider. Parries no longer refund shield.' },
   breaker: { name: 'Breaker', tag: 'BR', desc: 'Finishers (the lunge and the heavy slam) hit 60% harder and launch. Other lights deal 20% less.' },
   aftershock: { name: 'Aftershock', tag: 'AS', desc: 'Plunges send a ground ring outward. The impact itself deals 20% less.' },
   glass: { name: 'Glass Edge', tag: 'GE', desc: 'Deal 35% more damage. Take 25% more.' },
@@ -25,7 +25,8 @@ const WAVE_MODIFIERS = {
 
 function upgradeOffer(n = 3) {
   const who = Game.player ? Game.player.charId : 'ronin';
-  const free = Object.keys(UPGRADES).filter((id) => !Game.upgrades.has(id) && (!UPGRADES[id].only || UPGRADES[id].only === who));
+  const fits = (U) => (!U.only || [].concat(U.only).includes(who)) && !(U.not && U.not.includes(who));
+  const free = Object.keys(UPGRADES).filter((id) => !Game.upgrades.has(id) && fits(UPGRADES[id]));
   for (let i = free.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [free[i], free[j]] = [free[j], free[i]]; }
   return free.slice(0, n);
 }

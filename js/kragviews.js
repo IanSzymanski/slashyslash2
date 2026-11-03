@@ -60,10 +60,18 @@ const KragViews = {
     this.mark.userData = { mr, mx: mx1.material };
     // the circle it will swing round, faint on the street
     this.circle = new THREE.Mesh(G.flatRing, add(KRAG_ORANGE, { opacity: 0.35 }));
+    // KRAG as the player has its own: the Fist's red shell, rings and cone, and the leap's landing mark
+    this.pAura = new THREE.Mesh(G.sphere, add('#ff2a3a', { opacity: 0.2, side: THREE.FrontSide }));
+    this.pRings = [0, 1, 2].map(() => new THREE.Mesh(G.flatRing, add('#ff2a3a', { opacity: 0.9 })));
+    this.pWedges = [0, 1].map(() => [new THREE.Mesh(this.wedgeGeo, add('#ff2a3a', { opacity: 0.35 })), new THREE.Mesh(this.wedgeEdge.geometry, add('#ff2a3a', { opacity: 0.9 }))]);
+    this.pMark = this.mark.clone();
+    this.pMark.userData = { mr: this.pMark.children[0], mx: this.pMark.children[1].material };
+    this.pMark.children[0].material = this.pMark.children[0].material.clone();
+    this.pMark.children[1].material = this.pMark.children[2].material = this.pMark.children[1].material.clone();
     for (const o of this.shows()) { o.visible = false; o.renderOrder = 2; Gfx.scene.add(o); }
     this.ready = true;
   },
-  shows() { return [this.halo, this.haloCore, this.aura, ...this.auraRings, this.wedge, this.wedgeEdge, this.wedge2, this.wedgeEdge2, this.mark, this.circle]; },
+  shows() { return [this.halo, this.haloCore, this.aura, ...this.auraRings, this.wedge, this.wedgeEdge, this.wedge2, this.wedgeEdge2, this.mark, this.circle, this.pAura, ...this.pRings, ...this.pWedges.flat(), this.pMark]; },
   instanced(geo, mat, n, order) {
     const M = new THREE.InstancedMesh(geo, mat, n);
     M.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
@@ -300,6 +308,7 @@ const KragViews = {
     this.syncCracks(t);
     this.syncChasms(t);
     this.syncBalls(t);
+    this.syncPlayer(t);
     const r = Game.enemies.find((e) => e.type === 'krag' && !e.dead), R = r && r.model;
     if (!r || !R) return;
     this.syncMohawk(r, R, t);
@@ -379,6 +388,58 @@ const KragViews = {
       this.mark.position.set(a.to.x, a.to.y + 0.06, a.to.z);
       this.mark.scale.setScalar(a.phase === 'crouch' ? lerp(2.8, 1.8, clamp(a.t / a.wind, 0, 1)) : lerp(1.8, KJUMP.R / 0.95, near));
       U.mr.material.color.set(near > 0.75 && on ? '#ffffff' : on ? KRAG_ORANGE : '#ffb040');
+      U.mx.color.copy(U.mr.material.color);
+    }
+  },
+  // KRAG as the player: its mohawk fed by its heat (folded away with the head in first person); while the Molten
+  // Fist is drawn back, a red shell closing on it and the cone it will split open, on its own level and on the
+  // ground below where it falls off a ledge, white as it fires; and while a leap is aimed, the landing mark.
+  syncPlayer(t) {
+    const P = Game.player, R = typeof Render !== 'undefined' && Render.rigs && Render.rigs.krag;
+    if (!R) return;
+    if (!P || P.charId !== 'krag') { R.flames.g.visible = false; return; }
+    this.syncMohawk(P, R, t);
+    if (Camera.fp && Game.state === 'playing') R.flames.g.visible = false;
+    if (!R.mesh.visible || P.dead) return;
+    const p = P.rp || P.pos;
+    if (P.fistAim || P.ultCharging > 0) {
+      const k = P.fistAim ? 1 : clamp(P.ultCharging / KP_FIST.HOLD, 0, 1), c = P.chest(), beat = 0.5 + 0.5 * Math.sin(t * 14);
+      this.pAura.visible = !(Camera.fp && Game.state === 'playing');
+      this.pAura.position.set(c.x, c.y - 0.4, c.z);
+      this.pAura.scale.set(lerp(4.6, 2.4, k), lerp(4.2, 3, k), lerp(4.6, 2.4, k));
+      this.pAura.material.opacity = 0.08 + 0.18 * k + 0.06 * beat;
+      this.pRings.forEach((m, i) => {
+        const u = (t * 1.6 + i / 3) % 1;
+        m.visible = true;
+        m.position.set(p.x, p.y + 0.06, p.z);
+        m.scale.setScalar(lerp(10, 2.2, u));
+        m.material.opacity = (0.3 + 0.6 * u) * k;
+      });
+      if (P.fistAim) {
+        const yaw = P.fistAim.yaw, f = { x: fwdX(yaw), z: fwdZ(yaw) }, back = 0.6 + this.apexBack(), ax = p.x - f.x * back, az = p.z - f.z * back;
+        const gy = P.onGround ? p.y : World.groundAt(p.x, p.z, p.y + 0.3), lv = fistLevels({ x: p.x - f.x * 0.6, y: gy === -Infinity ? p.y : gy, z: p.z - f.z * 0.6 }, f);
+        const col = P.fistAim.real > KP_FIST.AIM - 0.4 && ((t * 24) | 0) % 2 ? '#ffffff' : ((t * 6) | 0) % 2 ? '#ff6a6a' : '#ff2a3a';
+        this.pWedges.forEach(([w, e], i) => {
+          const y = lv[i];
+          if (y === undefined) return;
+          for (const m of [w, e]) {
+            m.visible = true;
+            m.position.set(ax, y + (m === w ? 0.07 : 0.075), az);
+            m.rotation.y = yaw;
+            m.scale.setScalar(FIST.CONE + this.apexBack());
+            m.material.color.set(col);
+          }
+          w.material.opacity = 0.26 + 0.06 * beat; e.material.opacity = 0.9;
+        });
+      }
+    }
+    const L = P.leapAim && P.leapAim.plan;
+    if (L) {
+      const U = this.pMark.userData, k = clamp(P.leapAim.t / 0.35, 0, 1), on = ((t * (6 + 10 * k)) | 0) % 2;
+      this.pMark.visible = true;
+      this.pMark.position.set(L.x, L.y + 0.06, L.z);
+      this.pMark.scale.setScalar(lerp(2.6, KP_LEAP.R / 0.95, k));
+      U.mr.material.color.set(on ? KRAG_ORANGE : '#ffd070');
       U.mx.color.copy(U.mr.material.color);
     }
   },
@@ -518,6 +579,15 @@ const KragViews = {
   // its lights: the chest core and the mohawk by the heat, the fist as it charges or guards charged, fresh
   // cracks, fireballs and vents
   pushLights() {
+    // KRAG as the player: its core by the heat, the fist as the Fist is drawn back or the counter charges
+    const P = Game.player, PR = typeof Render !== 'undefined' && Render.rigs && Render.rigs.krag;
+    if (P && P.charId === 'krag' && !P.dead && PR && PR.mesh.visible) {
+      const k = P.heatK(), c = P.chest();
+      Gfx.light(c.x, c.y, c.z, '#ff7a2a', 0.6 + 1.8 * k, 3.5 + 3 * k);
+      const s = P.sheathe;
+      if (P.fistAim || P.ultCharging > 0) { const f = P.fistPos(); Gfx.light(f.x, f.y, f.z, '#ff2a3a', 3 + 3 * (P.fistAim ? 1 : 0), 8); }
+      else if (s && s.empowered) { const f = P.fistPos(); Gfx.light(f.x, f.y, f.z, s.charge >= 1 ? '#fff0c8' : '#ffd070', 1.5 + 2.5 * (s.charge || 0), 5); }
+    }
     const r = Game.enemies.find((e) => e.type === 'krag' && !e.dead);
     if (r && r.model && r.model.mesh.visible && !(r.dying && r.ko && (r.ko.stage === 'collapse' || r.ko.stage === 'down'))) {
       const k = r.heatK(), c = r.chest(), a = r.act;

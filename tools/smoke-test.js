@@ -1714,6 +1714,160 @@ async function run(browser, file, errors) {
       ok(asRonin && !Tutorial.active && P instanceof AegisPlayer && Math.abs(P.h - P.M.H) < 0.01 && Render.playerRig === Render.rigs.aegis && Game.state === 'playing', 'with AEGIS-07 picked, the Training tutorial plays as RONIN, and skipping it hands the hall back to AEGIS-07');
       Game.toMenu(); SaveData.tutorialDone = done0;
     }
+
+    // ---------- KRAG as the player ----------
+    // picked on the title screen, it plays as the brawler: a 2.75 m body on its own model, cold, its arm whole
+    const asKrag = () => {
+      Game.toMenu(); SaveData.character = 'krag'; UI.act('street'); T.frame(3);
+      p = Game.player; S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD;
+      Game.props = []; Game.projectiles = []; Game.hazards = []; Game.enemies = [];
+      return p;
+    };
+    // in front of it at a point d m along where it faces, at chest height
+    const inFront = (q, d = 2) => ({ x: q.pos.x + fwdX(q.yaw) * d, y: q.pos.y + 1.6, z: q.pos.z + fwdZ(q.yaw) * d });
+    p = asKrag(); Render.draw(1 / 60);
+    ok(p instanceof KragPlayer && p.h > 2.6 && p.heat === 0 && p.arm === KP_ARM.MAX && Render.playerRig === Render.rigs.krag && !Render.rigs.ronin.mesh.visible && Render.rigs.krag.flames.g.visible, 'picking KRAG plays it: a 2.75 m body on its own model with its mohawk lit, cold, its arm whole');
+    // the string: jab, cross, hook, haymaker, each landing, the finisher hardest; the blows feed its heat
+    {
+      const k1 = T.enemy('scrapper', 2.6, 0, { frozen: true, hp: 500 });
+      T.face(k1.pos.x, k1.pos.z);
+      const hits = [];
+      let h0 = k1.hp;
+      for (let i = 0; i < 4; i++) { T.tap('Mouse0'); T.frame(i === 3 ? 40 : 17); hits.push(h0 - k1.hp); h0 = k1.hp; }
+      ok(hits.every((d) => d > 0) && hits[3] > hits[0] * 2 && p.heat > 15, `the string lands jab, cross, hook and haymaker (${hits.join(', ')}) and the blows feed its heat (${p.heat.toFixed(0)})`);
+      // held: the uppercut opens a string and throws the scrapper up
+      Game.enemies = [];
+      const k2 = T.enemy('scrapper', 2.6, 0, { hp: 500 });
+      T.face(k2.pos.x, k2.pos.z); T.frame(30);
+      T.press('Mouse0'); T.frame(25); T.release('Mouse0');
+      let up = 0;
+      for (let i = 0; i < 30; i++) { T.frame(1); up = Math.max(up, k2.pos.y - p.pos.y); }
+      ok(500 - k2.hp >= 30 && up > 1, `a held attack is an uppercut that launches (${500 - k2.hp}, thrown ${up.toFixed(1)} m up)`);
+      // at full heat its blows hit a quarter harder
+      Game.enemies = []; p.heat = KP_HEAT.MAX;
+      const k3 = T.enemy('scrapper', 2.6, 0, { frozen: true, hp: 500 });
+      T.face(k3.pos.x, k3.pos.z); T.frame(40); T.tap('Mouse0'); T.frame(20);
+      ok(500 - k3.hp === Math.round(KP_BLOWS.jab.dmg * KP_HEAT.FULL_DMG), `at full heat a jab hits a quarter harder (${500 - k3.hp})`);
+      Game.enemies = [];
+    }
+    // E: a guard that takes blows from the front at a fraction and wears the arm; not from behind
+    {
+      p = asKrag(); T.frame(5);
+      T.press('KeyE'); T.frame(30);
+      const before = p.hp + p.shield, arm0 = p.arm;
+      p.iframes = 0;
+      const front = p.takeHit({ dmg: 20, from: inFront(p), kind: 'melee', knock: 12 });
+      const lost = before - p.hp - p.shield, armLost = arm0 - p.arm;
+      p.iframes = 0;
+      const back = p.takeHit({ dmg: 20, from: inFront(p, -2), kind: 'melee', knock: 12 });
+      T.release('KeyE'); T.frame(10);
+      ok(front === 'blocked' && lost > 0 && lost <= 20 * KP_ARM.MUL + 0.01 && armLost > 10 && back === 'hit', `the guard takes a blow from the front for ${lost.toFixed(1)} of 20, wearing the arm ${armLost.toFixed(0)}; one from behind lands (${back})`);
+      // worn through, the arm breaks: no guard until it re-forms
+      p = asKrag(); T.frame(5);
+      T.press('KeyE'); T.frame(20);
+      for (let i = 0; i < 8 && p.armDown <= 0; i++) { p.iframes = 0; p.takeHit({ dmg: 30, from: inFront(p), kind: 'melee', knock: 12 }); T.frame(2); }
+      const broke = p.armDown > 0 && !p.sheathe;
+      T.release('KeyE'); T.frame(30); T.tap('KeyE'); T.frame(3);
+      const refused = !p.sheathe;
+      T.frame(Math.ceil(KP_ARM.DOWN * 120 / 2) + 30);
+      ok(broke && refused && p.armDown <= 0 && p.arm === KP_ARM.BACK, `blocked blows wear the arm until it breaks, E does nothing while it's broken, and it re-forms at ${p.arm}`);
+    }
+    // E on the blow: a parry, and held after it the molten counter, a cone of fire through what's in front
+    {
+      p = asKrag(); T.frame(5);
+      const c1 = T.enemy('scrapper', 3, 0, { frozen: true, hp: 500 }), c2 = T.enemy('scrapper', 9, 1.5, { frozen: true, hp: 500 }), c3 = T.enemy('scrapper', -4, 0, { frozen: true, hp: 500 });
+      T.face(c1.pos.x, c1.pos.z); T.frame(30);
+      T.press('KeyE'); T.frame(2); p.iframes = 0;
+      const r = p.takeHit({ dmg: 12, from: c1.center(), kind: 'melee', source: c1, knock: 12 });
+      const heat = p.heat;
+      T.frame(Math.ceil(COUNTER.CHARGE * 120 / 2) + 5);
+      const full = p.sheathe && p.sheathe.charge >= 1;
+      T.release('KeyE'); T.frame(60);
+      ok(r === 'parried' && heat >= KP_HEAT.PARRY && full && 500 - c1.hp > 80 && 500 - c2.hp > 60 && c3.hp === 500, `E on the blow parries (feeding the heat ${heat.toFixed(0)}), and the charged counter burns a cone ahead (${500 - c1.hp}, ${500 - c2.hp} further out) but not behind (${500 - c3.hp})`);
+      Game.enemies = [];
+    }
+    // at full heat a blow on the guard sets the arm off: everything round it is blown away, the heat spent
+    {
+      p = asKrag(); T.frame(5); p.heat = KP_HEAT.MAX;
+      const ring = [0, 1, 2, 3].map((i) => T.enemy('scrapper', Math.cos(i * 1.57 + 0.3) * 4, Math.sin(i * 1.57 + 0.3) * 4, { frozen: true, hp: 500 }));
+      T.press('KeyE'); T.frame(30); p.iframes = 0;
+      const hp0 = p.hp + p.shield;
+      const r = p.takeHit({ dmg: 20, from: inFront(p), kind: 'melee', knock: 12 });
+      T.frame(20); T.release('KeyE'); T.frame(10);
+      ok(r === 'blocked' && p.heat === 0 && p.hp + p.shield === hp0 && ring.every((q) => 500 - q.hp > 40), `at full heat a blow on the guard detonates the arm (${ring.map((q) => 500 - q.hp).join(', ')} all round), takes no damage and spends the heat`);
+      Game.enemies = [];
+    }
+    // F: a leap onto the crosshair's spot, landing with a blast
+    {
+      p = asKrag(); T.frame(5);
+      const l1 = T.enemy('scrapper', 13, 0, { frozen: true, hp: 500 });
+      T.face(l1.pos.x, l1.pos.z, -0.2); T.frame(10);
+      const x0 = { x: p.pos.x, z: p.pos.z };
+      T.press('KeyF'); T.frame(30);
+      const plan = p.leapAim && p.leapAim.plan;
+      T.release('KeyF');
+      let flew = false;
+      for (let i = 0; i < 180 && !(flew && p.onGround); i++) { T.frame(1); if (p.leap) flew = true; }
+      T.frame(10);
+      ok(plan && flew && distXZ(p.pos, x0) > 9 && 500 - l1.hp >= 25 && p.utilCD > 0, `holding F aims a leap (mark ${plan ? distXZ(plan, x0).toFixed(1) : '-'} m off); letting go leaps ${distXZ(p.pos, x0).toFixed(1)} m and the landing hits (${500 - l1.hp}); then it cools down`);
+      Game.enemies = []; Game.hazards = [];
+    }
+    // attack out of a dash: the shoulder charge plows through and explodes
+    {
+      p = asKrag(); T.frame(5);
+      const s1 = T.enemy('scrapper', 5, 0, { frozen: true, hp: 500 });
+      T.face(s1.pos.x, s1.pos.z); T.frame(5);
+      T.press('KeyW'); T.tap('ShiftLeft'); T.tap('Mouse0');
+      const charged = !!p.shoulder;
+      T.release('KeyW'); T.frame(60);
+      ok(charged && 500 - s1.hp >= KP_SHOULDER.DMG, `attack out of a dash is a shoulder charge (${500 - s1.hp})`);
+      Game.enemies = [];
+    }
+    // Q: the Molten Fist, drawn back into bullet time, then a chasm through the cone in front and nothing behind
+    {
+      p = asKrag(); T.frame(5);
+      const f1 = T.enemy('scrapper', 7, 0, { frozen: true, hp: 500 }), f2 = T.enemy('scrapper', 18, 3, { frozen: true, hp: 500 }), f3 = T.enemy('scrapper', -8, 0, { frozen: true, hp: 500 });
+      T.face(f1.pos.x, f1.pos.z); T.frame(5);
+      p.ultCharge = 0.5; T.tap('KeyQ'); T.frame(3);
+      const refused = !p.fistAim && p.ultCharging <= 0;
+      p.ultCharge = 1;
+      T.press('KeyQ'); T.frame(Math.ceil(KP_FIST.HOLD * 60) + 5);
+      const aimed = !!p.fistAim && Game.btKind === 'aim';
+      T.release('KeyQ'); T.frame(5); T.tap('Mouse0'); T.frame(100);
+      ok(refused && aimed && !p.fistAim && p.ultCharge === 0 && 500 - f1.hp >= KP_FIST.DMG && 500 - f2.hp >= KP_FIST.DMG && f3.hp === 500 && Game.hazards.some((h) => h instanceof KragFistChasm), `the Molten Fist needs a full meter (${refused}), draws back into bullet time (${aimed}), and its chasm hits what's in the cone (${500 - f1.hp}, ${500 - f2.hp} 18 m out) and not behind (${500 - f3.hp})`);
+      Game.enemies = []; Game.hazards = [];
+    }
+    // the character select: every character on the stage plays every skill's demo with its real moves, with no
+    // page error and no shader compiled; confirming picks it, and leaving takes the stage down
+    {
+      Game.toMenu(); SaveData.character = 'ronin';
+      Render.draw(1 / 60);
+      const progs0 = Gfx.renderer.info.programs.length;
+      UI.act('char');
+      const sf = (n) => { for (let i = 0; i < n; i++) { Game.realTime += 1 / 60; Showroom.frame(1 / 60); if (i % 3 === 0) Render.draw(1 / 60); } };
+      sf(10);
+      const opened = UI.openPanel() === 'select' && Showroom.active && Game.player && Game.player.charId === 'ronin' && Game.state === 'menu';
+      const played = [];
+      for (const C of ROSTER) {
+        UI.act('sel-pick', { dataset: { id: C.id } }); sf(10);
+        const shown = Game.player.charId === C.id && Render.playerRig === Render.rigs[C.id] && document.getElementById('sel-name').textContent === C.name && document.querySelectorAll('#sel-stats .pip').length === STAT_DEFS.length * 5;
+        let n = 0;
+        for (const k of C.skills) {
+          UI.act('sel-skill', { dataset: { demo: k.demo } });
+          const marked = document.querySelector(`#sel-skills [data-demo="${k.demo}"]`).classList.contains('on');
+          sf(150);
+          if (marked && Showroom.demo === k.demo) n++;
+        }
+        UI.act('sel-skill', { dataset: { demo: Showroom.demo } }); sf(90);
+        played.push(`${C.id} ${shown ? n + '/' + C.skills.length : 'not shown'}`);
+      }
+      const progs = Gfx.renderer.info.programs.length;
+      UI.act('sel-pick', { dataset: { id: 'krag' } }); UI.act('sel-confirm');
+      const picked = SaveData.character === 'krag' && UI.openPanel() === 'menu' && !Showroom.active && !Game.player && document.getElementById('char-name').textContent === 'KRAG';
+      ok(opened && played.every((q) => /(\d+)\/\1$/.test(q)) && progs === progs0 && picked, `the character select stages each character and plays every skill's demo (${played.join(', ')}; ${progs - progs0} shaders compiled), and confirming picks KRAG and takes the stage down`);
+      UI.act('char'); sf(5); UI.act('sel-back');
+      ok(SaveData.character === 'krag' && !Showroom.active && !Game.player && UI.openPanel() === 'menu', 'backing out of the select keeps the pick and takes the stage down');
+    }
     SaveData.character = 'ronin';
     // ---------- Training, the tutorial, touch controls and the Sawblade ----------
     {
@@ -1928,8 +2082,8 @@ async function run(browser, file, errors) {
 
   // ---------- random play ----------
   // Endless from wave 6, so every enemy type turns up; then the rival fight; then the KRAG fight; then the
-  // training hall; then endless and both boss fights again as AEGIS-07
-  const runs = [['endless', seconds, 'ronin'], ['boss', Math.min(seconds, 30), 'ronin'], ['krag', Math.min(seconds, 30), 'ronin'], ['training', Math.min(seconds, 15), 'ronin'], ['endless', Math.min(seconds, 30), 'aegis'], ['boss', Math.min(seconds, 30), 'aegis'], ['krag', Math.min(seconds, 30), 'aegis']];
+  // training hall; then endless and both boss fights again as AEGIS-07, and again as KRAG
+  const runs = [['endless', seconds, 'ronin'], ['boss', Math.min(seconds, 30), 'ronin'], ['krag', Math.min(seconds, 30), 'ronin'], ['training', Math.min(seconds, 15), 'ronin'], ['endless', Math.min(seconds, 30), 'aegis'], ['boss', Math.min(seconds, 30), 'aegis'], ['krag', Math.min(seconds, 30), 'aegis'], ['endless', Math.min(seconds, 30), 'krag'], ['boss', Math.min(seconds, 30), 'krag'], ['krag', Math.min(seconds, 30), 'krag']];
   for (const [mode, secs, char] of runs) {
   const res = await page.evaluate(async ([frames, mode, char]) => {
     const problems = [];
@@ -1942,7 +2096,7 @@ async function run(browser, file, errors) {
     S.gameplay.invincible = true;
     T.frame(1); Render.draw(1 / 60);
     const progs0 = Gfx.renderer.info.programs.length, progSet0 = new Set(Gfx.renderer.info.programs);
-    const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'Mouse0', 'KeyE', 'Mouse2', 'KeyF'].concat(char === 'aegis' ? ['KeyQ', 'KeyR'] : []);
+    const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'Mouse0', 'KeyE', 'Mouse2', 'KeyF'].concat(char === 'aegis' ? ['KeyQ', 'KeyR'] : char === 'krag' ? ['KeyQ'] : []);
     const B = World.def.bounds, PM = Camera.PITCH_MAX + 1e-6;
     // the lowest a body may stand: the street, or the bed of the Foundry's molten river
     const floorY = Math.min(World.def.groundY, ...((World.def.lava || []).map((r) => r.y)));
@@ -1964,8 +2118,10 @@ async function run(browser, file, errors) {
         if (e) { Camera.yaw = yawOf(e.pos.x - p.x, e.pos.z - p.z); Camera.pitch = -0.15; }
       }
       if (Game.state === 'pick') Game.chooseUpgrade(UI.pickIds[0]);
-      // AEGIS gets its strike now and then, so the aim, the probe and the eruption get played
-      if (char === 'aegis' && f % 400 === 200) Game.player.ultCharge = 1;
+      // AEGIS and KRAG get their ultimates now and then, so the aim and what it fires get played
+      if (char !== 'ronin' && f % 400 === 200) Game.player.ultCharge = 1;
+      // KRAG reaches full heat now and then, so the detonation and the eruption get played
+      if (char === 'krag' && f % 500 === 250) Game.player.heat = KP_HEAT.MAX;
       // a third of the way into the rival fight, bring it to half health so its blade phase gets played too;
       // in the KRAG fight, fill its heat now and then so the Molten Fist and the charged guard get played
       if (mode === 'boss' && f === Math.floor(frames / 3)) { const r = Game.enemies.find((e) => e.isBoss && !e.spawning); if (r) r.hp = Math.floor(r.maxHp / 2) - 1; }
@@ -2002,7 +2158,7 @@ async function run(browser, file, errors) {
     S.visuals.resScale = 1; Render.resize();
     return r;
   }, [Math.round(secs * 60), mode, char]);
-  const who = char === 'aegis' ? ' as AEGIS-07' : '';
+  const who = char === 'ronin' ? '' : ' as ' + (char === 'aegis' ? 'AEGIS-07' : 'KRAG');
   if (mode === 'endless') {
     console.log(`  endless from wave 6${who}: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies (${res.types}), style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
     if (res.kills < 1 && !res.hits) errors.push(`${name}: random play${who} hit nothing`);

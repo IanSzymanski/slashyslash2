@@ -180,18 +180,19 @@ const Touch = {
     if (!p) return;
     this.el.style.setProperty('--t-size', S.controls.touchSize || 1);
     this.el.style.setProperty('--t-alpha', S.controls.touchOpacity == null ? 0.6 : S.controls.touchOpacity);
-    // AEGIS: E is the beam (gun) or the block (blade), and F held switches modes, filling as it goes
-    const A = p.charId === 'aegis', free = S.gameplay.invincible;
-    this.setText(this.btn.sheathe, A ? (p.mode === 'gun' ? 'BEAM' : 'BLOCK') : 'PARRY');
-    this.setText(this.btn.utility, A ? 'MODE' : 'BEAM');
+    // the buttons read what they do for this character (roster.js). AEGIS: E is the beam (gun) or the block
+    // (blade), and F held switches modes, filling as it goes. KRAG: E is its guard, F its leap, lit while aimed.
+    const A = p.charId === 'aegis', K = p.charId === 'krag', free = S.gameplay.invincible;
+    this.setText(this.btn.sheathe, A ? (p.mode === 'gun' ? 'BEAM' : 'BLOCK') : touchLabel('sheathe', p.charId));
+    this.setText(this.btn.utility, touchLabel('utility', p.charId));
     const U = p.utility(), cd = A ? (p.swap ? p.swap.t / AP.SWITCH : 1) : U && p.utilCD > 0 ? 1 - p.utilCD / U.cooldown : 1;
-    this.btn.utility.style.setProperty('--cd', p.charging ? p.charging.k : cd);
+    this.btn.utility.style.setProperty('--cd', K && p.leapAim ? 1 : p.charging ? p.charging.k : cd);
     this.btn.utility.classList.toggle('cooling', !A && !p.charging && cd < 1);
-    this.btn.utility.classList.toggle('full', !!(p.charging && p.charging.k >= 1));
-    const eOut = A && p.mode === 'gun' ? p.shield < AP.BEAM_COST && !free : p.parryCD > 0 || (p.shield < PC.PARRY_COST && !free);
+    this.btn.utility.classList.toggle('full', K ? !!p.leapAim : !!(p.charging && p.charging.k >= 1));
+    const eOut = A && p.mode === 'gun' ? p.shield < AP.BEAM_COST && !free : K ? p.parryCD > 0 || p.armDown > 0 : p.parryCD > 0 || (p.shield < PC.PARRY_COST && !free);
     this.btn.sheathe.classList.toggle('cooling', eOut);
     this.btn.dash.classList.toggle('cooling', p.dashCharges <= 0);
-    this.btn.ultimate.hidden = !(p.ultCharge >= 1 || p.ult || p.ultAim);
+    this.btn.ultimate.hidden = !(p.ultCharge >= 1 || p.ult || p.ultAim || p.fistAim);
     this.btn.view.firstElementChild.textContent = S.camera.distance > 0.5 ? '1P' : '3P';
   },
 };

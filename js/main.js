@@ -12,6 +12,7 @@
       const open = UI.openPanel();
       if (Game.state === 'playing') Game.pause();
       else if (open === 'settings' || open === 'howto') UI.act('back');
+      else if (open === 'select') UI.act('sel-back');
       // Esc can't resume: browsers don't let it lock the pointer
       else if (Game.state === 'paused' && !Input.pressed.has('Escape')) UI.resumeGame();
       Input.consume();
@@ -39,10 +40,13 @@
           Camera.update(realDt, camD, p.dashT > 0 || p.iaido ? 8 : 5 * clamp((Controller.hspeed(p) - p.M.RUN) / (p.M.SPRINT - p.M.RUN), 0, 1));
         }
       } else if (Game.state === 'menu') {
-        // the title screen: a slow orbit framed for the arena
-        const O = World.def.orbit;
-        Camera.orbit(Arena.center(), Game.realTime, O.pitch, O.lift);
-        Camera.update(realDt, O.dist);
+        // the character select's stage (showroom.js), or the title screen's slow orbit framed for the arena
+        if (Showroom.active) Showroom.frame(realDt);
+        else {
+          const O = World.def.orbit;
+          Camera.orbit(Arena.center(), Game.realTime, O.pitch, O.lift);
+          Camera.update(realDt, O.dist);
+        }
         Input.consume();
       } else {
         if (Game.player) { Render.interp(); Camera.update(realDt); }
@@ -81,6 +85,7 @@
       if (e.code !== 'Escape' || Input.codes('pause').includes('Escape')) return;
       const open = UI.openPanel();
       if (open === 'settings' || open === 'howto') UI.act('back');
+      else if (open === 'select') UI.act('sel-back');
     });
     // clicking the scene beside the pause panel resumes (which also retries a refused lock);
     // clicking it mid-run without the lock, after an upgrade pick say, takes the lock back
