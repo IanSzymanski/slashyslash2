@@ -14,8 +14,8 @@ const ACTIONS = [
   { id: 'crouch', label: 'Crouch / Slide / Plunge' },
   { id: 'dash', label: 'Dash' },
   { id: 'attack', label: 'Slash (tap) / Heavy (hold)' },
-  { id: 'sheathe', label: 'Parry stance (costs shield) / AEGIS: beam or block' },
-  { id: 'utility', label: 'Sword beam (tap / hold to charge) / AEGIS: hold to switch mode' },
+  { id: 'sheathe', label: 'Parry stance (costs shield) / AEGIS: beam or block / KRAG: guard' },
+  { id: 'utility', label: 'Sword beam (tap / hold to charge) / AEGIS: hold to switch mode / KRAG: hold to aim a leap' },
   { id: 'tether', label: 'Tether (tap fling / hold zip / grab)' },
   { id: 'ultimate', label: 'Ultimate (hold)' },
   { id: 'reload', label: 'Reload (AEGIS gun)' },
@@ -104,7 +104,7 @@ function applyPreset(name) {
 }
 
 // unlocks.aegis records the rival's defeat (AEGIS-07 is playable either way).
-// character: who the next run plays as ('ronin' or 'aegis')
+// character: who the next run plays as (a roster id: 'ronin', 'aegis', 'krag')
 const SaveData = deepMerge({ bestWave: 0, bestScore: 0, demoCleared: false, bossKills: 0, unlocks: { aegis: false, krag: false }, character: 'ronin' }, (() => {
   try { return JSON.parse(safeStorageGet(SAVE_KEY) || 'null'); } catch (e) { return null; }
 })());

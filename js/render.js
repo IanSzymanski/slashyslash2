@@ -14,18 +14,16 @@ const Render = {
     hudCanvas.width = VIEW_W; hudCanvas.height = VIEW_H;
     this.ctx = hudCanvas.getContext('2d');
     this.ctx.imageSmoothingEnabled = false;
-    // a rig per playable character; playerRig is whichever the player is drawn with
-    this.rigs = { ronin: Rig.build(MODELS.player), aegis: Rig.build(MODELS.aegis) };
-    for (const k in this.rigs) {
-      const R = this.rigs[k];
+    // a rig per playable character in the roster (roster.js); playerRig is whichever the player is drawn with
+    this.rigs = {};
+    for (const C of ROSTER) {
+      const R = (this.rigs[C.id] = Rig.build(MODELS[C.model]));
       R.mesh.visible = false;
       // yaw last, so the body's forward tilt and bank are about its own axes
       R.mesh.rotation.order = 'YXZ';
+      if (C.rig) C.rig(R);
       Gfx.scene.add(R.mesh);
     }
-    // AEGIS as the player burns cyan, apart from the rival's blue
-    const BM = this.rigs.aegis.bladeMats;
-    BM.glow.color.set(AEGIS_P.glow); BM.halo.color.set(AEGIS_P.glow); BM.core.color.set('#eafcff');
     this.playerRig = this.rigs.ronin;
     this.pickupGeo = Gfx.boxGeometry([{ min: { x: -0.08, y: -0.22, z: -0.08 }, max: { x: 0.08, y: 0.22, z: 0.08 } }, { min: { x: -0.22, y: -0.08, z: -0.08 }, max: { x: 0.22, y: 0.08, z: 0.08 } }]);
     this.pickupMat = new THREE.MeshBasicMaterial({ color: '#5aff7a' });
@@ -58,9 +56,11 @@ const Render = {
     SawView.build(); Tutorial.buildMarker();
     SawView.g.visible = Tutorial.marker.visible = true;
     Gfx.scene.add(g);
-    for (const k in this.rigs) this.rigs[k].mesh.visible = true;
+    for (const k in this.rigs) { this.rigs[k].mesh.visible = true; if (this.rigs[k].flames) this.rigs[k].flames.g.visible = true; }
+    Showroom.build(); Showroom.ring.visible = Showroom.disc.visible = true;
     Gfx.renderer.compile(Gfx.scene, Gfx.camera);
-    for (const k in this.rigs) this.rigs[k].mesh.visible = false;
+    for (const k in this.rigs) { this.rigs[k].mesh.visible = false; if (this.rigs[k].flames) this.rigs[k].flames.g.visible = false; }
+    Showroom.ring.visible = Showroom.disc.visible = false;
     Views.prewarmHide();
     SawView.g.visible = Tutorial.marker.visible = false;
     Gfx.scene.remove(g);
@@ -159,7 +159,8 @@ const Render = {
       m.visible = !(pk.t > 11 && ((pk.t * 10) | 0) % 2);
     }
     for (const [pk, m] of this.pickups) if (!live.has(pk)) { Gfx.scene.remove(m); this.pickups.delete(pk); }
-    // the player: posed from the 2D pose (AEGIS from its own), fading when the camera comes close, blinking while hurt
+    // the player: posed by its roster entry (RONIN from the 2D pose, AEGIS and KRAG from their own), fading when the
+    // camera comes close, blinking while hurt
     const P = Game.player, R = (P && this.rigs[P.charId]) || this.rigs.ronin;
     for (const k in this.rigs) if (this.rigs[k] !== R) this.rigs[k].mesh.visible = false;
     this.playerRig = R;
@@ -172,7 +173,7 @@ const Render = {
       // the body tips and rolls about a point pivotY up (the feet on the ground, its middle in the air)
       const v = this._pv.set(0, py, 0).applyEuler(R.mesh.rotation);
       R.mesh.position.set(p.x - v.x, p.y + py - v.y, p.z - v.z);
-      if (P.charId === 'aegis') AegisPose.apply(R, P); else PlayerPose.apply(R, P);
+      charDef(P.charId).pose(R, P);
       // first person looks out from the model's eyes, wherever the pose has put the head (crouched, sliding,
       // leaning into a sprint), kept as an offset from the body so the camera never lags it
       const hv = Rig.boneWorld(R, 'head', this._hv || (this._hv = new THREE.Vector3()));
@@ -182,7 +183,7 @@ const Render = {
       R.mat.opacity = want * blink;
       R.mat.depthWrite = R.mat.opacity > 0.99;
       if (R.bladeMats) { R.bladeMats.glow.opacity = 0.75 * want; R.bladeMats.halo.opacity = 0.22 * want; }
-      else {
+      else if (P.charId === 'ronin') {
         // the blade's halo burns brighter as the beam charges, and gold once it's full
         const ck = P.charging ? P.charging.k : 0, hot = ck >= 1 && ((Game.realTime * 16) | 0) % 2;
         R.extras[0].material.opacity = Math.min(1, 0.2 * want * (1 + 3.5 * ck));
@@ -221,7 +222,7 @@ const Render = {
     if (!P || P.dead || !R.mesh.visible) return;
     if (P.charId === 'aegis') {
       if (P.bladeOut > 0.5) { const v = this._v.set(0, AEGIS_BLADE * 0.5, 0); R.bones.weapon.localToWorld(v); Gfx.light(v.x, v.y, v.z, AEGIS_P.glow, 1.4, 4); }
-    } else {
+    } else if (P.charId === 'ronin') {
       const v = this._v.set(0, 0.55, 0.03);
       R.bones.weapon.localToWorld(v);
       const sh = P.sheathe, ck = P.charging ? P.charging.k : sh && sh.empowered ? sh.charge : 0;
@@ -238,6 +239,7 @@ const Render = {
     Gfx.processRebake();
     this.syncModels(realDt);
     Views.sync();
+    Showroom.sync();
     Tutorial.syncMarker(t);
     Training.sync(t);
     FX.sync(Gfx.camera);
@@ -246,6 +248,7 @@ const Render = {
     Gfx.nearCut.value = Camera.fp && G.state === 'playing' ? 0.28 : 0;
     Gfx.beginFrame();
     this.bladeLight();
+    Showroom.pushLights();
     BossViews.pushLights();
     AegisViews.pushLights();
     KragViews.pushLights();
@@ -333,6 +336,7 @@ const Render = {
       ux += 14;
     }
     if (p.charId === 'aegis') this.drawAegisHUD(ctx, p, x, y2, t);
+    else if (p.charId === 'krag') this.drawKragHUD(ctx, p, x, y2, t);
     // parry stance: cooldown and shield cost
     else {
       const px = x + 48, py = y2 + 10;
@@ -346,7 +350,7 @@ const Render = {
     }
     // utility: fills as its cooldown runs down, flashes when pressed too early; a charge fills it white-hot
     // and it flickers gold once full
-    const U = p.utility();
+    const U = p.charId === 'krag' ? null : p.utility();
     if (U) {
       const ux = x + 88, uy = y2 + 10, C = p.charging;
       const k = p.utilCD > 0 ? 1 - p.utilCD / U.cooldown : 1;
@@ -425,12 +429,14 @@ const Render = {
     this.drawUltMeter(ctx, x + 9, y2 + 31, p, t);
   },
   // the ultimate's meter: twelve teeth filling round a disc as kills charge it, spinning and flashing when
-  // it's ready (hold the key), turning while the saw runs or the strike is aimed. AEGIS's is cyan.
+  // it's ready (hold the key), turning while the saw runs, the strike is aimed or the Fist is drawn back. AEGIS's
+  // is cyan, KRAG's molten.
   drawUltMeter(ctx, cx, cy, p, t) {
-    const A = p.charId === 'aegis', ready = p.ultCharge >= 1, active = A ? !!p.ultAim : !!p.ult;
-    const lit0 = A ? AEGIS_P.glow : '#ff3048', dark = A ? '#10222c' : '#3a1a24', core = A ? '#1a6a9a' : '#b8142a';
-    const hold = A ? (p.ultAim ? 1 : clamp(p.ultCharging / AP.ULT_HOLD, 0, 1)) : p.ultHold, name = A ? 'STRIKE' : 'SAWBLADE';
-    const spin = active ? (A ? t * 6 : p.ult.spin) : ready ? t * 4 : 0, n = 12;
+    const A = p.charId === 'aegis', K = p.charId === 'krag', ready = p.ultCharge >= 1, active = A ? !!p.ultAim : K ? !!p.fistAim : !!p.ult;
+    const lit0 = A ? AEGIS_P.glow : K ? '#ff7a2a' : '#ff3048', dark = A ? '#10222c' : K ? '#2a160c' : '#3a1a24', core = A ? '#1a6a9a' : K ? '#b8400e' : '#b8142a';
+    const hold = A ? (p.ultAim ? 1 : clamp(p.ultCharging / AP.ULT_HOLD, 0, 1)) : K ? (p.fistAim ? 1 : clamp(p.ultCharging / KP_FIST.HOLD, 0, 1)) : p.ultHold;
+    const name = A ? 'STRIKE' : K ? 'MOLTEN FIST' : 'SAWBLADE';
+    const spin = active ? (A || K ? t * 6 : p.ult.spin) : ready ? t * 4 : 0, n = 12;
     for (let i = 0; i < n; i++) {
       const a = spin + (i / n) * TAU - Math.PI / 2;
       const lit = active || i / n < p.ultCharge;
@@ -447,9 +453,9 @@ const Render = {
     }
     const key = hudKey('ultimate');
     // a refused press (not charged yet) flashes it red
-    if (A && p.ultFlash > 0 && ((t * 20) | 0) % 2) drawText(ctx, name, cx + 13, cy - 3, { color: '#ff3048' });
+    if ((A || K) && p.ultFlash > 0 && ((t * 20) | 0) % 2) drawText(ctx, name, cx + 13, cy - 3, { color: '#ff3048' });
     else if (active) drawText(ctx, name, cx + 13, cy - 3, { color: '#ffffff' });
-    else drawText(ctx, (ready ? key + ' ' : '') + name, cx + 13, cy - 3, { color: ready ? (((t * 3) | 0) % 2 ? (A ? AEGIS_P.hi : '#ff8a9a') : '#ffffff') : A ? '#4a5a6a' : '#5a4a5a' });
+    else drawText(ctx, (ready ? key + ' ' : '') + name, cx + 13, cy - 3, { color: ready ? (((t * 3) | 0) % 2 ? (A ? AEGIS_P.hi : K ? '#ffd070' : '#ff8a9a') : '#ffffff') : A ? '#4a5a6a' : K ? '#5a4a40' : '#5a4a5a' });
   },
   // ---------- the bosses ----------
   // Its health along the bottom of the screen: the rival's with the half-health mark of phase 1 and its shield,
@@ -720,6 +726,7 @@ const Render = {
   // Aiming the strike in bullet time: speed lines converging on the landing ring, a reticle on it, and the time
   // left before it fires itself.
   drawAimCue(ctx, p, k, t) {
+    if (p.charId === 'krag') { this.drawFistCue(ctx, p, k, t); return; }
     const A = p.ultAim;
     if (!A || !A.plan) return;
     const s = this.project({ x: A.plan.land.x, y: A.plan.land.y + 0.5, z: A.plan.land.z });
@@ -740,5 +747,53 @@ const Render = {
     const w = 80, bx = Math.round(VIEW_W / 2 - w / 2), by = VIEW_H / 2 + 26;
     ctx.fillStyle = '#0b0910'; ctx.fillRect(bx - 1, by - 1, w + 2, 3);
     ctx.fillStyle = AEGIS_P.hi; ctx.fillRect(bx, by, Math.round(w * left), 1);
+  },
+  // ---------- KRAG ----------
+  // E: the guard, its diamond the onyx arm (emptying as it wears; dark and filling back up while it's broken). F:
+  // the leap on its cooldown, lit while it's aimed. Heat at the bottom right, white and flickering at full. The
+  // Molten Fist's charge is the ultimate meter under them.
+  drawKragHUD(ctx, p, x, y2, t) {
+    {
+      const px = x + 48, py = y2 + 10, broken = p.armDown > 0, fl = p.parryFlash > 0 && ((t * 20) | 0) % 2;
+      ctx.fillStyle = '#0b0910'; this.diamond(ctx, px, py, 4);
+      ctx.fillStyle = fl ? '#ff3048' : broken ? '#1a1012' : '#2a2026'; this.diamond(ctx, px, py, 3);
+      if (broken) this.fillDiamond(ctx, px, py, 1 - p.armDown / KP_ARM.DOWN, '#6a2a14');
+      else if (!fl) this.fillDiamond(ctx, px, py, p.arm / KP_ARM.MAX, p.sheathe ? '#bfe8ff' : p.charged() ? (((t * 12) | 0) % 2 ? '#ffffff' : '#ffd060') : p.wearK() > 0.7 ? '#ff8a2a' : '#9a8aa8');
+      drawText(ctx, 'GUARD', px + 7, y2 + 8, { color: broken ? '#5a4a4a' : '#7a849c' });
+    }
+    {
+      const U = p.utility(), ux = x + 88, uy = y2 + 10, k = p.utilCD > 0 ? 1 - p.utilCD / U.cooldown : 1, fl = p.utilFlash > 0 && ((t * 20) | 0) % 2;
+      ctx.fillStyle = '#0b0910'; this.diamond(ctx, ux, uy, 4);
+      ctx.fillStyle = fl ? '#ffffff' : p.leapAim ? '#ffd070' : k >= 1 ? '#ff7a2a' : '#2a160c'; this.diamond(ctx, ux, uy, 3);
+      if (!p.leapAim && k < 1) this.fillDiamond(ctx, ux, uy, k, '#8a3a10');
+      drawText(ctx, (hudKey('utility') + ' LEAP').trim(), ux + 7, y2 + 8, { color: k >= 1 ? '#7a849c' : '#5a4a5a' });
+    }
+    {
+      const bx = VIEW_W - 8, by = VIEW_H - 14, w = 60, k = p.heatK(), max = p.charged(), fl = ((t * 12) | 0) % 2;
+      drawText(ctx, 'HEAT', bx, by - 9, { align: 'right', color: max ? (fl ? '#ffffff' : '#ffd070') : p.ventT > 0 ? '#5a4a4a' : '#c08a6a' });
+      ctx.fillStyle = '#0b0910'; ctx.fillRect(bx - w - 1, by - 1, w + 2, 5);
+      ctx.fillStyle = '#2a120a'; ctx.fillRect(bx - w, by, w, 3);
+      ctx.fillStyle = max ? (fl ? '#fff0c8' : '#ffd060') : k > 0.66 ? '#ffa840' : k > 0.33 ? '#ff7a2a' : '#c0400e';
+      ctx.fillRect(bx - w, by, Math.round(w * k), 3);
+      if (!max) { ctx.fillStyle = '#ffd090'; ctx.fillRect(bx - w, by, Math.round(w * k), 1); }
+    }
+  },
+  // The Molten Fist drawn back in bullet time: red speed lines closing on the cone's middle, and the time left
+  // before it fires itself.
+  drawFistCue(ctx, p, k, t) {
+    const A = p.fistAim;
+    if (!A) return;
+    const s = this.project({ x: p.pos.x + fwdX(A.yaw) * 12, y: p.pos.y + 0.5, z: p.pos.z + fwdZ(A.yaw) * 12 });
+    const cx = s && !s.off ? s.x : VIEW_W / 2, cy = s && !s.off ? s.y : VIEW_H / 2;
+    ctx.globalAlpha = 0.3 * k;
+    ctx.fillStyle = '#ffb0a0';
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * TAU + Math.sin(i * 7.3) * 0.2, r0 = 60 + ((i * 37 + ((t * 200) | 0)) % 90), r1 = r0 + 22 + (i % 3) * 10;
+      pline(ctx, cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, cx + Math.cos(a) * r1, cy + Math.sin(a) * r1, 1);
+    }
+    ctx.globalAlpha = 1;
+    const left = clamp(1 - A.real / KP_FIST.AIM, 0, 1), w = 80, bx = Math.round(VIEW_W / 2 - w / 2), by = VIEW_H / 2 + 26;
+    ctx.fillStyle = '#0b0910'; ctx.fillRect(bx - 1, by - 1, w + 2, 3);
+    ctx.fillStyle = left < 0.15 && ((t * 16) | 0) % 2 ? '#ffffff' : '#ff5a3a'; ctx.fillRect(bx, by, Math.round(w * left), 1);
   },
 };

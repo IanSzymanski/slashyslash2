@@ -137,12 +137,68 @@ button:hover small, button:focus-visible small { color: var(--accent-hot); }
 button:disabled { opacity: 0.45; cursor: default; transform: none; }
 button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
 button.ghost:hover, button.ghost:focus-visible { color: var(--ink); border-color: var(--panel-edge); transform: none; }
-/* the character picker: RONIN in the menu's red, AEGIS-07 in its cyan */
-button.char { border-color: var(--accent); margin-bottom: 0.3em; }
-button.char b { color: var(--accent-hot); font-weight: inherit; }
-button.char.aegis { border-color: #21b8ff; }
-button.char.aegis b { color: #7ad8ff; }
-button.char.aegis:hover, button.char.aegis:focus-visible { background: rgba(14, 64, 96, 0.85); }
+/* the title screen's button for the character select, in the picked character's colours (ui.js sets them) */
+button.char { --c: var(--accent); --a: var(--accent-hot); border-color: var(--c); margin-bottom: 0.3em; }
+button.char b { color: var(--a); font-weight: inherit; }
+button.char:hover, button.char:focus-visible { border-color: var(--a); background: rgba(40, 18, 34, 0.95); box-shadow: inset 0.3em 0 0 var(--c); }
+
+/* The character select: the roster down the left, the stage left clear in the middle (the 3D view shows through
+   it; drag it to turn, wheel to zoom), who the character is on the right. --c and --a are its colours. */
+.select { inset: 0; display: grid; grid-template-columns: minmax(9em, 22%) 1fr minmax(14em, 37%); --c: var(--accent); --a: var(--accent-hot); }
+.sel-roster {
+  display: flex; flex-direction: column; gap: 0.7em; min-height: 0;
+  padding: 1.6em 1.2em 1.2em max(1.6em, env(safe-area-inset-left, 0px));
+  background: linear-gradient(90deg, rgba(8, 5, 12, 0.92), rgba(8, 5, 12, 0.7) 70%, rgba(8, 5, 12, 0));
+}
+.sel-roster h2 { font-size: 1.15em; }
+.sel-list { display: flex; flex-direction: column; gap: 0.4em; overflow-y: auto; min-height: 0; flex: 1; padding-right: 0.3em; scrollbar-color: var(--panel-edge) transparent; }
+.sel-card {
+  flex: none; flex-direction: column; align-items: flex-start; gap: 0.1em;
+  border-color: transparent; border-left: 0.35em solid var(--c);
+  background: rgba(20, 12, 24, 0.8);
+}
+.sel-card small { font-size: 0.95em; }
+.sel-card.on { border-color: var(--c); border-left-width: 0.35em; background: rgba(40, 18, 34, 0.95); box-shadow: 0 0 0.6em -0.1em var(--c); }
+.sel-card.on .sel-card-name { color: var(--a); }
+.sel-card:hover, .sel-card:focus-visible { border-color: var(--a); background: rgba(40, 18, 34, 0.95); }
+.sel-hint { color: var(--muted); margin: 0; font-size: 0.8em; line-height: 1.1; }
+.sel-stage { cursor: grab; touch-action: none; }
+.sel-stage:active { cursor: grabbing; }
+.sel-info {
+  display: flex; flex-direction: column; min-height: 0; gap: 0.4em;
+  padding: 1.5em max(1.6em, env(safe-area-inset-right, 0px)) 1.1em 1.4em;
+  background: linear-gradient(270deg, rgba(8, 5, 12, 0.95), rgba(8, 5, 12, 0.85) 82%, rgba(8, 5, 12, 0));
+}
+.sel-info header { display: flex; flex-direction: column; gap: 0.1em; }
+.sel-info .scroll { padding: 0 0.4em 0 0; }
+.sel-role { margin: 0; font-family: var(--font-display); font-size: 0.6em; letter-spacing: 0.24em; text-transform: uppercase; color: var(--c); }
+#sel-name { font-size: 2.1em; line-height: 1; text-shadow: 0 0 0.45em var(--c); }
+.sel-title { margin: 0; font-family: var(--font-display); font-size: 0.62em; letter-spacing: 0.14em; color: var(--a); }
+.sel-blurb { color: var(--muted); line-height: 1.12; margin: 0.4em 0 0.8em; }
+.sel-stats { display: grid; grid-template-columns: auto 1fr; gap: 0.25em 0.8em; margin: 0; align-items: center; }
+.sel-stats dt { font-family: var(--font-display); font-size: 0.55em; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.sel-stats dd { margin: 0; display: flex; gap: 0.2em; }
+.pip { width: 1.6em; height: 0.42em; background: rgba(255, 255, 255, 0.09); transform: skewX(-18deg); }
+.pip.on { background: var(--c); box-shadow: 0 0 0.35em -0.05em var(--c); }
+.sel-specs { color: var(--muted); font-size: 0.8em; margin: 0.6em 0 0; line-height: 1.1; }
+.sel-skills { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.3em; }
+.sel-skill {
+  width: 100%; display: grid; grid-template-columns: auto 1fr; gap: 0.15em 0.6em; align-items: baseline;
+  grid-template-areas: "kind name" "keys keys" "desc desc";
+  font-family: var(--font-body); font-size: 0.9em; background: rgba(20, 12, 24, 0.75); border-color: transparent;
+}
+.sel-skill:hover, .sel-skill:focus-visible { transform: none; border-color: var(--c); background: rgba(40, 18, 34, 0.9); }
+.sel-skill.on { border-color: var(--a); background: rgba(40, 18, 34, 0.95); box-shadow: inset 0.25em 0 0 var(--c); }
+.sel-skill.on .sel-sname::after { content: ' ▶'; color: var(--a); }
+.sel-kind { grid-area: kind; font-family: var(--font-display); font-size: 0.55em; letter-spacing: 0.12em; text-transform: uppercase; color: var(--c); }
+.sel-kind[data-kind="Ultimate"] { color: var(--a); }
+.sel-sname { grid-area: name; font-family: var(--font-display); font-size: 0.75em; letter-spacing: 0.04em; }
+.sel-skill kbd { grid-area: keys; justify-self: start; font-size: 0.85em; }
+.sel-sdesc { grid-area: desc; color: var(--muted); line-height: 1.1; }
+.sel-actions { display: flex; justify-content: space-between; align-items: center; gap: 0.6em; padding-top: 0.4em; border-top: 0.08em solid var(--panel-edge); }
+.sel-go { border-color: var(--c); }
+.sel-go b { color: var(--a); font-weight: inherit; }
+.sel-go:hover, .sel-go:focus-visible { border-color: var(--a); background: rgba(40, 18, 34, 0.95); box-shadow: inset 0.3em 0 0 var(--c); }
 .best { color: var(--shield); margin: auto 0 0; font-size: 0.95em; }
 .need { color: var(--muted); margin: 0; font-size: 0.85em; }
 

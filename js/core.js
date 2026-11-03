@@ -4,7 +4,7 @@
 
 // Style: hits build a meter that ranks you C to SSS. Repeating the same move earns less,
 // and the rank multiplies score and ultimate charge.
-const STYLE_GAIN = { lava: 15, lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, beam: 4, beamFull: 9, round: 1.2, laser: 1.5, burst: 14, strike: 3, detonate: 30, armbreak: 20 };
+const STYLE_GAIN = { lava: 15, lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, beam: 4, beamFull: 9, round: 1.2, laser: 1.5, burst: 14, strike: 3, detonate: 30, armbreak: 20, punch: 4, smash: 7, shoulder: 8, leap: 9, kragCounter: 14, kragBlast: 12, eruption: 10, fist: 3, vent: 2 };
 const STYLE_RANKS = [
   { th: 380, r: 'SSS', c: '#ffffff', mul: 2.5 }, { th: 260, r: 'SS', c: '#ffd070', mul: 2 }, { th: 170, r: 'S', c: '#ffb040', mul: 1.75 },
   { th: 100, r: 'A', c: '#ff5a6a', mul: 1.5 }, { th: 50, r: 'B', c: '#d0a0ff', mul: 1.25 }, { th: 20, r: 'C', c: '#9ab0d0', mul: 1.1 },
@@ -167,6 +167,8 @@ const Game = {
   },
   addScore(n) { this.stats.score += Math.round(n); },
   registerHit(d, cause) {
+    // a character that feeds on the blows it lands (KRAG's heat)
+    if (this.player && this.player.onDealt) this.player.onDealt(d, cause);
     this.combo++;
     this.comboT = 2.5;
     this.comboPop = 0.06;

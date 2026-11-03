@@ -533,11 +533,156 @@ const KragPose = {
     return o;
   },
 
+  // ---------- as the player ----------
+  // The same vocabulary for KRAG as the player (kragplayer.js): how it's moving, then what its arms are doing over
+  // the top of that, borrowing the boss's blows, guard, leap and Fist.
+  pickPlayer(p) {
+    const S = KRAG_SCALE, f = p.fwd(), hs = Math.hypot(p.vel.x, p.vel.z);
+    const o = {
+      lean: 0.12, twist: 0, drop: 0, roll: 0, legs: 'plant', walk: 0, amt: 0, fR: [0.24, 0, -0.16], fL: [-0.24, 0, 0.16], kneel: 0,
+      armR: { rot: [0.15, 0.2, 0.5] }, armL: { rot: [0.25, -0.18, 0.4] }, head: 0, headYaw: 0, tremble: 0, tilt: 0,
+    };
+    // crouched or sliding, the body sinks into the shorter hull
+    const sink = Math.max(0, p.M.H - p.h);
+    o.headYaw = clamp(angDiff(p.yaw, p.aimYaw), -0.8, 0.8);
+    o.head = clamp(-p.aimDir.y * 0.7, -0.5, 0.5);
+    if (p.dead) {
+      // down on one knee, slumped over the onyx fist, then over on its face
+      const k = clamp(p.deadT / 0.4, 0, 1);
+      o.legs = 'kneel'; o.kneel = k; o.drop = lerp(0.1, 0.62 * S, k); o.lean = 0.6 * k; o.head = 0.5; o.headYaw = 0;
+      o.armL = { at: p.handPlant(), pole: [-0.6, 0.2, 0.6] }; o.armR = { rot: [0.9, 0.2, 1.0] };
+      return o;
+    }
+    if (p.emote) return this.emotePose(p, o, p.emote);
+    this.playerMove(p, o, f, hs);
+    if (sink > 0 && o.legs === 'plant') o.drop = Math.max(o.drop, sink * 0.9);
+    const A = p.attack, s = p.sheathe, T = p.tether, air = !p.onGround;
+    const act = (a) => { this.actPose(p, o, a); if (air && o.legs !== 'air' && o.legs !== 'dash') o.legs = 'air'; return o; };
+    if ((p.hurtT > 0 || p.dazeT > 0) && !p.fistAim) return act({ kind: 'flinch', t: p.dazeT > 0 ? 0.13 + Math.sin(p.t * 5) * 0.03 : 0.15 });
+    if (p.kickAnim) { this.meleePose(p, o, { m: { pose: 'kickR', swing: 0.2 }, phase: 'swing', t: p.kickAnim.t, wind: 0 }); return o; }
+    // the Molten Fist: drawn back while charging and aimed, driven into the street, then hunched over the arm
+    if (p.fistAim || p.ultCharging > 0) { this.punchPose(p, o, { phase: 'wind', t: p.fistAim ? 9 : p.ultCharging, wind: KP_FIST.HOLD / 0.6 }); return o; }
+    if (p.fistT > 0) { const e = 0.7 - p.fistT; this.punchPose(p, o, e < 0.07 ? { phase: 'strike', t: e } : { phase: 'vent', t: e - 0.07 }); return o; }
+    if (p.leapAim) return act({ kind: 'jump', phase: 'crouch', t: p.leapAim.t, wind: 0.35 });
+    if (p.leap) return act({ kind: 'jump', phase: 'air' });
+    if (p.landT > 0) return act({ kind: 'jump', phase: 'land' });
+    if (p.shoulder) { act({ kind: 'charge', phase: 'run' }); if (air) o.legs = 'dash'; return o; }
+    if (p.counterT > 0) {
+      // the onyx fist driven out to the full reach of the arm, the body thrown in behind it
+      const d = p.counterDir || { x: f.x, y: 0, z: f.z };
+      o.legs = 'plant'; o.fR = [0.32, 0, -0.75]; o.fL = [-0.3, 0, 0.6]; o.drop = 0.3; o.lean = 0.55; o.twist = -0.6; o.head = -0.1;
+      o.armL = { D: { x: d.x, y: -0.05, z: d.z }, reach: 1 }; o.armR = { rot: [0.5, 0.6, 0.9] };
+      if (air) o.legs = 'air';
+      return o;
+    }
+    if (s) {
+      if (s.empowered) {
+        // a parry taken: the onyx arm drawn far back, shaking harder as the counter charges
+        const k = s.charge || 0;
+        o.legs = 'plant'; o.fR = [0.3, 0, -0.45]; o.fL = [-0.3, 0, 0.5]; o.drop = 0.25 + 0.15 * k;
+        o.lean = 0.25; o.twist = 0.6 + 0.35 * k; o.tremble = 0.4 + 0.8 * k;
+        o.armL = { D: this.dir(p, -0.85, -0.2, -0.45), reach: 0.95 }; o.armR = { D: this.dir(p, 0.9, 0.1, 0.2), reach: 0.7 };
+        if (air) o.legs = 'air';
+        return o;
+      }
+      return act({ kind: 'guard', t: s.t, rise: 0.1, charged: p.charged(), hitT: p.blockT });
+    }
+    if (A && A.groundCut) {
+      // the onyx fist dragged through the street; held, ripped up out of it
+      if (A.heavy && A.t >= A.rip) { this.meleePose(p, o, { m: { pose: 'upL', swing: 0.15 }, phase: 'swing', t: A.t - A.rip, wind: 0, aim: { x: f.x, y: 0.5, z: f.z } }); return o; }
+      return act({ kind: 'jump', phase: 'land' });
+    }
+    if (A) {
+      const wind = A.t < (A.wind || 0), pa = A.pa || 0;
+      this.meleePose(p, o, { m: { pose: A.pose, swing: Math.max(0.1, (A.act1 - (A.wind || 0)) / 0.6), stopper: A.heavy || A.finisher }, phase: wind ? 'wind' : 'swing', t: wind ? A.t : A.t - (A.wind || 0), wind: A.wind || 0.05, aim: { x: fwdX(A.yaw) * Math.cos(pa), y: Math.sin(pa), z: fwdZ(A.yaw) * Math.cos(pa) } });
+      o.tremble = wind && A.heavy ? 0.5 : 0;
+      if (air) o.legs = 'air';
+      return o;
+    }
+    if (p.plunge) return act({ kind: 'jump', phase: 'air' });
+    const pend = p.atkPend;
+    if (pend && !pend.dash && pend.t > 0.05 && Input.isDown('attack')) {
+      // holding for the heavy: both fists hauled up, shaking
+      const k = clamp((pend.t - 0.05) / 0.12, 0, 1);
+      o.armL = { D: this.dir(p, -0.1, lerp(-0.4, 1, k), -0.2), reach: 0.9 }; o.armR = { D: this.dir(p, -0.1, lerp(-0.4, 1, k), 0.2), reach: 0.9 };
+      o.lean = -0.15 * k; o.tremble = k >= 1 ? 0.6 : 0;
+      return o;
+    }
+    if (T && (T.phase === 'fly' || (T.phase === 'attached' && (T.mode === 'zip' || T.mode === 'tow')))) {
+      // the right arm out along the chain
+      const h = p.hand(), dx = T.pos.x - h.x, dy = T.pos.y - h.y, dz = T.pos.z - h.z, l = Math.hypot(dx, dy, dz) || 1;
+      o.armR = { D: { x: dx / l, y: dy / l, z: dz / l }, reach: 0.98 };
+      o.twist = -0.3;
+      if (T.mode === 'zip') { o.legs = 'air'; o.lean = 0.35; }
+    }
+    return o;
+  },
+  // the select screen's emotes (showroom.js): the onyx fist beaten into the right palm, and a roar
+  emotePose(p, o, E) {
+    o.legs = 'plant'; o.fR = [0.28, 0, -0.3]; o.fL = [-0.3, 0, 0.3]; o.headYaw = 0;
+    if (E.kind === 'roar') {
+      const k = easeOutCubic(clamp(E.t / 0.25, 0, 1));
+      o.drop = 0.2; o.lean = -0.35 * k; o.head = -0.6 * k; o.tremble = 0.9 * k;
+      o.armR = { rot: [-0.5, 1.3 * k, 1.0] }; o.armL = { rot: [-0.5, -1.3 * k, 1.0] };
+      return o;
+    }
+    const beat = Math.max(0, Math.sin(E.t * 9)) * 0.08;
+    o.drop = 0.12; o.lean = 0.1; o.head = 0.1;
+    o.armL = { at: p.local(0.0, 1.85 + beat, 0.62), pole: [-1, -0.4, 0] }; o.armR = { at: p.local(0.15, 1.85, 0.6), pole: [1, -0.4, 0] };
+    return o;
+  },
+  // the legs and body for how the player is moving
+  playerMove(p, o, f, hs) {
+    const v = p.vel;
+    if (p.dashT > 0) {
+      // a heavy lunge, the spiked pauldron leading
+      o.legs = 'dash'; o.lean = 0.6; o.twist = 0.7; o.head = -0.2;
+      o.armL = { D: this.dir(p, 0.5, -0.4, -0.2), reach: 0.75 }; o.armR = { rot: [0.9, 0.4, 1.4] };
+      return;
+    }
+    if (p.cling) { o.legs = 'air'; o.lean = 0.05; o.armL = { at: p.clingHand(p.cling.n), pole: [-0.6, -0.4, 0.6] }; o.armR = { rot: [0.2, 0.5, 0.6] }; return; }
+    if (p.vault) { o.legs = 'air'; o.lean = 0.35; if (p.vault.t / p.vault.dur < 0.8) o.armL = { at: p.vault.plant, pole: [-0.6, -0.4, 0.6] }; return; }
+    if (p.mantle) { o.legs = 'air'; o.lean = 0.5; o.armR = { rot: [-2.4, 0.3, 0.4] }; o.armL = { rot: [-2.4, -0.3, 0.4] }; return; }
+    if (p.skid) {
+      // dropped low, the onyx fist dug into the street
+      o.legs = 'plant'; o.fR = [0.28, 0, -0.4]; o.fL = [-0.24, 0, 0.55]; o.drop = 0.45; o.lean = 0.5;
+      o.armL = { at: p.skidHand(), pole: [-0.6, 0.2, 0.6] };
+      return;
+    }
+    if (p.sliding) {
+      // leaning back on the slide, the leading leg out in front, the fist trailing in the street
+      o.legs = 'plant'; o.fR = [0.26, 0, -0.8]; o.fL = [-0.24, 0, 0.05]; o.drop = 0.5; o.lean = -0.4;
+      o.armR = { rot: [0.6, 0.5, 0.4] }; o.armL = { rot: [0.9, -0.5, 0.5] };
+      return;
+    }
+    if (!p.onGround) {
+      o.legs = 'air'; o.lean = 0.15 + clamp(hs / 30, 0, 0.3);
+      o.armR = { rot: [-0.4, 0.5, 0.6] }; o.armL = { rot: [-0.3, -0.5, 0.6] };
+      return;
+    }
+    if (p.crouching) { o.legs = 'plant'; o.fR = [0.28, 0, -0.32]; o.fL = [-0.3, 0, 0.34]; o.drop = 0.35; o.lean = 0.4; return; }
+    if (hs > 0.6) {
+      // a heavy stomping run: the faster, the deeper the lean and the wider the swing of the arms
+      const k = clamp(hs / p.M.SPRINT, 0, 1), fv = (v.x * f.x + v.z * f.z) / hs;
+      o.legs = 'walk'; o.walk = p.runPhase; o.amt = clamp(hs / 6, 0.35, 1.15); o.lean = 0.14 + 0.36 * k * Math.max(0, fv) - 0.1 * Math.max(0, -fv) + p.accF * 0.15;
+      const sw = Math.sin(p.runPhase) * 0.55 * k;
+      o.armR = { rot: [0.25 - sw, 0.22, 0.6] }; o.armL = { rot: [0.3 + sw * 0.6, -0.2, 0.5] };
+      o.roll = Math.sin(p.runPhase) * 0.05 * k;
+      return;
+    }
+    // planted wide, hunched, the heavy arm hanging forward, a slow breath through the shoulders
+    const br = Math.sin(p.t * 1.8) * 0.025;
+    o.legs = 'plant'; o.fR = [0.26, 0, -0.2]; o.fL = [-0.28, 0, 0.18]; o.drop = 0.08 + br; o.lean = 0.18;
+    o.armL = { rot: [0.35 + br, -0.12, 0.5] }; o.armR = { rot: [0.2 - br, 0.22, 0.65] };
+  },
+
   apply(r, e) {
     const [T, P, D, U, F, A, W] = this.temps();
-    const o = this.pick(e), B = r.bones, M = r.mesh, S = KRAG_SCALE;
+    const o = e.isPlayer ? this.pickPlayer(e) : this.pick(e), B = r.bones, M = r.mesh, S = KRAG_SCALE;
     Rig.reset(r);
-    e.tilt = o.tilt || 0;
+    if (!e.isPlayer) e.tilt = o.tilt || 0;
+    // as the player in first person, the head folds away so the view is out from its eyes
+    B.head.scale.setScalar(e.isPlayer && Camera.fp && e === Game.player && Game.state === 'playing' ? 0.001 : 1);
     const tr = () => (o.tremble ? rand(-0.015, 0.015) * o.tremble : 0);
     // body: drop and roll at the hips, lean shared by spine and chest, twist in the chest; the head keeps level
     B.hips.position.y -= o.drop;

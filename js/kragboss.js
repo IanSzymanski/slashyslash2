@@ -510,7 +510,7 @@ class Krag extends Boss {
   // gun firing, or ranged hits landing on it.
   threat(p, d) {
     if (d < 6 || p.dead) return null;
-    const C = p.charging;
+    const C = p.charging && p.charging.def.id === 'swordBeam' ? p.charging : null;
     if (C && C.k > 0.45) return C.k >= 0.85 ? 'big' : 'small';
     if (p.beamAct) return 'big';
     for (const b of Game.projectiles) if (!b.dead && b.kind === 'swordbeam' && b.full && dist3(b.pos, this.center()) < 22) return 'big';
@@ -1608,24 +1608,9 @@ class MoltenChasm {
   at(s, u) { const w = Math.tan(FIST.HALF) * s * u, F = this.f; return { x: this.o.x + F.x * s - F.z * w, y: this.o.y, z: this.o.z + F.z * s + F.x * w }; }
   update(dt) {
     this.t += dt;
-    const P = Game.player, K = this.owner, o = this.o;
+    const o = this.o;
     this.front = Math.min(FIST.CONE, this.front + FIST.FRONT * dt);
-    // the hit: the split reaching you, on its street, below it or over it (a jump doesn't clear the fire), only as
-    // it passes
-    if (!this.hit && !P.dead && K && !K.dead) {
-      const L = this.local(P.pos), level = P.pos.y < o.y + (P.onGround ? FIST.LIFT : CHASM.FLY);
-      if (level && this.inCone(P.pos) && L.along <= this.front + 0.6 && this.t <= Math.max(0, L.along) / FIST.FRONT + CHASM.HIT) {
-        this.hit = true;
-        const from = { x: P.pos.x - this.f.x * 2, y: o.y + 0.4, z: P.pos.z - this.f.z * 2 };
-        const res = P.takeHit({ dmg: FIST.DMG * K.dmgMul, from, kind: 'melee', source: K, knock: FIST.KNOCK, unparryable: true, pierce: true, through: true, daze: FIST.DAZE });
-        if (res === 'hit') {
-          P.vel.y = Math.max(P.vel.y, 18); P.onGround = false;
-          FX.sparks(P.chest(), 40, { x: this.f.x, y: 0.6, z: this.f.z }, 1.6, 11, 42, KRAG_FIRE);
-          FX.flash('#ff3010', 0.6);
-          Game.hitstop(0.18); Game.slowmo(0.3, 0.45, true);
-        }
-      } else if (!this.dodged && this.front >= FIST.CONE && distXZ(P.pos, o) < FIST.CONE + 4) { this.dodged = true; P.perilDodge(K); }
-    }
+    this.strike();
     // the split racing out: fire and stone thrown up right across the cone, lamps in it torn down
     while (this.s < this.front) {
       const s = this.s, n = Math.max(1, Math.round((Math.tan(FIST.HALF) * s * 2) / 4.5));
@@ -1650,13 +1635,13 @@ class MoltenChasm {
     // its floor erupting: vents up through the chasm, never right under you while you're dazed, the last of them
     // done erupting as it seals
     const lastVent = CHASM.ERUPT - Math.max(0.2, VENT.TELL * S.enemies.telegraph) - VENT.ERUPT;
-    if (this.front >= FIST.CONE && this.t < lastVent && K && !K.dead && !K.dying && (this.ventT -= dt) <= 0) {
+    if (this.front >= FIST.CONE && this.t < lastVent && this.live() && (this.ventT -= dt) <= 0) {
       this.ventT = (1 / CHASM.RATE) * rand(0.7, 1.3);
       for (let tries = 0; tries < 4; tries++) {
         const q = this.at(rand(3, FIST.CONE - 1), rand(-0.9, 0.9));
         q.y = World.groundAt(q.x, q.z, o.y + 1.5);
-        if (q.y === -Infinity || Foundry.lavaAt(q.x, q.z) || (P.dazeT > 0 && distXZ(q, P.pos) < 3.5)) continue;
-        const v = K.spawnVent(q, VENT.TELL);
+        if (q.y === -Infinity || Foundry.lavaAt(q.x, q.z) || !this.ventOk(q)) continue;
+        const v = this.vent(q);
         if (v && v.crack) this.cracks.push(v.crack);
         break;
       }
@@ -1664,6 +1649,29 @@ class MoltenChasm {
     if (this.t >= CHASM.ERUPT && !this.sealed) this.seal();
     if (this.t >= CHASM.DUR) this.dead = true;
   }
+  // the hit: the split reaching you, on its street, below it or over it (a jump doesn't clear the fire), only as
+  // it passes
+  strike() {
+    const P = Game.player, K = this.owner, o = this.o;
+    if (!this.hit && !P.dead && K && !K.dead) {
+      const L = this.local(P.pos), level = P.pos.y < o.y + (P.onGround ? FIST.LIFT : CHASM.FLY);
+      if (level && this.inCone(P.pos) && L.along <= this.front + 0.6 && this.t <= Math.max(0, L.along) / FIST.FRONT + CHASM.HIT) {
+        this.hit = true;
+        const from = { x: P.pos.x - this.f.x * 2, y: o.y + 0.4, z: P.pos.z - this.f.z * 2 };
+        const res = P.takeHit({ dmg: FIST.DMG * K.dmgMul, from, kind: 'melee', source: K, knock: FIST.KNOCK, unparryable: true, pierce: true, through: true, daze: FIST.DAZE });
+        if (res === 'hit') {
+          P.vel.y = Math.max(P.vel.y, 18); P.onGround = false;
+          FX.sparks(P.chest(), 40, { x: this.f.x, y: 0.6, z: this.f.z }, 1.6, 11, 42, KRAG_FIRE);
+          FX.flash('#ff3010', 0.6);
+          Game.hitstop(0.18); Game.slowmo(0.3, 0.45, true);
+        }
+      } else if (!this.dodged && this.front >= FIST.CONE && distXZ(P.pos, o) < FIST.CONE + 4) { this.dodged = true; P.perilDodge(K); }
+    }
+  }
+  live() { const K = this.owner; return !!K && !K.dead && !K.dying; }
+  // never right under you while you're dazed
+  ventOk(q) { const P = Game.player; return !(P.dazeT > 0 && distXZ(q, P.pos) < 3.5); }
+  vent(q) { return this.owner.spawnVent(q, VENT.TELL); }
   // crusting over all at once in a hiss of steam: nothing in it hurts from here
   seal() {
     this.sealed = true;
@@ -1680,13 +1688,15 @@ class MoltenChasm {
 
 // A molten vent: a glowing crack in the street, bubbling, that bursts into a column of fire. Standing on it as
 // it erupts throws you up out of it.
-// o.R, o.tall and o.erupt size it; o.harmless for show (the entry).
+// o.R, o.tall and o.erupt size it; o.harmless for show (the entry); o.friendly for one KRAG raises as the player,
+// which throws the enemies standing on it instead of you (o.dmg each), and keeps its own quick tell.
 class MoltenVent {
   constructor(pos, delay, owner, o = {}) {
     this.kind = 'vent';
     this.pos = { x: pos.x, y: pos.y, z: pos.z };
     this.owner = owner; this.R = o.R || VENT.R; this.tall = o.tall || 1; this.erupt = o.erupt || VENT.ERUPT; this.harmless = !!o.harmless;
-    this.delay = Math.max(0.2, delay * (this.harmless ? 1 : S.enemies.telegraph));
+    this.friendly = !!o.friendly; this.dmg = o.dmg || VENT.DMG; this.burnt = this.friendly ? new Set() : null;
+    this.delay = this.friendly ? Math.max(0.05, delay) : Math.max(0.2, delay * (this.harmless ? 1 : S.enemies.telegraph));
     this.t = 0; this.phase = 'tell'; this.dead = false; this.hit = false;
     FX.decal('crack', { x: pos.x, y: pos.y, z: pos.z }, { len: 2.4 * (this.R / VENT.R), dur: 3 });
     this.crack = KragViews.crack(pos, { r: this.R * 1.7, life: this.delay + 3, grow: Math.min(0.4, this.delay * 0.6) });
@@ -1712,7 +1722,8 @@ class MoltenVent {
     if (this.phase === 'erupt') {
       if (Math.random() < 0.9) FX.sparks({ x: c.x + rand(-0.4, 0.4) * this.R, y: c.y + rand(0.5, 3) * this.tall, z: c.z + rand(-0.4, 0.4) * this.R }, 1, { x: 0, y: 1, z: 0 }, 0.5, 4, 11, KRAG_FIRE);
       const P = Game.player;
-      if (!this.harmless && !this.hit && !P.dead && distXZ(P.pos, c) < this.R + P.r && P.pos.y > c.y - 0.4 && P.pos.y < c.y + 3.2) {
+      if (this.friendly) this.burn(c);
+      else if (!this.harmless && !this.hit && !P.dead && distXZ(P.pos, c) < this.R + P.r && P.pos.y > c.y - 0.4 && P.pos.y < c.y + 3.2) {
         this.hit = true;
         const res = P.takeHit({ dmg: VENT.DMG * (this.owner ? this.owner.dmgMul : 1), from: { x: c.x, y: c.y - 0.5, z: c.z }, kind: 'shockwave', source: this.owner && !this.owner.dead ? this.owner : null, knock: 10 });
         if (res === 'hit') { P.vel.y = Math.max(P.vel.y, 17); P.onGround = false; }
@@ -1721,6 +1732,15 @@ class MoltenVent {
       return;
     }
     if (this.t >= 0.4) this.dead = true;
+  }
+  // a friendly vent throws whatever stands on it, each once
+  burn(c) {
+    for (const e of Game.enemies) {
+      if (e.dead || e.spawning || this.burnt.has(e) || distXZ(e.pos, c) > this.R + e.r || e.pos.y < c.y - 0.6 || e.pos.y > c.y + 3.2 * this.tall) continue;
+      this.burnt.add(e);
+      hurtEnemy(e, this.dmg, { kv: { x: (e.pos.x - c.x) * 4, y: 30, z: (e.pos.z - c.z) * 4 }, dir: { x: 0, y: 1, z: 0 }, heavy: true, cause: 'vent', stagger: 0.6, hitstop: 0.01 });
+    }
+    for (const pr of Game.props) if (!pr.dead && pr.grabR && !this.burnt.has(pr) && distXZ(pr.pos, c) < this.R + 0.4) { this.burnt.add(pr); pr.hit(20, { heavy: true, kv: { x: 0, y: 16, z: 0 } }); }
   }
 }
 

@@ -158,7 +158,7 @@ class Player {
     if (this.shield < PC.MAX_SHIELD - 0.5) this.shieldWasFull = false;
     if (this.utilCD > 0) {
       this.utilCD -= dt;
-      if (this.utilCD <= 0) { this.utilCD = 0; Sound.play('utilReady'); FX.ring(this.center(), 0.4, 1.5, 0.25, { c: '#ff3a52', flat: false }); }
+      if (this.utilCD <= 0) { this.utilCD = 0; Sound.play('utilReady'); FX.ring(this.center(), 0.4, 1.5, 0.25, { c: this.fxCol.ring, flat: false }); }
     }
 
     if (this.ultCharge >= 1 && !this.ultReadyPlayed) { this.ultReadyPlayed = true; Sound.play('ultReady'); }
@@ -191,6 +191,7 @@ class Player {
     const col = Controller.integrate(this, dt, reeled ? null : I, { mantle: this.canMantle(reeled), step: this.plunge ? 0 : undefined });
     this.updateLean(dt, vx0, vz0);
     if (this.iaido && col.wall) this.iaido.t = this.iaido.dur;
+    this.postMove(col);
     // a zip to a wall or a ledge ends when the body meets the surface near the anchor (the ground counts only
     // for an anchor below the chest, so a zip at a low ledge carries on to its face and climbs it)
     if (this.zipping() && (this.tether.kind === 'world' || this.tether.kind === 'anchor') && (col.wall || col.ceil || (col.ground && this.tether.pos.y < this.chest().y - 0.3)) && dist3(this.tether.pos, this.chest()) < 2.4) this.arriveZip();
@@ -273,8 +274,9 @@ class Player {
     this.canSlide = !this.attack && !this.sheathe;
     this.canCling = !this.attack && !this.sheathe && !this.plunge && !this.tether && !this.iaido && !this.atkPend;
   }
-  // a character's own way of moving (true when it moved the body this tick)
+  // a character's own way of moving (true when it moved the body this tick), and what it does once the body has moved
   moveSpecial() { return false; }
+  postMove() {}
   // whether walking or jumping into a ledge climbs it this tick
   canMantle(reeled) { return !this.attack && !this.iaido && !this.sheathe && !this.plunge && !reeled; }
   // cutscenes, pauses and blasts take the body: whatever the character was holding stops
@@ -663,7 +665,7 @@ class Player {
         if (a.heavy) up = a.type === 'slam' && !this.onGround ? -18.2 : a.launch + (brk && a.type === 'slam' ? 13.6 : 0) + fy * a.knock * 0.5;
         else up = fy * a.knock + (big ? (brk ? 27.3 : 12.7) : 4.5) * (fy < -0.3 ? 0.3 : 1);
         hurtEnemy(e, a.dmg * mul, {
-          kv: { x: fx * a.knock, y: up, z: fz * a.knock }, dir: { x: fx, y: 0.2 + fy, z: fz }, heavy: big, cause: a.heavy ? 'heavy' : 'slash', heavyAtk: a.heavy,
+          kv: { x: fx * a.knock, y: up, z: fz * a.knock }, dir: { x: fx, y: 0.2 + fy, z: fz }, heavy: big, cause: this.blowCause(a), heavyAtk: a.heavy,
           stagger: a.heavy ? 0.7 : big ? 0.55 : 0.22, hitstop: a.hitstop, shake: a.shake, guardBreak: a.heavy,
         });
         this.swingHit(a, e);
@@ -698,8 +700,9 @@ class Player {
       if (a.finisher) { this.strN = 0; this.strLights = 0; this.attackCD = a.heavy ? 0.16 : 0.1; }
     }
   }
-  // something a swing just hit (a character can add its own impact)
+  // something a swing just hit (a character can add its own impact), and what the hit counts as
   swingHit() {}
+  blowCause(a) { return a.heavy ? 'heavy' : 'slash'; }
   // The heavy finisher hits the street hard enough to send a ring running out over the ground.
   slamQuake() {
     const f = { x: this.pos.x + fwdX(this.yaw) * 1.3, y: this.pos.y + 0.05, z: this.pos.z + fwdZ(this.yaw) * 1.3 }, C = this.fxCol;
@@ -930,7 +933,7 @@ class Player {
     if (!s) return;
     s.t += dt;
     this.stanceFX(s, dt);
-    const maxT = s.empowered ? s.parriedAt + this.counterWindow() : PC.STANCE_MAX;
+    const maxT = s.empowered ? s.parriedAt + this.counterWindow() : this.stanceMax();
     if (!Input.isDown('sheathe') || s.releaseQueued || s.t >= maxT) this.releaseSheathe();
   }
   // the stance crackles at the sheath; after a parry, holding charges the counter in tiers
@@ -945,6 +948,8 @@ class Player {
       this.counterGather(s, dt);
     } else if (s.t <= s.parryUntil && Math.random() < 0.5) FX.elec(sp, 0.5, 1);
   }
+  // how long the stance holds without a parry (a character's guard can hold for as long as E is down)
+  stanceMax() { return PC.STANCE_MAX; }
   // seconds to a full counter (Arc Conductor halves it)
   counterCharge() { return COUNTER.CHARGE * (Game.has('arc') ? 0.5 : 1); }
   // how long the stance holds after a parry before the counter fires by itself
