@@ -64,6 +64,8 @@ const Views = {
     AegisViews.init();
     KragViews.init();
     FoundryViews.init();
+    RiftViews.init();
+    ReaperViews.init();
   },
   // everything once, visible, for the shader compile
   prewarmShow(group) {
@@ -85,6 +87,8 @@ const Views = {
     AegisViews.prewarmShow(group);
     KragViews.prewarmShow(group);
     FoundryViews.prewarmShow(group);
+    RiftViews.prewarmShow(group);
+    ReaperViews.prewarmShow(group);
   },
   prewarmHide() {
     for (const pool of this.ghostPools.values()) pool[0].mesh.visible = false;
@@ -92,6 +96,8 @@ const Views = {
     BossViews.prewarmHide();
     AegisViews.prewarmHide();
     KragViews.prewarmHide();
+    RiftViews.prewarmHide();
+    ReaperViews.prewarmHide();
   },
   // The sword beam's crescent: a band across its path, bulging forward in the middle and thinning at its tips,
   // in its own frame (x across, y up, forward -z), half-width and half-height 1.
@@ -131,12 +137,15 @@ const Views = {
     AegisViews.sync();
     KragViews.sync();
     FoundryViews.sync();
+    ReaperViews.sync();
+    RiftViews.sync();
   },
   make(o) {
     if (BossViews.kinds.has(o.kind)) return BossViews.make(o);
     if (AegisViews.kinds.has(o.kind)) return AegisViews.make(o);
     if (KragViews.kinds.has(o.kind)) return KragViews.make(o);
     if (FoundryViews.kinds.has(o.kind)) return FoundryViews.make(o);
+    if (ReaperViews.kinds.has(o.kind)) return ReaperViews.make(o);
     const M = this.mats, G = this.geos, g = new THREE.Group();
     if (o.kind === 'bolt') {
       g.add(new THREE.Mesh(G.bolt, this.boltMat(o)), new THREE.Mesh(G.boltCore, M.boltCore));
@@ -184,6 +193,7 @@ const Views = {
     if (v.aegis) { AegisViews.update(o, v, t); return; }
     if (v.krag) { KragViews.update(o, v, t); return; }
     if (v.foundry) { FoundryViews.update(o, v, t); return; }
+    if (v.reaper) { ReaperViews.update(o, v, t); return; }
     if (v.rig && o.kind === 'football') {
       // nose along its flight, spiralling round it
       const R = v.rig, m = R.mesh;
@@ -247,6 +257,7 @@ const Views = {
     if (v.aegis) { AegisViews.dispose(v); return; }
     if (v.krag) { KragViews.dispose(v); return; }
     if (v.foundry) { FoundryViews.dispose(v); return; }
+    if (v.reaper) { ReaperViews.dispose(v); return; }
     if (v.rig) { Gfx.scene.remove(v.rig.mesh); v.rig.geo.dispose(); v.rig.mat.dispose(); v.rig.outline.material.dispose(); return; }
     Gfx.scene.remove(v.group);
     if (v.group.userData.halo) v.group.userData.halo.material.dispose();
@@ -312,14 +323,16 @@ const Views = {
     for (let i = 0; i < this.ASH; i++) this.flakes.push({ x: 0, y: -1e9, z: 0, v: rand(0.5, 1.3), ph: rand(0, TAU) });
     this.wLast = 0;
   },
-  // Rain and ash over the city; in the Foundry (def.weather 'embers') no rain, and the ash is embers rising
+  // Rain and ash over the city; in the Foundry (def.weather 'embers') no rain, and the ash is embers rising; in
+  // the Rift ('motes') violet motes drift up slowly
   syncWeather() {
-    const on = S.visuals.weather && !(World.def && World.def.indoor), embers = !!(World.def && World.def.weather === 'embers');
+    const kind = (World.def && World.def.weather) || 'rain', embers = kind === 'embers' || kind === 'motes', rise = kind === 'motes' ? 0.7 : 1.6;
+    const on = S.visuals.weather && !(World.def && World.def.indoor);
     this.rain.visible = on && !embers; this.ash.visible = on;
     if (!on) return;
-    if (this._embers !== embers) {
-      this._embers = embers;
-      this.ash.material.color.set(embers ? '#ff8a3a' : '#9a8a9a'); this.ash.material.size = embers ? 0.07 : 0.05;
+    if (this._weather !== kind) {
+      this._weather = kind;
+      this.ash.material.color.set(kind === 'embers' ? '#ff8a3a' : kind === 'motes' ? '#b070ff' : '#9a8a9a'); this.ash.material.size = embers ? 0.07 : 0.05;
       for (const f of this.flakes) f.y = -1e9;
     }
     const now = Game.realTime, dt = clamp(now - this.wLast, 0, 0.1) * (Game.state === 'playing' || Game.state === 'menu' ? Game.slowScale : 0);
@@ -341,7 +354,7 @@ const Views = {
     const ap = this.ash.geometry.attributes.position, aa = ap.array;
     for (let i = 0; i < this.flakes.length; i++) {
       const f = this.flakes[i];
-      f.ph += dt; f.y += (embers ? f.v * 1.6 : -f.v) * dt; f.x += (Math.sin(f.ph * 1.3) * 0.5 - (embers ? 0 : 0.35)) * dt; f.z += Math.cos(f.ph * 0.9) * 0.3 * dt;
+      f.ph += dt; f.y += (embers ? f.v * rise : -f.v) * dt; f.x += (Math.sin(f.ph * 1.3) * 0.5 - (embers ? 0 : 0.35)) * dt; f.z += Math.cos(f.ph * 0.9) * 0.3 * dt;
       if (f.y < c.y - 10 || f.y > c.y + 18 || Math.abs(f.x - c.x) > W || Math.abs(f.z - c.z) > W || f.y < World.groundAt(f.x, f.z, f.y + 0.05)) respawn(f, false);
       aa[i * 3] = f.x; aa[i * 3 + 1] = f.y; aa[i * 3 + 2] = f.z;
     }

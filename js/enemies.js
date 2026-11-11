@@ -99,8 +99,9 @@ class Enemy {
     this.skipPhysics = false; this.hop = null;
     this.cd = Math.max(this.cd, 0.4);
   }
-  scaleSpeed() { return this.def.speed * S.enemies.speed * this.speedVar; }
-  tele(base) { return base * S.enemies.telegraph * this.windMul; }
+  // (REAP-R's dread, as the player: what's near it moves slower and winds up longer)
+  scaleSpeed() { return this.def.speed * S.enemies.speed * this.speedVar * (this.dread > Game.time ? RP_DREAD.SLOW : 1); }
+  tele(base) { return base * S.enemies.telegraph * this.windMul * (this.dread > Game.time ? RP_DREAD.WIND : 1); }
   dmg() { return this.def.dmg * this.dmgMul; }
   // facing as a unit vector on the ground
   fwd() { return { x: fwdX(this.yaw), z: fwdZ(this.yaw) }; }
@@ -512,6 +513,8 @@ function hurtEnemy(e, dmg, o = {}) {
   }
   let d = dmg * (e.damageTakenMul ? e.damageTakenMul() : 1) * (Game.has('glass') ? 1.35 : 1);
   if (e.tethered) d *= 1.25;
+  // its soul hanging out of it (REAP-R's rend)
+  if (e.rent > Game.time) d *= RP_REND.MUL;
   d = Math.max(1, Math.round(d));
   // the rival's first phase can't be skipped: its health stops at half until the limiters come off
   if (e.gateDamage) { d = e.gateDamage(d); if (d <= 0) return 0; }

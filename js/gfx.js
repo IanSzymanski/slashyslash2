@@ -27,6 +27,10 @@ const TEX_STYLES = {
   plate: ['#3a3436', '#242022', '#56504e'], ironwall: ['#2e2a2e', '#1c181c', '#48424a'], brickfire: ['#5a2a20', '#3a1812', '#7a3e2a'],
   grate: ['#3e3c42', '#121014', '#62606a'], rust: ['#5a3a2a', '#3a2418', '#7a5038'], ingot: ['#4a4446', '#2a2628', '#6a6466'],
   belt: ['#242226', '#121014', '#3c3a3e'], belt2: ['#242226', '#121014', '#3c3a3e'], iron: ['#34303a', '#221e26', '#4c4652'],
+  // the Rift: cracked flagstones, the dais's pale inlaid stone, rough ruin blocks, dressed cathedral stone, and
+  // the dark rock of the chunks torn out of the ground, veined with violet
+  flag: ['#3c3646', '#262230', '#544c60'], relic: ['#5a5266', '#3a3446', '#7a7088'], ruin: ['#443c4c', '#2c2634', '#5c5266'],
+  gothic: ['#342c40', '#201a2a', '#4a4058'], voidrock: ['#2a2234', '#16101e', '#40344e'],
 };
 // grid-lined styles: a line every metre, with a lit edge beside it
 const GRID_STYLES = new Set(['tile', 'wall', 'ceiling', 'wallDark', 'mat', 'block', 'block2', 'block3']);
@@ -185,6 +189,38 @@ const Gfx = {
         speckle(80);
         for (let x = 0; x < W; x += 8) { g.fillStyle = dark; g.fillRect(x, 0, 2, Ht); g.fillStyle = light; g.fillRect(x + 2, 0, 1, Ht); }
         g.fillStyle = '#c8a020'; g.fillRect(0, 0, W, 2); g.fillRect(0, Ht - 2, W, 2);
+      } else if (style === 'flag' || style === 'relic') {
+        // flagstones: big slabs in a broken bond, worn edges, cracks running through some; the dais's are inlaid
+        speckle(260);
+        for (let y = 0; y < Ht; y += 16) {
+          g.fillStyle = dark; g.fillRect(0, y, W, 1);
+          for (let x = (y / 16) % 2 ? 12 : 0; x < W; x += 24) { g.fillStyle = dark; g.fillRect(x, y, 1, 16); g.fillStyle = light; g.fillRect(x + 1, y + 1, 22, 1); }
+        }
+        g.fillStyle = dark;
+        for (let i = 0; i < 5; i++) { let x = (R() * 64) | 0, y = (R() * 64) | 0; for (let k = 0; k < 14; k++) { g.fillRect(x & 63, y & 63, 1, 1); x += R() < 0.5 ? 1 : 0; y += R() < 0.6 ? 1 : -1; } }
+        if (style === 'relic') { g.fillStyle = '#7a4ac0'; for (const [x, y] of [[12, 8], [44, 8], [28, 24], [60, 24], [12, 40], [44, 40], [28, 56], [60, 56]]) { g.fillRect(x - 1, y, 3, 1); g.fillRect(x, y - 1, 1, 3); } }
+      } else if (style === 'ruin' || style === 'gothic') {
+        // coursed ashlar; the cathedral's is dressed finer, with a lancet's outline cut into each bay
+        speckle(style === 'ruin' ? 340 : 200);
+        for (let y = 0; y < Ht; y += 8) {
+          g.fillStyle = dark; g.fillRect(0, y, W, 1);
+          for (let x = (y / 8) % 2 ? 8 : 0; x < W; x += 16) g.fillRect(x, y, 1, 8);
+        }
+        if (style === 'gothic') {
+          g.fillStyle = dark;
+          for (const x of [16, 48]) { g.fillRect(x - 5, 14, 1, 36); g.fillRect(x + 5, 14, 1, 36); for (let k = 0; k < 5; k++) { g.fillRect(x - 5 + k, 13 - k * 2, 1, 2); g.fillRect(x + 5 - k, 13 - k * 2, 1, 2); } }
+          g.fillStyle = light; g.fillRect(0, 62, W, 1); g.fillRect(0, 1, W, 1);
+        } else {
+          g.fillStyle = light;
+          for (let i = 0; i < 12; i++) g.fillRect((R() * 60) | 0, (R() * 60) | 0, 2 + ((R() * 3) | 0), 1);
+        }
+      } else if (style === 'voidrock') {
+        // dark rock split by veins of violet light
+        speckle(380);
+        for (let i = 0; i < 4; i++) {
+          let x = (R() * 64) | 0, y = 0;
+          while (y < 64) { g.fillStyle = R() < 0.3 ? '#c08aff' : '#6a34c0'; g.fillRect(x & 63, y, 1, 1); if (R() < 0.12) { g.fillStyle = '#4a2490'; g.fillRect((x + 1) & 63, y, 2, 1); } x += R() < 0.4 ? -1 : R() < 0.6 ? 1 : 0; y += R() < 0.75 ? 1 : 0; }
+        }
       } else if (style === 'asphalt' || style === 'roof') {
         speckle(420);
         g.fillStyle = dark;
@@ -368,6 +404,38 @@ const Gfx = {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.magFilter = THREE.NearestFilter;
     this.texCache.set('camo', t);
+    return t;
+  },
+  // REAP-R's finish from its concept art: gunmetal pixel camo in 2x2 blocks, light and dark greys with a few
+  // violet-tinted pits, multiplied into each part's colour (its cloak takes it as a weave)
+  reaperTexture() {
+    let t = this.texCache.get('reaper');
+    if (t) return t;
+    const N = 64, B = 2, M = N / B, c = makeCanvas(N, N), g = c.ctx, R = mulberry32(9133);
+    const grid = new Uint8Array(M * M);
+    const blob = (kind, count, len) => {
+      for (let i = 0; i < count; i++) {
+        let x = (R() * M) | 0, y = (R() * M) | 0;
+        for (let s = 0, L = len * (0.5 + R()); s < L; s++) {
+          grid[y * M + x] = kind;
+          if (R() < 0.5) x = (x + (R() < 0.5 ? M - 1 : 1)) % M; else y = (y + (R() < 0.5 ? M - 1 : 1)) % M;
+        }
+      }
+    };
+    blob(1, 44, 12); blob(2, 34, 9); blob(3, 22, 5); blob(4, 30, 2);
+    const COLS = [[214, 212, 222], [255, 252, 255], [170, 166, 182], [128, 120, 150], [236, 220, 255]];
+    for (let y = 0; y < M; y++) {
+      for (let x = 0; x < M; x++) {
+        const [r, gg, b] = COLS[grid[y * M + x]], k = 0.88 + R() * 0.14;
+        g.fillStyle = `rgb(${Math.min(255, r * k) | 0},${Math.min(255, gg * k) | 0},${Math.min(255, b * k) | 0})`;
+        g.fillRect(x * B, y * B, B, B);
+      }
+    }
+    t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.magFilter = THREE.NearestFilter;
+    this.texCache.set('reaper', t);
     return t;
   },
   // KRAG's finish from its concept art: pixel stone in 2x2 blocks, warm patches of rust and ochre with dark pits
@@ -565,7 +633,7 @@ const Gfx = {
     for (const e of def.emitters || []) {
       const m = new THREE.MeshBasicMaterial({ color: e.color, fog: !e.glow });
       m.userData.base = new THREE.Color(e.color);
-      if (e.fire) this.fireMats.push(m);
+      if (e.fire) { this.fireMats.push(m); m.userData.own = !!e.own; }
       if (e.lamp) this.lampMats.push(m);
       if (e.buzz) this.buzzMats.push(m);
       if (e.blink) this.blinkMats.push(m);
@@ -765,7 +833,9 @@ const Gfx = {
     else if (B.next <= 0) { B.t = rand(0.08, 0.3); B.next = rand(1.5, 5); }
     World.flick.fire = f; World.flick.buzz = B.k;
     this.uFire.value = f; this.uBuzz.value = B.k;
-    for (const m of this.fireMats) m.color.setRGB(1, 0.55 + 0.25 * Math.sin(t * 17) * Math.sin(t * 5.3), 0.2);
+    // fires waver through orange; a flame of another colour (the Rift's violet, `own`) wavers in its own
+    const fk = 0.82 + 0.3 * Math.sin(t * 17) * Math.sin(t * 5.3);
+    for (const m of this.fireMats) { if (m.userData.own) m.color.copy(m.userData.base).multiplyScalar(fk); else m.color.setRGB(1, 0.55 + 0.25 * Math.sin(t * 17) * Math.sin(t * 5.3), 0.2); }
     for (const m of this.buzzMats) {
       if (World.blackout && this.lampMats.includes(m)) continue;
       m.color.copy(m.userData.base).multiplyScalar(0.25 + 0.75 * B.k);
