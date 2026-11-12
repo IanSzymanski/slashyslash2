@@ -107,7 +107,9 @@ const Foundry = {
     // embers and spatters off the river near you (motes rising off the Rift's void)
     for (const R of D.lava) {
       if (Math.random() < 0.5) {
-        const x = clamp(P.pos.x + rand(-26, 26), R.min.x + 0.3, R.max.x - 0.3), z = clamp(P.pos.z + rand(-26, 26), R.min.z + 0.3, R.max.z - 0.3);
+        // somewhere along it near you: along the river's length, or along whichever way a reach of the void runs
+        const lx = R.max.x - R.min.x >= R.max.z - R.min.z;
+        const x = lx ? clamp(P.pos.x + rand(-26, 26), R.min.x + 0.3, R.max.x - 0.3) : rand(R.min.x + 0.3, R.max.x - 0.3), z = lx ? rand(R.min.z + 0.3, R.max.z - 0.3) : clamp(P.pos.z + rand(-26, 26), R.min.z + 0.3, R.max.z - 0.3);
         if (R.void) FX.sparks({ x, y: R.surface + 0.2, z }, 1, { x: 0, y: 1, z: 0 }, 0.4, 1.5, 5, Object.assign({ life: 1.4, g: -2 }, VOID_FX));
         else if (Math.random() < 0.7) FX.embers({ x, y: R.surface, z }, 1);
         else FX.sparks({ x, y: R.surface + 0.05, z }, 3, { x: 0, y: 1, z: 0 }, 0.6, 2, 6, Object.assign({ life: 0.8 }, MOLTEN));

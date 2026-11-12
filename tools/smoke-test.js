@@ -1602,7 +1602,9 @@ async function run(browser, file, errors) {
       // comes out beside you into a blow
       R = reaper(0, -18);
       R.cds.warp = 0;
-      const shots0 = RiftViews.shots.length;
+      let tears = 0;
+      const tear0 = RiftViews.tear;
+      RiftViews.tear = function (...a) { tears++; return tear0.apply(this, a); };
       R.warpStrike(p);
       const warping = !!(R.act && R.act.kind === 'warp');
       let hidF = 0, tearAhead = false, dmgHidden = -1, nearHidden = 99;
@@ -1614,7 +1616,8 @@ async function run(browser, file, errors) {
           if (RiftViews.shots.some((s) => Math.hypot(s.x - R.pos.x, s.z - R.pos.z) < 0.3 && Game.time >= s.t0)) tearAhead = true;
         }
       }
-      ok(warping && hidF >= 15 && tearAhead && dmgHidden === 0 && nearHidden < 5 && RiftViews.shots.length >= shots0 + 2 && R.act && R.act.kind === 'melee' && !R.hidden && distXZ(R.pos, p.pos) < 5.5 && R.hp === R.maxHp, `it folds into a tear 18 m off and steps out beside you (${distXZ(R.pos, p.pos).toFixed(1)} m) into a blow; the way out is open for ${(hidF / 60).toFixed(2)} s before it does (${tearAhead}), and nothing reaches it between (${dmgHidden})`);
+      RiftViews.tear = tear0;
+      ok(warping && hidF >= 15 && tearAhead && dmgHidden === 0 && nearHidden < 5 && tears >= 2 && R.act && R.act.kind === 'melee' && !R.hidden && distXZ(R.pos, p.pos) < 5.5 && R.hp === R.maxHp, `it folds into a tear 18 m off and steps out beside you (${distXZ(R.pos, p.pos).toFixed(1)} m) into a blow; the way out is open for ${(hidF / 60).toFixed(2)} s before it does (${tearAhead}), and nothing reaches it between (${dmgHidden})`);
       // the throw: down the line to you, into a tear past you, out of another behind you and home to its hand
       R = reaper(0, -16, { shield: 0 });
       R.startThrow(p);
