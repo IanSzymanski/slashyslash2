@@ -1,6 +1,6 @@
 'use strict';
 // The roster: everything the game shows and draws for a playable character, beside how it plays (its class in
-// player.js, aegisplayer.js, kragplayer.js and the like, registered in CHARACTERS). The character select screen
+// player.js, aegisplayer.js, kragplayer.js, reaperplayer.js and the like, registered in CHARACTERS). The character select screen
 // (ui.js and showroom.js), the render rigs and poses (render.js), the HUD's colours and the touch buttons all read
 // from here, so a new character is its class, its model in MODELS with a pose function, and one defineCharacter.
 //
@@ -155,5 +155,39 @@ defineCharacter('krag', {
     jabs: [['tap', 'attack'], 0.26, ['tap', 'attack'], 1.2],
   },
   idle: ['rest', 'beat', 'rest', 'roar', 'rest', 'jabs'],
+});
+defineCharacter('reaper', {
+  order: 3, title: 'THE LAST HARVEST', role: 'Trickster',
+  blurb: 'The Rift\'s harvester: a gaunt machine with a jet-boosted scythe that tears reality open and steps through. Never where they left it, and nothing near it is unafraid.',
+  color: '#a050ff', accent: '#e0c0ff', model: 'reaper', move: REAPER_PMOVE,
+  pose: (r, p) => ReaperPose.apply(r, p),
+  stats: { power: 4, reach: 5, defence: 2, speed: 4, mobility: 5, difficulty: 4 },
+  labels: { dash: 'WARP', utility: 'THROW' },
+  skills: [
+    { name: 'Warp', kind: 'Move', input: '{dash} + direction', desc: 'No dash: it folds into a tear and is at once up to 7.5 m away, through whatever stood between. Attack out of it for a drawn cut.', demo: 'warp' },
+    { name: 'Scythe string', kind: 'Attack', input: 'Tap {attack}', desc: 'Two wide sweeps, then a reaping cut most of the way round. Swings send bolts back.', demo: 'string' },
+    { name: 'Whirlwind', kind: 'Attack', input: 'Hold {attack}, release', desc: 'The jet builds with the reach shown on the ground; let go to spin, cutting everything round you again and again and throwing it out with the last. A hit breaks the charge.', demo: 'whirl' },
+    { name: 'Scythe throw', kind: 'Utility', input: '{utility}', desc: 'Thrown down the aim through everything on the line, into a tear, out of another off to one side and back to the hand. Unarmed until it returns.', demo: 'throw' },
+    { name: 'Parry and execution', kind: 'Defence', input: '{sheathe} on the glint, hold, release', desc: 'Parry a blow as it lands (15 shield, refunded), then hold. The space in front of you gives, everything in the cone is hauled to your feet, and one cut goes through all of it.', demo: 'parry' },
+    { name: 'Rend', kind: 'Passive', input: 'Land cuts', desc: 'What the scythe cuts has its soul hanging out for 4 s: it takes a fifth more from every blow, and killed like that it gives back shield.', demo: 'rend' },
+    { name: 'Dread', kind: 'Passive', input: 'Be near them', desc: 'Enemies within 8 m move slower and take longer to wind up.', demo: 'loom' },
+    { name: 'Plunge and drag', kind: 'Attack', input: 'Hold {attack} in the air · {attack} sliding', desc: 'Straight down with a shockwave; from a slide, the blade dragged through the street.', demo: 'plunge' },
+    { name: 'Harvest', kind: 'Ultimate', input: 'Hold {ultimate} with the meter full', desc: 'A great tear opens where you aim and drags in everything round it; then you step out of it and reap the lot.', demo: 'harvest' },
+  ],
+  demos: {
+    rest: REST,
+    warp: [['move', 1, 0], ['tap', 'dash'], 0.5, ['move', -1, 0], 0.1, ['tap', 'dash'], 0.2, ['move', 0, 0], 1.0],
+    string: [['tap', 'attack'], 0.3, ['tap', 'attack'], 0.3, ['tap', 'attack'], 1.2],
+    rend: [['tap', 'attack'], 0.3, ['tap', 'attack'], 1.1],
+    whirl: { steps: [['hold', 'attack', 1.35], 2.2], view: 1.5 },
+    throw: { steps: [['aim', 16, 2, 0], ['tap', 'utility'], 2.2], view: 1.5 },
+    parry: [['press', 'sheathe'], 0.05, hit(), 0.95, ['release', 'sheathe'], 1.4],
+    plunge: [['tap', 'jump'], 0.3, ['tap', 'jump'], 0.35, ['hold', 'attack', 0.35], 1.2],
+    harvest: { steps: [full, ['aim', 6, 0, 0], ['hold', 'ultimate', 1.1], 3.6], view: 1.7 },
+    loom: [['emote', 'loom', 2.4], 0.4],
+    sweep: [['emote', 'sweep', 1.4], 0.6],
+    idleWarp: [['move', 0, 1], ['tap', 'dash'], 0.45, ['move', 0, -1], 0.1, ['tap', 'dash'], 0.2, ['move', 0, 0], 1.0],
+  },
+  idle: ['rest', 'sweep', 'rest', 'loom', 'rest', 'idleWarp'],
 });
 ROSTER.sort((a, b) => a.order - b.order);

@@ -80,6 +80,7 @@ const UI = {
       case 'boss': this.startRun('boss'); break;
       case 'duel': this.startRun('duel'); break;
       case 'krag': this.startRun('krag'); break;
+      case 'reaper': this.startRun('reaper'); break;
       case 'training': this.startRun('training'); break;
       case 'test': this.startRun('test'); break;
       case 'street': this.startRun('street'); break;
@@ -177,7 +178,7 @@ const UI = {
   },
   refreshBest() {
     const el = document.getElementById('best');
-    if (el) el.textContent = `Best endless: wave ${SaveData.bestWave} · ${SaveData.bestScore.toLocaleString()} pts${SaveData.demoCleared ? ' · Demo cleared' : ''}${SaveData.unlocks.aegis ? ' · AEGIS-07 beaten' : ''}${SaveData.unlocks.krag ? ' · KRAG beaten' : ''}`;
+    if (el) el.textContent = `Best endless: wave ${SaveData.bestWave} · ${SaveData.bestScore.toLocaleString()} pts${SaveData.demoCleared ? ' · Demo cleared' : ''}${SaveData.unlocks.aegis ? ' · AEGIS-07 beaten' : ''}${SaveData.unlocks.krag ? ' · KRAG beaten' : ''}${SaveData.unlocks.reaper ? ' · REAP-R beaten' : ''}`;
   },
   applyVisualToggles() {
     document.getElementById('scanlines').hidden = !S.visuals.scanlines;
@@ -196,10 +197,12 @@ const UI = {
   // ---------- results ----------
   showOver(victory) {
     const st = Game.stats;
-    const boss = Game.mode === 'boss', duel = Game.mode === 'duel', krag = Game.mode === 'krag';
-    document.getElementById('over-title').textContent = victory ? (duel ? 'Duel won' : boss ? 'Rival defeated' : krag ? 'KRAG defeated' : 'Demo complete') : 'Signal lost';
+    const boss = Game.mode === 'boss', duel = Game.mode === 'duel', krag = Game.mode === 'krag', reaper = Game.mode === 'reaper';
+    document.getElementById('over-title').textContent = victory ? (duel ? 'Duel won' : boss ? 'Rival defeated' : krag ? 'KRAG defeated' : reaper ? 'REAP-R defeated' : 'Demo complete') : 'Signal lost';
     let sub;
-    if (victory && krag) sub = 'KRAG is down, and the street stops shaking.';
+    if (victory && reaper) sub = 'REAP-R is down, and the tears close behind it.';
+    else if (reaper) sub = 'REAP-R still stands. Watch for the tear it steps out of, parry its gold glints (the thrown scythe too), get clear of the red ring, and dash to snap its thread.';
+    else if (victory && krag) sub = 'KRAG is down, and the street stops shaking.';
     else if (krag) sub = 'KRAG still stands. Dodge its strings, parry the gold blow, crack its arm, and hit the arm when it guards at full heat.';
     else if (victory && duel) sub = 'You beat AEGIS-07 blade to blade. Practice only: the full Rival Fight is the one that counts.';
     else if (victory && !boss && !Director.rivalBuilt()) sub = 'All six demo waves cleared. AEGIS-07 joins the demo as its last wave in a later build.';
@@ -280,6 +283,11 @@ const UI = {
       ['KRAG guarding (a blue flash, then the arm up): blows on its arm crack it until the guard breaks; at full heat (seams white, mohawk torn up), hit the arm to blow it up in its face and stun it', actionLabel('attack')],
       ['KRAG Molten Fist (red): no parry or dash saves you in the red cone; get out of it sideways (easiest close in) or behind it before it splits open', actionLabel('dash')],
       ['The Foundry: knock enemies into the molten river; hit a hanging ladle, or yank it on the tether, to pour it on whatever is under it', `${actionLabel('attack')} · ${actionLabel('tether')}`],
+      ['REAP-R steps through tears: the one it will come out of opens first, with its own sound; turn to it. Every scythe blow glints gold before it lands, the thrown scythe too (it comes back from behind you): parry them', actionLabel('sheathe')],
+      ['REAP-R whirlwind (red, a red ring on the ground): no parry; be outside the ring or above it, then punish it while it kneels', actionLabel('dash')],
+      ['REAP-R reaping (a violet thread from its hand to you): dash to snap it, or parry the blow it hauls you in for', `${actionLabel('dash')} · ${actionLabel('sheathe')}`],
+      ['A blow that reaches your health tears part of it out: reach the violet wisp before REAP-R does to take it back', 'Walk into it'],
+      ['The Rift: knock enemies into the void round the dais; step into a standing tear to come out of its twin', 'Walk into it'],
       ['Pause (training: spawn panel)', actionLabel('pause')],
       ['Skip a cutscene you have seen', `Hold ${actionLabel('sheathe')}`],
       ['Pick an endless upgrade', touch ? 'Tap a card' : 'Click, or 1 / 2 / 3'],
@@ -300,7 +308,22 @@ const UI = {
       ['Tether (a chain from the right hand): tap fling, hold zip; grab barrels; reel in and kick grenades', actionLabel('tether')],
       ['Molten Fist (charged by kills): hold to draw it back in slow motion with the cone shown, then press again or attack to split the street', `Hold ${actionLabel('ultimate')}, then ${actionLabel('ultimate')} or ${actionLabel('attack')}`],
     ];
-    const all = rows.concat({ aegis, krag }[SaveData.character] || ronin, rival);
+    // REAP-R as the player: the warp, the scythe and its whirlwind, the throw, the execution and the Harvest
+    const rL = (a) => (touch ? touchLabel(a, 'reaper') : actionLabel(a));
+    const reaper = [
+      ['Warp (2 charges, untouchable): through a tear to a spot up to 7.5 m along the way you are moving, through whatever is between; attack out of it for a drawn cut', `${rL('dash')} + direction, ${actionLabel('attack')}`],
+      ['Scythe string: two wide sweeps, then a reaping cut most of the way round (toward the crosshair); swings send bolts back', `Tap ${actionLabel('attack')}`],
+      ['Whirlwind: hold to build it (its reach shows on the ground; a hit breaks it), let go to spin through everything round you', `Hold ${actionLabel('attack')}, release`],
+      ['Plunge, with a shockwave that grows with the fall', `Hold ${actionLabel('attack')} in the air`],
+      ['Slide attack: the blade dragged through the street (hold to rip up out of it)', `${actionLabel('attack')} while sliding`],
+      ['Scythe throw: down the aim, into a tear, out of another and back to your hand; no attacks or parry until it returns', rL('utility')],
+      ['Parry stance (costs 15 shield, refunded on a parry)', `${actionLabel('sheathe')} just before a hit`],
+      ['Execution after a parry: hold to charge; everything in the cone ahead is hauled to your feet and cut through', `${actionLabel('sheathe')}, hold, release`],
+      ['Rend and dread: what you cut takes a fifth more for 4 s and gives back shield if it dies like that; enemies within 8 m are slower to move and to strike', 'Passive'],
+      ['Tether: tap fling, hold zip; grab barrels; reel in and kick grenades', actionLabel('tether')],
+      ['Harvest (charged by kills): a great tear opens where you aim and drags everything in, then you step out of it and reap the lot', `Hold ${actionLabel('ultimate')} when it's full`],
+    ];
+    const all = rows.concat({ aegis, krag, reaper }[SaveData.character] || ronin, rival);
     document.getElementById('howto-table').innerHTML = all.map(([a, k]) => `<tr><td>${a}</td><td><kbd>${k}</kbd></td></tr>`).join('');
   },
 

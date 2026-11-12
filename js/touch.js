@@ -182,9 +182,11 @@ const Touch = {
     this.el.style.setProperty('--t-alpha', S.controls.touchOpacity == null ? 0.6 : S.controls.touchOpacity);
     // the buttons read what they do for this character (roster.js). AEGIS: E is the beam (gun) or the block
     // (blade), and F held switches modes, filling as it goes. KRAG: E is its guard, F its leap, lit while aimed.
+    // REAP-R: its dash is the warp, F its throw.
     const A = p.charId === 'aegis', K = p.charId === 'krag', free = S.gameplay.invincible;
     this.setText(this.btn.sheathe, A ? (p.mode === 'gun' ? 'BEAM' : 'BLOCK') : touchLabel('sheathe', p.charId));
     this.setText(this.btn.utility, touchLabel('utility', p.charId));
+    this.setText(this.btn.dash, touchLabel('dash', p.charId));
     const U = p.utility(), cd = A ? (p.swap ? p.swap.t / AP.SWITCH : 1) : U && p.utilCD > 0 ? 1 - p.utilCD / U.cooldown : 1;
     this.btn.utility.style.setProperty('--cd', K && p.leapAim ? 1 : p.charging ? p.charging.k : cd);
     this.btn.utility.classList.toggle('cooling', !A && !p.charging && cd < 1);

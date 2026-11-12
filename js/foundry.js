@@ -21,6 +21,8 @@ const POUR = { DUR: 2.4, R: 1.6, EDMG: 48, DMG: 18, POOL: 3.6, LIFE: 6 };
 const SLAG = { EDMG: 9, DMG: 6, EVERY: 0.5, PEVERY: 0.8 };
 const FOUNDRY_NAMES = ['SLAG HEAP', 'FURNACE FLOOR', 'MOLTEN RUN', 'IRON TIDE', 'CRUCIBLE', 'HOT METAL', 'ASH FALL', 'FORGE LINE'];
 const MOLTEN = { c0: '#fff0c0', c1: '#ff7a1a', c2: '#6a1404' };
+// what the Rift's void throws off
+const VOID_FX = { c0: '#ffffff', c1: '#b060ff', c2: '#3a0a7a' };
 const SLAG_COLS = ['#3a3034', '#5a3a2a', '#ff7a1a', '#2a2226'];
 
 // a crucible: a squat iron pot banded and handled, molten slag glowing in its mouth
@@ -74,9 +76,13 @@ const Foundry = {
     const D = World.def;
     if (!D || !D.lava) return;
     const P = Game.player;
+    // thrown up out of the void: once it's over the lip, out onto the side
+    const over = (o) => { const Q = o._voidOut; if (!Q) return; if (Game.time > Q.until) o._voidOut = null; else if (o.pos.y > Q.y) { o.vel.x = Q.x; o.vel.z = Q.z; o._voidOut = null; } };
+    over(P);
     // the river burns what's in it and throws it out onto the nearer bank
     if (!P.dead) { const R = this.lavaAt(P.pos.x, P.pos.z); if (R && P.pos.y < R.y + 0.45) this.burn(P, R); }
     for (const e of Game.enemies) {
+      over(e);
       if (e.dead || e.spawning || e.flying || e.dying) continue;
       const R = this.lavaAt(e.pos.x, e.pos.z);
       if (R && e.pos.y < R.y + 0.45) this.burn(e, R);
@@ -98,31 +104,50 @@ const Foundry = {
       for (const e of Game.enemies) if (!e.dead && !e.flying) carry(e);
       for (const pr of Game.props) if (!pr.dead && pr.kind === 'barrel') carry(pr);
     }
-    // embers and spatters off the river near you
+    // embers and spatters off the river near you (motes rising off the Rift's void)
     for (const R of D.lava) {
       if (Math.random() < 0.5) {
-        const x = clamp(P.pos.x + rand(-26, 26), R.min.x + 0.3, R.max.x - 0.3), z = rand(R.min.z + 0.3, R.max.z - 0.3);
-        if (Math.random() < 0.7) FX.embers({ x, y: R.surface, z }, 1);
+        // somewhere along it near you: along the river's length, or along whichever way a reach of the void runs
+        const lx = R.max.x - R.min.x >= R.max.z - R.min.z;
+        const x = lx ? clamp(P.pos.x + rand(-26, 26), R.min.x + 0.3, R.max.x - 0.3) : rand(R.min.x + 0.3, R.max.x - 0.3), z = lx ? rand(R.min.z + 0.3, R.max.z - 0.3) : clamp(P.pos.z + rand(-26, 26), R.min.z + 0.3, R.max.z - 0.3);
+        if (R.void) FX.sparks({ x, y: R.surface + 0.2, z }, 1, { x: 0, y: 1, z: 0 }, 0.4, 1.5, 5, Object.assign({ life: 1.4, g: -2 }, VOID_FX));
+        else if (Math.random() < 0.7) FX.embers({ x, y: R.surface, z }, 1);
         else FX.sparks({ x, y: R.surface + 0.05, z }, 3, { x: 0, y: 1, z: 0 }, 0.6, 2, 6, Object.assign({ life: 0.8 }, MOLTEN));
       }
     }
     for (const Q of D.pours || []) if (Math.random() < 0.6) FX.sparks({ x: Q.b[0] + rand(-0.4, 0.4), y: Q.b[1] + 0.1, z: Q.b[2] + rand(-0.4, 0.4) }, 2, { x: 0, y: 1, z: 0 }, 1, 2, 7, Object.assign({ life: 0.8 }, MOLTEN));
   },
-  // in the river: burned (not KRAG, who's made of the stuff) and thrown up onto the nearer bank
+  // in the river: burned (not a boss) and thrown up onto the nearer bank, across its narrow side. The Rift's void
+  // tears at what falls in and throws it out the same way.
   burn(o, R) {
     if (o._lavaT > Game.time) return;
     o._lavaT = Game.time + 0.5;
-    const mid = (R.min.z + R.max.z) / 2, side = o.pos.z < mid ? -1 : 1, P = Game.player;
+    const P = Game.player, V = !!R.void, alongX = R.max.x - R.min.x >= R.max.z - R.min.z;
+    const side = alongX ? (o.pos.z < (R.min.z + R.max.z) / 2 ? -1 : 1) : (o.pos.x < (R.min.x + R.max.x) / 2 ? -1 : 1);
+    // (the void is deeper than the river: thrown hard enough to clear its lip)
+    const ox = alongX ? 0 : side, oz = alongX ? side : 0, UP = V ? 26 : LAVA.UP;
+    // (out of the deeper void it's thrown straight up first, and sideways once it's over the lip: see update)
+    const out = (b, keep) => {
+      b.vel.y = UP; b.onGround = false;
+      if (V) { b.vel.x *= alongX ? keep : 0; b.vel.z *= alongX ? 0 : keep; b._voidOut = { x: ox * LAVA.OUT, z: oz * LAVA.OUT, y: World.def.groundY + 0.2, until: Game.time + 1.2 }; return; }
+      b.vel.x = alongX ? b.vel.x * keep : ox * LAVA.OUT; b.vel.z = alongX ? oz * LAVA.OUT : b.vel.z * keep;
+    };
     if (o === P) {
-      P.takeHit({ dmg: LAVA.DMG, from: { x: o.pos.x, y: o.pos.y - 1, z: o.pos.z - side }, kind: 'hazard', source: null, knock: 0, unparryable: true, through: true });
-      if (!P.dead) { P.vel.y = LAVA.UP; P.vel.z = side * LAVA.OUT; P.vel.x *= 0.3; P.onGround = false; }
-    } else if (o.type === 'krag') {
-      o.vel.y = LAVA.UP; o.vel.z = side * LAVA.OUT; o.onGround = false;
-    } else {
-      hurtEnemy(o, LAVA.EDMG, { kv: { x: 0, y: LAVA.UP, z: side * LAVA.OUT }, dir: { x: 0, y: 1, z: side }, heavy: true, cause: 'lava', stagger: 0.6 });
-      if (!o.dead) { o.vel.y = LAVA.UP; o.vel.z = side * LAVA.OUT; o.onGround = false; }
+      P.takeHit({ dmg: LAVA.DMG, from: { x: o.pos.x - ox, y: o.pos.y - 1, z: o.pos.z - oz }, kind: 'hazard', source: null, knock: 0, unparryable: true, through: true });
+      if (!P.dead) out(P, 0.3);
+    } else if (o.isBoss) out(o, 1);
+    else {
+      hurtEnemy(o, LAVA.EDMG, { kv: { x: ox * LAVA.OUT, y: UP, z: oz * LAVA.OUT }, dir: { x: ox, y: 1, z: oz }, heavy: true, cause: 'lava', stagger: 0.6 });
+      if (!o.dead) out(o, 1);
     }
     const at = { x: o.pos.x, y: R.surface + 0.2, z: o.pos.z };
+    if (V) {
+      FX.sparks(at, 26, { x: 0, y: 1, z: 0 }, 0.9, 5, 18, Object.assign({ life: 1 }, VOID_FX));
+      FX.ring(at, 0.3, 3, 0.3, { c: '#b060ff' });
+      FX.light(at, '#a050ff', 4, 7, 0.3);
+      Sound.play('voidTear', {}, at);
+      return;
+    }
     FX.sparks(at, 22, { x: 0, y: 1, z: 0 }, 0.9, 5, 16, Object.assign({ life: 1 }, MOLTEN));
     FX.embers(at, 10);
     FX.dust(at, 4, { c: '#3a3036', smax: 2, rise: 3, life: 1.2 });
@@ -173,8 +198,8 @@ const Foundry = {
     Game.shake(0.4);
     Game.announcements = [];
     Sound.play('portalEnter');
-    const sub = free ? 'FREE ROAM' : to === 'foundry' ? 'KRAG WAITS IN THE FORGE' : 'BACK TO THE STREETS';
-    Game.announce(World.def.name.toUpperCase(), sub, to === 'foundry' ? '#ff9a5a' : '#4af0ff', 2.6);
+    const sub = free ? 'FREE ROAM' : to === 'foundry' ? 'KRAG WAITS IN THE FORGE' : to === 'rift' ? 'SOMETHING WAITS BEHIND THE WORLD' : 'BACK TO THE STREETS';
+    Game.announce(World.def.name.toUpperCase(), sub, to === 'foundry' ? '#ff9a5a' : to === 'rift' ? '#b060ff' : '#4af0ff', 2.6);
   },
 };
 
@@ -430,12 +455,12 @@ const FoundryViews = {
     if (!this.ready) this.init();
     const grp = Gfx.level;
     for (const R of def.lava || []) {
-      const L = R.max.x - R.min.x, W = R.max.z - R.min.z, m = this.flowMat(L, W);
+      const L = R.max.x - R.min.x, W = R.max.z - R.min.z, m = R.void ? RiftViews.voidMat(L, W) : this.flowMat(L, W);
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(L, W).rotateX(-Math.PI / 2), m);
       mesh.position.set((R.min.x + R.max.x) / 2, R.surface, (R.min.z + R.max.z) / 2);
       grp.add(mesh);
       // downstream is east, away from the furnace (a rising offset moves the pattern toward -x)
-      this.flows.push({ tex: m.map, u: -0.12, v: 0, mat: m });
+      this.flows.push(R.void ? { tex: m.map, u: 0.015, v: 0.022, mat: m } : { tex: m.map, u: -0.12, v: 0, mat: m });
     }
     for (const Q of def.pours || []) {
       const dx = Q.b[0] - Q.a[0], dy = Q.b[1] - Q.a[1], dz = Q.b[2] - Q.a[2], len = Math.hypot(dx, dy, dz);

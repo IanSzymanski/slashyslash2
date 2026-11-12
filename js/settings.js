@@ -15,7 +15,7 @@ const ACTIONS = [
   { id: 'dash', label: 'Dash' },
   { id: 'attack', label: 'Slash (tap) / Heavy (hold)' },
   { id: 'sheathe', label: 'Parry stance (costs shield) / AEGIS: beam or block / KRAG: guard' },
-  { id: 'utility', label: 'Sword beam (tap / hold to charge) / AEGIS: hold to switch mode / KRAG: hold to aim a leap' },
+  { id: 'utility', label: 'Sword beam (tap / hold to charge) / AEGIS: hold to switch mode / KRAG: hold to aim a leap / REAP-R: throw the scythe' },
   { id: 'tether', label: 'Tether (tap fling / hold zip / grab)' },
   { id: 'ultimate', label: 'Ultimate (hold)' },
   { id: 'reload', label: 'Reload (AEGIS gun)' },
@@ -104,8 +104,8 @@ function applyPreset(name) {
 }
 
 // unlocks.aegis records the rival's defeat (AEGIS-07 is playable either way).
-// character: who the next run plays as (a roster id: 'ronin', 'aegis', 'krag')
-const SaveData = deepMerge({ bestWave: 0, bestScore: 0, demoCleared: false, bossKills: 0, unlocks: { aegis: false, krag: false }, character: 'ronin' }, (() => {
+// character: who the next run plays as (a roster id: 'ronin', 'aegis', 'krag', 'reaper')
+const SaveData = deepMerge({ bestWave: 0, bestScore: 0, demoCleared: false, bossKills: 0, unlocks: { aegis: false, krag: false, reaper: false }, character: 'ronin' }, (() => {
   try { return JSON.parse(safeStorageGet(SAVE_KEY) || 'null'); } catch (e) { return null; }
 })());
 function saveProgress() { safeStorageSet(SAVE_KEY, JSON.stringify(SaveData)); }
@@ -131,7 +131,7 @@ const SETTINGS_SCHEMA = {
     { type: 'toggle', key: 'enemies.crawler', label: 'Armoured crawlers' },
     { type: 'toggle', key: 'enemies.grenadier', label: 'Grenadiers' },
     { type: 'toggle', key: 'enemies.sniper', label: 'Rooftop snipers' },
-    { type: 'toggle', key: 'enemies.bossEndless', label: 'Bosses in endless (AEGIS-07 ends each stint in the crossroads, KRAG each in the Foundry)' },
+    { type: 'toggle', key: 'enemies.bossEndless', label: 'Bosses in endless (AEGIS-07 ends each stint in the crossroads, KRAG each in the Foundry, REAP-R each in the Rift)' },
     { type: 'heading', label: 'Player' },
     { type: 'range', key: 'gameplay.parryWindow', label: 'Parry window', min: 0.08, max: 0.45, step: 0.01, fmt: 'ms' },
     { type: 'range', key: 'gameplay.ultKills', label: 'Kills to charge ultimate', min: 3, max: 40, step: 1, fmt: 'int' },

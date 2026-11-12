@@ -244,7 +244,8 @@ const Render = {
     Training.sync(t);
     FX.sync(Gfx.camera);
     // bullet time drains the colour from the lit world; glowing parts and effects stay bright
-    Gfx.desat.value = G.bulletK() * 0.85;
+    // (REAP-R's dread drains it too)
+    Gfx.desat.value = Math.max(G.bulletK() * 0.85, reaperDread() * 0.55);
     Gfx.nearCut.value = Camera.fp && G.state === 'playing' ? 0.28 : 0;
     Gfx.beginFrame();
     this.bladeLight();
@@ -253,6 +254,8 @@ const Render = {
     AegisViews.pushLights();
     KragViews.pushLights();
     FoundryViews.pushLights();
+    ReaperViews.pushLights();
+    RiftViews.pushLights();
     Views.pushLights();
     FX.pushLights();
     Gfx.endFrame();
@@ -261,6 +264,7 @@ const Render = {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, VIEW_W, VIEW_H);
     FPFX.render(ctx, realDt);
+    ReaperViews.drawHud(ctx, t);
     this.drawTexts(ctx);
     if (FX.flashA > 0) {
       ctx.globalAlpha = Math.min(0.7, FX.flashA);
@@ -364,7 +368,7 @@ const Render = {
     // wave info
     const D = Director;
     if (D.wave > 0) {
-      const label = G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : G.mode === 'krag' ? 'KRAG FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
+      const label = G.mode === 'duel' ? 'MELEE DUEL' : G.mode === 'boss' ? 'RIVAL FIGHT' : G.mode === 'krag' ? 'KRAG FIGHT' : G.mode === 'reaper' ? 'REAP-R FIGHT' : (G.mode === 'demo' ? 'DEMO ' : 'ENDLESS ') + 'WAVE ' + D.wave;
       drawText(ctx, label, VIEW_W / 2, 6, { align: 'center', color: '#ffd0d8' });
       let sub;
       if (D.state === 'fight') sub = D.remaining() + ' HOSTILES' + (D.modifier ? ' - ' + WAVE_MODIFIERS[D.modifier].name : '');
@@ -429,14 +433,14 @@ const Render = {
     this.drawUltMeter(ctx, x + 9, y2 + 31, p, t);
   },
   // the ultimate's meter: twelve teeth filling round a disc as kills charge it, spinning and flashing when
-  // it's ready (hold the key), turning while the saw runs, the strike is aimed or the Fist is drawn back. AEGIS's
-  // is cyan, KRAG's molten.
+  // it's ready (hold the key), turning while the saw runs, the strike is aimed, the Fist is drawn back or the
+  // Harvest drags. AEGIS's is cyan, KRAG's molten, REAP-R's violet.
   drawUltMeter(ctx, cx, cy, p, t) {
-    const A = p.charId === 'aegis', K = p.charId === 'krag', ready = p.ultCharge >= 1, active = A ? !!p.ultAim : K ? !!p.fistAim : !!p.ult;
-    const lit0 = A ? AEGIS_P.glow : K ? '#ff7a2a' : '#ff3048', dark = A ? '#10222c' : K ? '#2a160c' : '#3a1a24', core = A ? '#1a6a9a' : K ? '#b8400e' : '#b8142a';
+    const A = p.charId === 'aegis', K = p.charId === 'krag', Rp = p.charId === 'reaper', ready = p.ultCharge >= 1, active = A ? !!p.ultAim : K ? !!p.fistAim : Rp ? !!p.harvest : !!p.ult;
+    const lit0 = A ? AEGIS_P.glow : K ? '#ff7a2a' : Rp ? '#a050ff' : '#ff3048', dark = A ? '#10222c' : K ? '#2a160c' : Rp ? '#1e1030' : '#3a1a24', core = A ? '#1a6a9a' : K ? '#b8400e' : Rp ? '#6a2ac0' : '#b8142a';
     const hold = A ? (p.ultAim ? 1 : clamp(p.ultCharging / AP.ULT_HOLD, 0, 1)) : K ? (p.fistAim ? 1 : clamp(p.ultCharging / KP_FIST.HOLD, 0, 1)) : p.ultHold;
-    const name = A ? 'STRIKE' : K ? 'MOLTEN FIST' : 'SAWBLADE';
-    const spin = active ? (A || K ? t * 6 : p.ult.spin) : ready ? t * 4 : 0, n = 12;
+    const name = A ? 'STRIKE' : K ? 'MOLTEN FIST' : Rp ? 'HARVEST' : 'SAWBLADE';
+    const spin = active ? (A || K || Rp ? t * 6 : p.ult.spin) : ready ? t * 4 : 0, n = 12;
     for (let i = 0; i < n; i++) {
       const a = spin + (i / n) * TAU - Math.PI / 2;
       const lit = active || i / n < p.ultCharge;
@@ -455,7 +459,7 @@ const Render = {
     // a refused press (not charged yet) flashes it red
     if ((A || K) && p.ultFlash > 0 && ((t * 20) | 0) % 2) drawText(ctx, name, cx + 13, cy - 3, { color: '#ff3048' });
     else if (active) drawText(ctx, name, cx + 13, cy - 3, { color: '#ffffff' });
-    else drawText(ctx, (ready ? key + ' ' : '') + name, cx + 13, cy - 3, { color: ready ? (((t * 3) | 0) % 2 ? (A ? AEGIS_P.hi : K ? '#ffd070' : '#ff8a9a') : '#ffffff') : A ? '#4a5a6a' : K ? '#5a4a40' : '#5a4a5a' });
+    else drawText(ctx, (ready ? key + ' ' : '') + name, cx + 13, cy - 3, { color: ready ? (((t * 3) | 0) % 2 ? (A ? AEGIS_P.hi : K ? '#ffd070' : Rp ? '#e0c0ff' : '#ff8a9a') : '#ffffff') : A ? '#4a5a6a' : K ? '#5a4a40' : '#5a4a5a' });
   },
   // ---------- the bosses ----------
   // Its health along the bottom of the screen: the rival's with the half-health mark of phase 1 and its shield,

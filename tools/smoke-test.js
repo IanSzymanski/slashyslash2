@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Headless smoke test. Boots the 3D page and checks WebGL draws, runs scripted checks of the moves
 // (Phases 1 and 2), the nav graph, each enemy type's answer and the wave modes (Phase 3), the rival's
-// rules (Phase 5), KRAG's rules, and Training's tutorial, touch controls and the Sawblade (Phase 6), then plays
-// Endless from wave 6, the rival fight, the KRAG fight and the training hall with random input and mouse look.
+// rules (Phase 5), KRAG's rules, REAP-R's rules and the Rift's, and Training's tutorial, touch controls and the
+// Sawblade (Phase 6), then plays Endless from wave 6, the rival fight, the KRAG fight, the REAP-R fight and the
+// training hall with random input and mouse look, as each character.
 // Fails on any page error, a camera inside a box or under the street, a body inside a box or outside the
 // arena, a shader compiled mid-fight, or a failed check.
 // Needs the dev dependencies:  npm install
@@ -1488,7 +1489,8 @@ async function run(browser, file, errors) {
         for (let i = 0; i < 90; i++) { T.frame(1); e.vel.x = e.vel.z = 0; }
         ok(cr.dead && pool && (e.dead || after - e.hp >= 9), `a crucible bursts (${cr.dead}) into a pool of slag (${!!pool}) that burns an enemy standing in it (${e.dead ? 'dead' : after - e.hp})`);
       }
-      // Free Roam: a portal stands on the plaza leading to the Foundry, and one there leads back to the city
+      // Free Roam: a portal stands on the plaza leading to the Foundry, one there leads on to the Rift, and one
+      // there leads back to the city
       {
         Director.freePortal = true;
         Game.toMenu(); UI.act('test'); T.frame(2); p = Game.player; S.gameplay.invincible = true;
@@ -1499,16 +1501,288 @@ async function run(browser, file, errors) {
         for (let i = 0; i < 20 && Arena.id !== 'foundry'; i++) T.frame(1);
         const inF = Arena.id === 'foundry';
         for (let i = 0; i < 160; i++) T.frame(1);
+        const on = Director.portal, onOk = !!(on && on.free && on.to === 'rift');
+        if (on) step(on);
+        for (let i = 0; i < 20 && Arena.id !== 'rift'; i++) T.frame(1);
+        const inR = Arena.id === 'rift';
+        for (let i = 0; i < 160; i++) T.frame(1);
         const back = Director.portal, backOk = !!(back && back.free && back.to === 'crossroads');
         if (back) step(back);
         for (let i = 0; i < 20 && Arena.id !== 'crossroads'; i++) T.frame(1);
-        ok(there && inF && backOk && Arena.id === 'crossroads' && !Game.enemies.length, `Free Roam: a portal on the plaza leads to the Foundry (${inF}), and one there leads back to the city (${backOk}, now in ${Arena.id})`);
+        ok(there && inF && onOk && inR && backOk && Arena.id === 'crossroads' && !Game.enemies.length, `Free Roam: a portal on the plaza leads to the Foundry (${inF}), one there leads on to the Rift (${onOk}, ${inR}), and one there leads back to the city (${backOk}, now in ${Arena.id})`);
         Director.freePortal = false;
       }
       Game.enemies = []; Game.props = []; Game.hazards = []; Game.projectiles = [];
     }
     S.gameplay.invincible = false;
     // FOUNDRY:END
+    // REAPER:START
+    // ---------- REAP-R ----------
+    {
+      // the REAP-R fight opens on its entry cutscene (a tear opens and it steps out of it), in the Rift, and it
+      // fights once that's over
+      Game.toMenu(); UI.act('reaper');
+      p = Game.player; S.gameplay.invincible = true;
+      let R = null;
+      for (let i = 0; i < 60 * 4 && !R; i++) { T.frame(1); R = Game.enemies.find((q) => q.type === 'reaper'); }
+      T.frame(2);
+      const rIntro = !!(Game.cine && Game.cine.kind === 'reaperIntro'), unseen = R && !R.showModel(), stages = new Set();
+      for (let i = 0; i < 60 * 12 && (R.spawning || !R.act || R.act.kind === 'intro'); i++) { T.frame(1); if (R.intro) stages.add(R.intro.stage); }
+      let rActed = '';
+      for (let i = 0; i < 60 * 8 && !rActed; i++) { T.frame(1); if (R.act && R.act.kind !== 'intro') rActed = R.act.kind; }
+      ok(rIntro && unseen && ['tear', 'step', 'ignite', 'title'].every((s) => stages.has(s)) && !R.spawning && rActed && !Game.cineActive() && Arena.id === 'rift', `the REAP-R fight opens on its entry cutscene in the Rift, out of a tear (${[...stages].join(', ')}), then it fights (first act: ${rActed || 'none'}, arena ${Arena.id})`);
+      ok(!Game.hazards.some((h) => h.kind === 'soul') && Render.project && R.barCol === '#a050ff', 'its bar is its own and no soul is out before a blow lands');
+      // a REAP-R at (dx, dz) from the player, done arriving, facing you, its own choices switched off
+      const reaper = (dx, dz, o = {}) => {
+        Game.toMenu(); UI.act('test'); T.frame(2);
+        p = Game.player; S.gameplay.invincible = !!o.inv; p.hp = PC.MAX_HP; p.shield = o.shield === undefined ? PC.MAX_SHIELD : o.shield; p.iframes = 0;
+        // (a shield knocked out for the check stays out)
+        if (o.shield === 0) p.shieldDelay = 99;
+        const q = p.pos, r = new Reaper({ x: q.x + dx, y: 0, z: q.z + dz }, {});
+        r.spawning = false; r.pos.y = r.prev.y = World.groundAt(r.pos.x, r.pos.z, 1);
+        for (const c in r.cds) r.cds[c] = 99;
+        r.chooseAct = () => {};
+        r.react = () => {};
+        if (!o.move) r.navigate = () => {};
+        r.yaw = r.faceYaw = r.yawTo(p.pos);
+        Game.enemies.push(r); T.frame(1);
+        Camera.yaw = yawOf(r.pos.x - p.pos.x, r.pos.z - p.pos.z); Camera.pitch = -0.1;
+        return r;
+      };
+      const soulOut = () => Game.hazards.find((h) => h.kind === 'soul' && !h.dead);
+      // every scythe blow glints gold before it lands; E on the glint parries it, knocks it off balance and
+      // charges the counter; then it's gone through a tear
+      R = reaper(0, -3.4);
+      R.startMove('sweep', null);
+      let rGlint = -1, rWind = R.act.wind;
+      for (let i = 0; i < 90 && rGlint < 0; i++) { T.frame(1); if (R.act && R.act.glinted) rGlint = R.act.t; }
+      const goldOutline = R.outline() === '#ffd070' || R.outline() === '#ffffff';
+      T.frame(7);
+      T.press('KeyE');
+      const par0 = Game.stats.parries;
+      for (let i = 0; i < 40 && Game.stats.parries === par0; i++) T.frame(1);
+      const rFlinch = !!(R.act && R.act.kind === 'flinch'), rEmp = !!(p.sheathe && p.sheathe.empowered);
+      T.release('KeyE');
+      let rGone = false, rFar = 0;
+      for (let i = 0; i < 200; i++) { T.frame(1); if (R.hidden) rGone = true; if (rGone && !R.hidden) { rFar = distXZ(R.pos, p.pos); break; } }
+      ok(rGlint >= 0 && rWind - rGlint <= GLINT_LEAD + 0.03 && goldOutline && Game.stats.parries === par0 + 1 && rFlinch && rEmp && p.hp === PC.MAX_HP, `a scythe blow glints ${rGlint >= 0 ? (rWind - rGlint).toFixed(2) : '?'} s before it lands, outlined in gold; E on the glint parries it (${Game.stats.parries - par0}), knocks it off balance (${rFlinch}) and charges the counter (${rEmp})`);
+      ok(rGone && rFar > 8, `knocked off balance, it steps through a tear to start again (${rGone}, ${rFar.toFixed(1)} m off)`);
+      // a blow that reaches your health tears part of it out: a soul hangs where you were struck, holding a share of
+      // what the blow took; reaching it gives that back
+      R = reaper(0, -3.4, { shield: 0 });
+      R.startMove('sweep', null);
+      for (let i = 0; i < 90 && p.hp === PC.MAX_HP; i++) T.frame(1);
+      const lost = PC.MAX_HP - p.hp;
+      let so = soulOut();
+      const held = so ? so.held : 0, hpNow = p.hp;
+      R.act = null; R.attack = null;
+      const clearOf = so ? Math.min(distXZ(so.pos, p.pos), distXZ(so.pos, R.pos)) : 0;
+      T.frame(40);
+      const waits = !!so && !so.dead;
+      if (so) { p.pos.x = p.prev.x = so.pos.x; p.pos.z = p.prev.z = so.pos.z; p.pos.y = p.prev.y = World.groundAt(so.pos.x, so.pos.z, so.pos.y + 0.5); p.vel.x = p.vel.y = p.vel.z = 0; so.pos.y = p.pos.y + 1.2; }
+      T.frame(3);
+      ok(lost > 0 && so && Math.abs(held - lost * SOUL.SHARE) < 0.6 && clearOf > 2 && waits && so.dead && Math.abs(p.hp - (hpNow + Math.max(1, Math.round(held)))) < 0.6, `a blow that reaches your health (${lost.toFixed(0)}) tears a soul out holding ${held.toFixed(1)} of it, ${clearOf.toFixed(1)} m clear of you both; reaching it gives that back (health ${hpNow.toFixed(0)} to ${p.hp.toFixed(0)})`);
+      // a blow the shield eats tears nothing
+      R = reaper(0, -3.4);
+      R.startMove('sweep', null);
+      for (let i = 0; i < 90 && p.shield === PC.MAX_SHIELD; i++) T.frame(1);
+      ok(p.shield < PC.MAX_SHIELD && p.hp === PC.MAX_HP && !soulOut(), `a blow the shield eats tears nothing out (shield ${p.shield.toFixed(0)}, health ${p.hp})`);
+      // left too long, the soul is reaped: it's gone, and REAP-R mends
+      R = reaper(0, -3.4, { shield: 0 });
+      R.startMove('sweep', null);
+      for (let i = 0; i < 90 && p.hp === PC.MAX_HP; i++) T.frame(1);
+      so = soulOut();
+      R.act = null; R.attack = null; R.hp = 500;
+      const held2 = so ? so.held : 0, hp2 = p.hp;
+      let drift = 0;
+      if (so) { const d0 = dist3(so.pos, R.chest()); p.pos.x = p.prev.x = p.pos.x + 20; T.frame(30); drift = d0 - dist3(so.pos, R.chest()); so.t = SOUL.LIFE - 0.02; }
+      T.frame(4);
+      ok(so && so.dead && drift > 0.3 && R.hp === 500 + Math.round(held2 * SOUL.HEAL) && p.hp === hp2, `a soul left out drifts to REAP-R (${drift.toFixed(2)} m in half a second) and is reaped: REAP-R mends ${R.hp - 500} and you get nothing back`);
+      // it steps through tears: the way out opens before it steps out of it, nothing reaches it between, and it
+      // comes out beside you into a blow
+      R = reaper(0, -18);
+      R.cds.warp = 0;
+      let tears = 0;
+      const tear0 = RiftViews.tear;
+      RiftViews.tear = function (...a) { tears++; return tear0.apply(this, a); };
+      R.warpStrike(p);
+      const warping = !!(R.act && R.act.kind === 'warp');
+      let hidF = 0, tearAhead = false, dmgHidden = -1, nearHidden = 99;
+      for (let i = 0; i < 200 && !(R.act && R.act.kind === 'melee'); i++) {
+        T.frame(1);
+        if (R.hidden) {
+          hidF++;
+          if (dmgHidden < 0) { dmgHidden = hurtEnemy(R, 50, { cause: 'slash' }); nearHidden = distXZ(R.pos, p.pos); }
+          if (RiftViews.shots.some((s) => Math.hypot(s.x - R.pos.x, s.z - R.pos.z) < 0.3 && Game.time >= s.t0)) tearAhead = true;
+        }
+      }
+      RiftViews.tear = tear0;
+      ok(warping && hidF >= 15 && tearAhead && dmgHidden === 0 && nearHidden < 5 && tears >= 2 && R.act && R.act.kind === 'melee' && !R.hidden && distXZ(R.pos, p.pos) < 5.5 && R.hp === R.maxHp, `it folds into a tear 18 m off and steps out beside you (${distXZ(R.pos, p.pos).toFixed(1)} m) into a blow; the way out is open for ${(hidF / 60).toFixed(2)} s before it does (${tearAhead}), and nothing reaches it between (${dmgHidden})`);
+      // the throw: down the line to you, into a tear past you, out of another behind you and home to its hand
+      R = reaper(0, -16, { shield: 0 });
+      R.startThrow(p);
+      const phases = new Set();
+      let hits = 0, hpT = p.hp, backBehind = false, unarmed = false;
+      for (let i = 0; i < 120 && !R.scytheOut; i++) T.frame(1);
+      for (let i = 0; i < 60 * 6 && R.scytheOut; i++) {
+        T.frame(1);
+        const s = R.scytheOut;
+        if (s) { phases.add(s.phase); unarmed = true; if (s.back && (s.back.z - p.pos.z) > 1) backBehind = true; }
+        p.iframes = 0;
+        if (p.hp < hpT) { hits++; hpT = p.hp; }
+        p.vel.x = p.vel.z = 0; p.pos.x = p.prev.x = World.def.playerStart.x; p.pos.z = p.prev.z = World.def.playerStart.z;
+      }
+      ok(unarmed && ['out', 'gap', 'back'].every((s) => phases.has(s)) && hits >= 1 && backBehind && !R.scytheOut && Game.projectiles.every((b) => b.kind !== 'scythe' || b.dead), `its thrown scythe hits you standing in its line (${hits}), goes into a tear, comes back out of one on your far side (${backBehind}) and home to its hand (${[...phases].join(', ')})`);
+      // parried out of the air, the scythe drops and it's left unarmed and reeling until it calls it back
+      R = reaper(0, -16);
+      R.startThrow(p);
+      for (let i = 0; i < 200 && !(R.scytheOut && dist3(R.scytheOut.pos, p.center()) < 4.2); i++) T.frame(1);
+      T.press('KeyE');
+      for (let i = 0; i < 30 && !(R.stunT > 0); i++) T.frame(1);
+      const disarmed = R.stunT > 0 && R.scytheOut && R.scytheOut.dead && p.hp === PC.MAX_HP, hpD = R.hp;
+      T.release('KeyE'); T.frame(4);
+      const dTaken = hurtEnemy(R, 100, { cause: 'slash' });
+      for (let i = 0; i < 60 * 4 && R.stunT > 0; i++) T.frame(1);
+      ok(disarmed && dTaken === 130 && !R.scytheOut && R.stunT <= 0, `a parry knocks its thrown scythe out of the air: it's unarmed and reeling (${disarmed}), takes more while it is (${dTaken} from a 100 hit), then calls the scythe back (${!R.scytheOut})`);
+      // the whirlwind is its red move: bullet time, a red outline, no parry; standing in the ring you're hit through
+      // a parry, more than once; out of the ring you're not; and it kneels after, open
+      R = reaper(0, -4, { shield: 0 });
+      R.startWhirl(p);
+      const perilW = Game.btKind === 'peril' && Game.btOwner === R && R.outline() !== null && /^#ff/.test(R.outline());
+      for (let i = 0; i < 400 && !(R.act && R.act.kind === 'whirl' && R.act.phase === 'spin'); i++) T.frame(1);
+      const btOver = Game.btT <= 0;
+      p.shield = PC.MAX_SHIELD; T.press('KeyE');
+      const parW = Game.stats.parries;
+      let wHits = 0, hpW = p.hp, shW = p.shield, spun = 0, yaw0 = R.yaw;
+      for (let i = 0; i < 300 && R.act && R.act.kind === 'whirl' && R.act.phase === 'spin'; i++) { T.frame(1); spun += Math.abs(angDiff(yaw0, R.yaw)); yaw0 = R.yaw; if (p.hp < hpW || p.shield < shW - 1) wHits++; p.hp = PC.MAX_HP; hpW = p.hp; shW = p.shield; }
+      T.release('KeyE');
+      const venting = !!(R.act && R.act.kind === 'whirl' && R.act.phase === 'vent'), ventMul = R.damageTakenMul();
+      ok(perilW && btOver && wHits >= 2 && spun > TAU * 2 && Game.stats.parries === parW && venting && ventMul > 1, `the whirlwind winds up red in bullet time (${perilW}), spins ${(spun / TAU).toFixed(1)} times round and hits you ${wHits} times through a parry; then it kneels, open (${venting}, x${ventMul})`);
+      R = reaper(0, -24, { shield: 0 });
+      R.startWhirl(p);
+      for (let i = 0; i < 700 && R.act && R.act.kind === 'whirl' && R.act.phase !== 'vent'; i++) T.frame(1);
+      ok(p.hp === PC.MAX_HP && R.act && R.act.phase === 'vent', `out of its ring the whirlwind doesn't reach you (health ${p.hp})`);
+      // the reaping: a thread from its hand to you, then you're hauled to its feet for the executioner's blow, which
+      // a parry stops; a dash snaps the thread and leaves it open
+      R = reaper(0, -14);
+      R.startReap(p);
+      const reaching = R.act && R.act.kind === 'reap' && R.act.phase === 'reach', d0 = distXZ(R.pos, p.pos);
+      let pulled = false;
+      for (let i = 0; i < 200 && !(R.act && R.act.kind === 'melee'); i++) { T.frame(1); if (R.act && R.act.kind === 'reap' && R.act.phase === 'pull') pulled = true; }
+      const d1 = distXZ(R.pos, p.pos), exec = !!(R.act && R.act.kind === 'melee' && R.act.move === 'execute');
+      for (let i = 0; i < 90 && !(R.act && R.act.glinted); i++) T.frame(1);
+      T.frame(7);
+      T.press('KeyE');
+      const par1 = Game.stats.parries;
+      for (let i = 0; i < 40 && Game.stats.parries === par1; i++) T.frame(1);
+      T.release('KeyE');
+      ok(reaching && pulled && d0 > 13 && d1 < 6 && exec && Game.stats.parries === par1 + 1 && p.hp === PC.MAX_HP, `the reaping hauls you from ${d0.toFixed(1)} m to ${d1.toFixed(1)} m for the executioner's blow (${exec}), which a parry stops (${Game.stats.parries - par1})`);
+      R = reaper(0, -14);
+      R.startReap(p);
+      for (let i = 0; i < 200 && !(R.act && R.act.kind === 'reap' && R.act.phase === 'pull' && R.act.t > 0.08); i++) T.frame(1);
+      T.press('KeyD'); T.tap('ShiftLeft'); T.frame(3); T.release('KeyD');
+      const snapped = !!(R.act && R.act.kind === 'flinch'), dS = distXZ(R.pos, p.pos);
+      T.frame(40);
+      ok(snapped && dS > 7 && p.hp === PC.MAX_HP && p.shield === PC.MAX_SHIELD, `a dash snaps the thread (${snapped}) ${dS.toFixed(1)} m out and leaves it grasping at nothing`);
+      // its dread: the colour drains near it, and not far from it
+      R = reaper(0, -4);
+      const dreadNear = reaperDread();
+      R.pos.z -= 30; R.prev.z -= 30;
+      const dreadFar = reaperDread();
+      ok(dreadNear > 0.7 && dreadFar === 0, `its dread is on you near it (${dreadNear.toFixed(2)}) and gone at range (${dreadFar})`);
+      // the last hit plays its knockout and leaves its husk; a soul it was holding comes back to you
+      R = reaper(0, -3.4, { shield: 0 });
+      R.startMove('sweep', null);
+      for (let i = 0; i < 90 && p.hp === PC.MAX_HP; i++) T.frame(1);
+      const hpK = p.hp, hadSoul = !!soulOut();
+      S.gameplay.invincible = true;
+      Render.draw(1 / 60);
+      hurtEnemy(R, 99999, { cause: 'slash', dir: { x: 0, y: 0, z: -1 } });
+      const rKo = !!(R.dying && Game.cine && Game.cine.kind === 'ko');
+      for (let i = 0; i < 60 * 10 && !R.dead; i++) T.frame(1);
+      T.frame(30);
+      const rHusk = Game.props.find((q) => q.kind === 'husk');
+      Render.draw(1 / 60);
+      ok(rKo && R.dead && rHusk && rHusk.rig && SaveData.unlocks.reaper && hadSoul && !soulOut() && p.hp > hpK, `the last hit plays REAP-R's knockout and leaves its husk (cutscene ${rKo}, dead ${R.dead}, husk ${!!rHusk}${rHusk ? ', rig ' + !!rHusk.rig : ''}, saved ${SaveData.unlocks.reaper}, soul ${hadSoul}/${!soulOut()}), and the soul it tore out comes back (health ${hpK.toFixed(0)} to ${p.hp.toFixed(0)})`);
+      Game.enemies = []; Game.props = []; Game.hazards = []; Game.projectiles = [];
+      for (const c of ['KeyE', 'KeyD', 'KeyW', 'ShiftLeft', 'Mouse0', 'KeyF']) T.release(c);
+    }
+    S.gameplay.invincible = false;
+    // REAPER:END
+    // RIFT:START
+    // ---------- the Rift ----------
+    {
+      // the region flow goes round all three: KRAG's portal leads to the Rift, where three waves come before REAP-R,
+      // and REAP-R's leads back to the crossroads
+      {
+        Game.toMenu(); UI.act('endless'); T.frame(2); p = Game.player; S.gameplay.invincible = true;
+        Foundry.travel('foundry'); Director.region = 'foundry'; Director.stint = 1; Director.regionWave = 3; Director.wave = 11; Director.state = 'fight';
+        Director.nextWave(); T.frame(2);
+        const boss = Game.enemies.find((q) => q.isBoss);
+        for (const q of Game.enemies) { if (q.skipCine) q.skipCine(); }
+        T.frame(5);
+        for (const q of Game.enemies) q.dead = true;
+        for (let i = 0; i < 120 && Director.state !== 'portal'; i++) T.frame(1);
+        const pt = Director.portal, toRift = !!(Director.state === 'portal' && pt && pt.to === 'rift');
+        for (let i = 0; i < 90; i++) T.frame(1);
+        if (Game.state === 'pick') Game.chooseUpgrade(UI.pickIds[0]);
+        p = Game.player; p.hp = 64;
+        p.pos.x = p.prev.x = pt.pos.x; p.pos.z = p.prev.z = pt.pos.z; p.pos.y = p.prev.y = pt.pos.y;
+        for (let i = 0; i < 30 && Arena.id !== 'rift'; i++) T.frame(1);
+        const arrived = Arena.id === 'rift' && Director.region === 'rift' && Game.player.hp === 64 && Director.wave === 12;
+        const gates = Game.hazards.filter((h) => h.kind === 'riftgate').length;
+        const types = [];
+        for (let w = 0; w < 4; w++) { Game.enemies = []; Director.nextWave(); types.push(Director.bossWave ? Director.bossType : 'wave'); }
+        const named = RIFT_NAMES.includes(Director.waveName) || Director.waveName === 'REAP-R';
+        ok(boss && boss.type === 'krag' && toRift && arrived && gates === World.def.gates.length * 2 && types.join(',') === 'wave,wave,wave,reaper' && REGION_NEXT.rift === 'crossroads' && named, `endless: when KRAG falls its portal leads to the Rift (${toRift}); through it the run goes on there (${arrived}: wave and health carried over, ${gates} standing tears); then ${types.join(', ')}; REAP-R's portal leads to the ${REGION_NEXT.rift}`);
+        Game.enemies = []; Game.hazards = [];
+      }
+      const inRift = () => { Game.toMenu(); UI.act('test'); T.frame(2); Foundry.travel('rift', true); T.frame(5); p = Game.player; S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD; p.iframes = 0; return p; };
+      // the void round the dais tears at you and throws you back out onto a side; an enemy knocked in takes a lot
+      {
+        p = inRift();
+        const V = World.def.lava[1];
+        p.pos.x = p.prev.x = 6; p.pos.z = p.prev.z = (V.min.z + V.max.z) / 2 + 0.6; p.pos.y = p.prev.y = V.y + 0.05; p.vel.x = p.vel.y = p.vel.z = 0; p.shield = 0;
+        T.frame(2);
+        const burned = p.hp < PC.MAX_HP, thrown = p.vel.y > 8;
+        T.frame(12);
+        for (let i = 0; i < 120 && !(p.onGround && p.pos.y > -0.1); i++) T.frame(1);
+        const outY = p.pos.y, outZ = p.pos.z;
+        const en = T.enemy('scrapper', 0, 0, { frozen: true, hp: 500 });
+        en.pos.x = en.prev.x = -6; en.pos.z = en.prev.z = (V.min.z + V.max.z) / 2; en.pos.y = en.prev.y = V.y + 0.05;
+        T.frame(3);
+        ok(V.void && burned && thrown && outY > -0.1 && p.onGround && !Foundry.lavaAt(p.pos.x, outZ) && 500 - en.hp >= LAVA.EDMG, `the Rift's void tears at you (${(PC.MAX_HP - p.hp).toFixed(0)}) and throws you out onto a side (y ${outY.toFixed(2)}, z ${outZ.toFixed(1)}); an enemy in it takes ${500 - en.hp}`);
+        Game.enemies = [];
+      }
+      // a standing tear: step in and you're out of its twin, up on the arch; it rests before it will take you back
+      {
+        p = inRift();
+        const G = World.def.gates[0], ga = Game.hazards.find((h) => h.kind === 'riftgate' && h.spot === G && distXZ(h.pos, G.a) < 0.1);
+        p.pos.x = p.prev.x = G.a.x; p.pos.z = p.prev.z = G.a.z; p.pos.y = p.prev.y = G.a.y; p.vel.x = p.vel.y = p.vel.z = 0;
+        T.frame(2);
+        const up = distXZ(p.pos, G.b) < 0.6 && p.pos.y > G.b.y - 0.5, resting = ga && ga.cool > 0 && ga.twin.cool > 0;
+        T.frame(20);
+        const stayed = distXZ(p.pos, G.b) < 1.5 && p.pos.y > G.b.y - 0.5;
+        for (let i = 0; i < 100 && ga.twin.cool > 0; i++) { T.frame(1); p.pos.x = p.prev.x = G.b.x + 1.4; p.pos.z = p.prev.z = G.b.z; p.vel.x = p.vel.z = 0; }
+        p.pos.x = p.prev.x = G.b.x; p.pos.z = p.prev.z = G.b.z;
+        T.frame(2);
+        const down = distXZ(p.pos, G.a) < 0.6 && p.pos.y < 1;
+        ok(ga && up && resting && stayed && down && !World.overlap(p.pos.x, p.pos.y + 0.02, p.pos.z, p.r * 0.9, p.h - 0.04), `a standing tear takes you up onto the arch (${up}), rests before it will take you again (${resting}, ${stayed}), then takes you back down (${down})`);
+      }
+      // an enemy on the square reaches you on the dais by a bridge, not through the void
+      {
+        p = inRift();
+        p.pos.x = p.prev.x = 0; p.pos.z = p.prev.z = 0; p.pos.y = p.prev.y = 0;
+        T.frame(2);
+        const en = T.enemy('scrapper', 12, 21, { cd: 99 });
+        let fell = false, reached = false;
+        for (let i = 0; i < 60 * 14 && !reached; i++) { T.frame(1); if (en.pos.y < -1) fell = true; p.pos.x = p.prev.x = 0; p.pos.z = p.prev.z = 0; p.vel.x = p.vel.z = 0; if (distXZ(en.pos, p.pos) < 3) reached = true; }
+        ok(reached && !fell, `an enemy on the square crosses to the dais by a bridge (${reached}), never through the void (${!fell})`);
+        Game.enemies = [];
+      }
+      Game.enemies = []; Game.props = []; Game.hazards = []; Game.projectiles = [];
+    }
+    // RIFT:END
 
 
     // ---------- AEGIS-07 as the player ----------
@@ -1839,6 +2113,163 @@ async function run(browser, file, errors) {
       ok(refused && aimed && !p.fistAim && p.ultCharge === 0 && 500 - f1.hp >= KP_FIST.DMG && 500 - f2.hp >= KP_FIST.DMG && f3.hp === 500 && Game.hazards.some((h) => h instanceof KragFistChasm), `the Molten Fist needs a full meter (${refused}), draws back into bullet time (${aimed}), and its chasm hits what's in the cone (${500 - f1.hp}, ${500 - f2.hp} 18 m out) and not behind (${500 - f3.hp})`);
       Game.enemies = []; Game.hazards = [];
     }
+    // ---------- REAP-R as the player ----------
+    // picked on the title screen, it plays as the harvester: a 2.7 m body on its own model, scythe in hand
+    const asReaper = () => {
+      Game.toMenu(); SaveData.character = 'reaper'; UI.act('street'); T.frame(3);
+      p = Game.player; S.gameplay.invincible = false; p.hp = PC.MAX_HP; p.shield = PC.MAX_SHIELD;
+      Game.props = []; Game.projectiles = []; Game.hazards = []; Game.enemies = [];
+      return p;
+    };
+    p = asReaper(); Render.draw(1 / 60);
+    ok(p instanceof ReaperPlayer && p.h > 2.6 && !p.scytheOut && Render.playerRig === Render.rigs.reaper && !Render.rigs.ronin.mesh.visible && Render.rigs.reaper.jet.g.visible && p.utility().id === 'reaperThrow', 'picking REAP-R plays it: a 2.7 m body on its own model with the scythe\'s jet lit, the throw on F');
+    // the string: sweep, sweep, then the reaping cut, each landing, the last hardest; what it cuts is rent, and a
+    // rent enemy takes a fifth more
+    {
+      const k1 = T.enemy('scrapper', 3.2, 0, { frozen: true, hp: 500 });
+      T.face(k1.pos.x, k1.pos.z);
+      const hpsR = [], types = [];
+      for (let i = 0; i < 3; i++) { const h0 = k1.hp; T.tap('Mouse0'); T.frame(4); types.push(p.attack ? p.attack.type : '-'); for (let j = 0; j < 40 && (p.attack || k1.hp === h0); j++) { T.frame(1); k1.vel.x = k1.vel.z = 0; k1.pos.x = k1.prev.x = p.pos.x + 3.2; k1.pos.z = k1.prev.z = p.pos.z; } hpsR.push(h0 - k1.hp); T.face(k1.pos.x, k1.pos.z); }
+      const rent = k1.rent > Game.time, h1 = k1.hp;
+      hurtEnemy(k1, 100, { cause: 'test', noKnock: true });
+      const rentHit = h1 - k1.hp;
+      k1.rent = 0; const h2 = k1.hp;
+      hurtEnemy(k1, 100, { cause: 'test', noKnock: true });
+      ok(types.join(',') === 'L,L,L3' && hpsR.every((d) => d > 0) && hpsR[2] > hpsR[0] && rent && rentHit === Math.round(100 * RP_REND.MUL) && h2 - k1.hp === 100, `its string lands sweep, sweep and the reaping cut (${types.join(', ')}: ${hpsR.join(', ')}); what it cuts is rent (${rent}) and takes ${rentHit} from a 100 hit, 100 once it wears off`);
+      Game.enemies = [];
+    }
+    // the warp: no dash, it's at once metres along the way it was moving, through an enemy standing in the way,
+    // untouchable for a moment, a charge spent; into the arena's wall it stops short of it
+    {
+      p = asReaper();
+      const k1 = T.enemy('brute', 3, 0, { frozen: true, hp: 500 });
+      T.face(k1.pos.x, k1.pos.z);
+      const x0 = p.pos.x, ch0 = p.dashCharges;
+      T.press('KeyW'); T.frame(3); T.press('ShiftLeft'); T.frame(1); T.release('ShiftLeft');
+      const jumped = p.pos.x - x0, noDash = p.dashT <= 0, safe = p.iframes > 0.2, past = p.pos.x > k1.pos.x + k1.r, tears = RiftViews.shots.length >= 2;
+      T.frame(2); T.release('KeyW'); T.frame(20);
+      const spent = p.dashCharges === ch0 - 1 || p.dashRecharge > 0;
+      const B = World.def.bounds;
+      p.pos.x = p.prev.x = B.maxX - 2.5; p.vel.x = p.vel.z = 0; T.frame(2);
+      Camera.yaw = yawOf(1, 0); T.frame(2);
+      T.press('KeyW'); T.frame(2); T.tap('ShiftLeft'); T.frame(3); T.release('KeyW');
+      const inside = p.pos.x <= B.maxX - p.r + 0.01 && !World.overlap(p.pos.x, p.pos.y + 0.02, p.pos.z, p.r * 0.9, p.h - 0.04);
+      ok(jumped > 6 && jumped < RP_WARP.DIST + 1.2 && noDash && safe && past && tears && spent && inside, `the warp puts it ${jumped.toFixed(1)} m on at once (no dash: ${noDash}), through a brute in the way (${past}), untouchable (${safe}), a charge spent (${spent}), tears at both ends (${tears}); into the arena's wall it stops inside it (${inside})`);
+      Game.enemies = [];
+    }
+    // attack right after a warp is a drawn cut out of the tear
+    {
+      p = asReaper();
+      const k1 = T.enemy('scrapper', 11, 0, { frozen: true, hp: 500 });
+      T.face(k1.pos.x, k1.pos.z);
+      T.press('KeyW'); T.frame(3); T.tap('ShiftLeft'); T.frame(1); T.tap('Mouse0'); T.release('KeyW');
+      let drew = false;
+      for (let i = 0; i < 40; i++) { T.frame(1); if (p.iaido) drew = true; }
+      ok(drew && k1.hp < 500, `attack out of a warp is a drawn cut (${drew}) that lands (${500 - k1.hp})`);
+      Game.enemies = [];
+    }
+    // the whirlwind: held, it charges with its reach shown; let go at full it spins through everything round it,
+    // hit after hit, and throws it all out with the last; a tap of a hold is one quick turn; a hit breaks the charge
+    {
+      p = asReaper();
+      const ring = [T.enemy('brute', 5, 0, { frozen: true, hp: 2000 }), T.enemy('brute', -5, 0, { frozen: true, hp: 2000 }), T.enemy('brute', 0, 5.5, { frozen: true, hp: 2000 }), T.enemy('brute', 9.5, 0, { frozen: true, hp: 2000 })];
+      T.face(ring[0].pos.x, ring[0].pos.z);
+      T.press('Mouse0'); T.frame(Math.ceil((PC.HEAVY_HOLD + RP_WHIRL.CHARGE) * 60) + 6);
+      const W = p.whirl, charged = !!(W && W.phase === 'charge' && W.k >= 1);
+      Render.draw(1 / 60);
+      const shown = ReaperViews.pRing.visible && Math.abs(ReaperViews.pRing.scale.x - RP_WHIRL.R1) < 0.2;
+      T.release('Mouse0'); T.frame(2);
+      const spinning = !!(p.whirl && p.whirl.phase === 'spin');
+      let yawSum = 0, y0 = p.yaw, hitsW = 0, hpPrev = ring[0].hp;
+      for (let i = 0; i < 200 && p.whirl; i++) { T.frame(1); yawSum += Math.abs(angDiff(y0, p.yaw)); y0 = p.yaw; if (ring[0].hp < hpPrev) { hitsW++; hpPrev = ring[0].hp; } }
+      const near3 = ring.slice(0, 3).every((q) => q.hp < 2000 - RP_WHIRL.DMG1 * 3), far = ring[3].hp === 2000;
+      ok(charged && shown && spinning && yawSum > TAU * 2 && hitsW >= 5 && near3 && far, `the whirlwind charges to full with its ${RP_WHIRL.R1} m reach shown (${charged}, ${shown}), then spins ${(yawSum / TAU).toFixed(1)} times round through the three inside it (${hitsW} hits on one: ${ring.slice(0, 3).map((q) => 2000 - q.hp).join(', ')}) and not the one outside (${2000 - ring[3].hp})`);
+      p = asReaper();
+      const k2 = T.enemy('brute', 3.5, 0, { frozen: true, hp: 2000 });
+      T.face(k2.pos.x, k2.pos.z);
+      T.press('Mouse0'); T.frame(Math.ceil(PC.HEAVY_HOLD * 60) + 3); T.release('Mouse0');
+      for (let i = 0; i < 90 && (p.whirl || i < 5); i++) T.frame(1);
+      const quick = 2000 - k2.hp;
+      T.press('Mouse0'); T.frame(30);
+      const charging = !!(p.whirl && p.whirl.phase === 'charge');
+      p.takeHit({ dmg: 5, from: { x: p.pos.x - 2, y: p.pos.y + 1, z: p.pos.z }, kind: 'melee', source: null, knock: 2 });
+      const broke = !p.whirl;
+      T.release('Mouse0'); T.frame(20);
+      ok(quick >= RP_WHIRL.END0 && quick < RP_WHIRL.END1 + RP_WHIRL.DMG1 * 2 && charging && broke, `a tap of a hold is one quick turn (${quick}); a hit while it charges breaks it (${charging}, ${broke})`);
+      Game.enemies = [];
+    }
+    // the throw: down the aim through a line of enemies, into a tear, out of another and back to the hand; unarmed
+    // (no swing, no parry) until it's back, then on its cooldown
+    {
+      p = asReaper();
+      const line = [T.enemy('scrapper', 8, 0, { frozen: true, hp: 500 }), T.enemy('scrapper', 14, 0, { frozen: true, hp: 500 })];
+      T.aimAt(line[0].center());
+      T.tap('KeyF'); T.frame(2);
+      const out = !!p.scytheOut, s = p.scytheOut;
+      T.tap('Mouse0'); T.frame(4);
+      const noSwing = !p.attack && !p.atkPend && !p.whirl;
+      T.tap('KeyE'); T.frame(2);
+      const noParry = !p.sheathe;
+      const phs = new Set();
+      for (let i = 0; i < 60 * 5 && p.scytheOut; i++) { T.frame(1); if (p.scytheOut) phs.add(p.scytheOut.phase); }
+      Render.draw(1 / 60);
+      ok(out && s.kind === 'scythe' && noSwing && noParry && ['out', 'gap', 'back'].every((q) => phs.has(q)) && !p.scytheOut && line.every((q) => 500 - q.hp >= RP_THROW.DMG) && p.utilCD > 0, `the thrown scythe cuts the line (${line.map((q) => 500 - q.hp).join(', ')}), goes into a tear, out of another and home (${[...phs].join(', ')}); no swing or parry while it's out (${noSwing}, ${noParry}); then F waits (${p.utilCD.toFixed(1)} s)`);
+      Game.enemies = [];
+    }
+    // the execution: after a parry, held and let go, the space in front gives: an enemy 10 m off in the cone is
+    // hauled to your feet, and the cut goes through it and the one you parried
+    {
+      p = asReaper();
+      const a1 = T.scrapper(2.4, 0, { cd: 0 }), b1 = T.enemy('brute', 10, 1, { frozen: true, hp: 100 }), c1 = T.enemy('scrapper', -9, 0, { frozen: true, hp: 100 });
+      T.face(a1.pos.x, a1.pos.z);
+      for (let i = 0; i < 120 && !a1.glinted; i++) T.frame(1);
+      T.frame(6); T.press('KeyE');
+      const parE = Game.stats.parries;
+      for (let i = 0; i < 40 && Game.stats.parries === parE; i++) T.frame(1);
+      for (let i = 0; i < 120 && p.sheathe && p.sheathe.charge < 1; i++) T.frame(1);
+      const full = !!(p.sheathe && p.sheathe.charge >= 1), bFar = distXZ(b1.pos, p.pos);
+      Camera.yaw = yawOf(b1.pos.x - p.pos.x, b1.pos.z - p.pos.z); T.frame(1);
+      T.release('KeyE'); T.frame(1);
+      const bNear = distXZ(b1.pos, p.pos);
+      T.frame(60);
+      ok(Game.stats.parries === parE + 1 && full && bFar > 9 && bNear < 6 && (a1.dead || a1.hp < 44) && (b1.dead || b1.hp <= 0) && c1.hp === 100 && distXZ(c1.pos, p.pos) > 8, `the execution hauls what's in the cone ahead to your feet (${bFar.toFixed(1)} m to ${bNear.toFixed(1)} m) and cuts through it (${b1.dead ? 'dead' : b1.hp}) and what you parried (${a1.dead ? 'dead' : a1.hp}); what's behind you is left alone (${c1.hp})`);
+      T.release('KeyE'); Game.enemies = [];
+    }
+    // dread: an enemy near it is slower and slower to strike; one further off isn't. A kill with its soul out gives
+    // shield back.
+    {
+      p = asReaper();
+      const n1 = T.enemy('scrapper', 4, 0, { frozen: true, hp: 30 }), f1 = T.enemy('scrapper', 16, 0, { frozen: true, hp: 30 });
+      T.frame(3);
+      const base = S.enemies.telegraph * n1.windMul, slowN = n1.tele(1) / base, slowF = f1.tele(1) / (S.enemies.telegraph * f1.windMul), spdN = n1.scaleSpeed() / (n1.def.speed * S.enemies.speed * n1.speedVar);
+      p.shield = 50; p.shieldDelay = 99;
+      T.face(n1.pos.x, n1.pos.z);
+      T.tap('Mouse0'); T.frame(20); T.tap('Mouse0'); T.frame(30); T.tap('Mouse0'); T.frame(40);
+      ok(Math.abs(slowN - RP_DREAD.WIND) < 0.01 && slowF === 1 && Math.abs(spdN - RP_DREAD.SLOW) < 0.01 && n1.dead && Math.abs(p.shield - (50 + RP_REND.SHIELD)) < 0.5, `its dread slows an enemy near it (wind-up x${slowN.toFixed(2)}, speed x${spdN.toFixed(2)}) and not one ${distXZ(f1.pos, p.pos).toFixed(0)} m off (x${slowF}); a kill with its soul out gives ${(p.shield - 50).toFixed(0)} shield back`);
+      Game.enemies = [];
+    }
+    // the Harvest: needs a full meter; a great tear opens where it's aimed, drags enemies in from round it, then
+    // REAP-R steps out of it and reaps the lot (a boss takes a share)
+    {
+      p = asReaper();
+      const g1 = T.enemy('scrapper', 14, 3, { frozen: true, hp: 120 }), g2 = T.enemy('scrapper', 19, -4, { frozen: true, hp: 120 }), g3 = T.enemy('scrapper', -16, 0, { frozen: true, hp: 120 });
+      const at = { x: p.pos.x + 15, y: p.pos.y + 0.3, z: p.pos.z };
+      T.aimAt(at);
+      p.ultCharge = 0.5; T.press('KeyQ'); T.frame(75); T.release('KeyQ'); T.frame(2);
+      const refused = !p.harvest && !Game.hazards.some((h) => h.kind === 'harvest');
+      p.ultCharge = 1; T.aimAt(at); T.press('KeyQ');
+      for (let i = 0; i < 90 && !p.harvest; i++) { T.aimAt(at); }
+      T.release('KeyQ');
+      const H = p.harvest, opened = !!H && p.ultCharge === 0, d1a = distXZ(g1.pos, at), x0 = p.pos.x;
+      T.frame(Math.round(RP_HARVEST.PULL * 60) - 12);
+      const dragged = H ? distXZ(g1.pos, H.pos) : 99, bit = g1.hp < 120;
+      T.frame(40);
+      const stepped = H ? distXZ(p.pos, H.pos) < 1.5 : false;
+      T.frame(40);
+      ok(refused && opened && H && distXZ(H.pos, at) < 3 && dragged < d1a - 1.5 && bit && stepped && g1.dead && g2.dead && !g3.dead && g3.hp === 120, `the Harvest needs a full meter (${refused}); its tear opens where it's aimed (${opened}), drags an enemy in from ${d1a.toFixed(1)} m to ${dragged.toFixed(1)} m, biting (${bit}); then REAP-R steps out of it (${stepped}, ${(p.pos.x - x0).toFixed(1)} m on) and reaps what's round it (${g1.dead}, ${g2.dead}), not what's far off (${g3.hp})`);
+      Game.enemies = []; Game.hazards = [];
+    }
+    SaveData.character = 'ronin';
     // the character select: every character on the stage plays every skill's demo with its real moves, with no
     // page error and no shader compiled; confirming picks it, and leaving takes the stage down
     {
@@ -2084,8 +2515,9 @@ async function run(browser, file, errors) {
 
   // ---------- random play ----------
   // Endless from wave 6, so every enemy type turns up; then the rival fight; then the KRAG fight; then the
-  // training hall; then endless and both boss fights again as AEGIS-07, and again as KRAG
-  const runs = [['endless', seconds, 'ronin'], ['boss', Math.min(seconds, 30), 'ronin'], ['krag', Math.min(seconds, 30), 'ronin'], ['training', Math.min(seconds, 15), 'ronin'], ['endless', Math.min(seconds, 30), 'aegis'], ['boss', Math.min(seconds, 30), 'aegis'], ['krag', Math.min(seconds, 30), 'aegis'], ['endless', Math.min(seconds, 30), 'krag'], ['boss', Math.min(seconds, 30), 'krag'], ['krag', Math.min(seconds, 30), 'krag']];
+  // REAP-R fight; then the training hall; then endless and the boss fights again as AEGIS-07, as KRAG and as
+  // REAP-R
+  const runs = [['endless', seconds, 'ronin'], ['boss', Math.min(seconds, 30), 'ronin'], ['krag', Math.min(seconds, 30), 'ronin'], ['reaper', Math.min(seconds, 30), 'ronin'], ['training', Math.min(seconds, 15), 'ronin'], ['endless', Math.min(seconds, 30), 'aegis'], ['boss', Math.min(seconds, 30), 'aegis'], ['krag', Math.min(seconds, 30), 'aegis'], ['endless', Math.min(seconds, 30), 'krag'], ['boss', Math.min(seconds, 30), 'krag'], ['krag', Math.min(seconds, 30), 'krag'], ['reaper', Math.min(seconds, 30), 'aegis'], ['reaper', Math.min(seconds, 30), 'krag'], ['endless', Math.min(seconds, 30), 'reaper'], ['boss', Math.min(seconds, 30), 'reaper'], ['krag', Math.min(seconds, 30), 'reaper'], ['reaper', Math.min(seconds, 30), 'reaper']];
   for (const [mode, secs, char] of runs) {
   const res = await page.evaluate(async ([frames, mode, char]) => {
     const problems = [];
@@ -2098,7 +2530,7 @@ async function run(browser, file, errors) {
     S.gameplay.invincible = true;
     T.frame(1); Render.draw(1 / 60);
     const progs0 = Gfx.renderer.info.programs.length, progSet0 = new Set(Gfx.renderer.info.programs);
-    const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'Mouse0', 'KeyE', 'Mouse2', 'KeyF'].concat(char === 'aegis' ? ['KeyQ', 'KeyR'] : char === 'krag' ? ['KeyQ'] : []);
+    const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'Mouse0', 'KeyE', 'Mouse2', 'KeyF'].concat(char === 'aegis' ? ['KeyQ', 'KeyR'] : char === 'krag' || char === 'reaper' ? ['KeyQ'] : []);
     const B = World.def.bounds, PM = Camera.PITCH_MAX + 1e-6;
     // the lowest a body may stand: the street, or the bed of the Foundry's molten river
     const floorY = Math.min(World.def.groundY, ...((World.def.lava || []).map((r) => r.y)));
@@ -2128,6 +2560,8 @@ async function run(browser, file, errors) {
       // in the KRAG fight, fill its heat now and then so the Molten Fist and the charged guard get played
       if (mode === 'boss' && f === Math.floor(frames / 3)) { const r = Game.enemies.find((e) => e.isBoss && !e.spawning); if (r) r.hp = Math.floor(r.maxHp / 2) - 1; }
       if (mode === 'krag' && f % 600 === 300) { const r = Game.enemies.find((e) => e.type === 'krag' && !e.spawning && !e.dying); if (r) r.heat = HEAT.MAX; }
+      // in the REAP-R fight, make its whirlwind, throw and reaping ready now and then so each gets played
+      if (mode === 'reaper' && f % 400 === 200) { const r = Game.enemies.find((e) => e.type === 'reaper' && !e.spawning && !e.dying); if (r) { r.cds.whirl = 0; r.cds.throw = 0; r.cds.reap = 0; } }
       if (f === Math.floor(frames / 2)) { Game.pause(); if (Game.state !== 'paused') fail('pause failed'); await UI.resumeGame(); if (Game.state !== 'playing') fail('resume failed'); }
       T.frame(1);
       if (f % 3 === 0) Render.draw(1 / 60);
@@ -2155,17 +2589,18 @@ async function run(browser, file, errors) {
     }
     const boss = Game.enemies.find((e) => e.isBoss);
     SaveData.character = 'ronin';
-    const r = { problems, wave: Director.wave, kills: Game.stats.kills, hits: Game.stats.maxCombo, maxEnemies, types: [...seen].join(' '), style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length, boss: boss ? `${boss.name} at ${boss.hp}/${boss.maxHp}, ${boss.phase ? 'phase ' + boss.phase : 'heat ' + Math.round(boss.heat)}` : 'no boss left' };
+    const r = { problems, wave: Director.wave, kills: Game.stats.kills, hits: Game.stats.maxCombo, maxEnemies, types: [...seen].join(' '), style: Game.rank() ? Game.rank().r : '-', time: Game.time.toFixed(1), calls: Gfx.renderer.info.render.calls, progs: Gfx.renderer.info.programs.length, boss: boss ? `${boss.name} at ${boss.hp}/${boss.maxHp}, ${boss.phase ? 'phase ' + boss.phase : boss.type === 'reaper' ? 'rage ' + boss.rageK().toFixed(2) : 'heat ' + Math.round(boss.heat)}` : 'no boss left' };
     Game.toMenu();
     S.visuals.resScale = 1; Render.resize();
     return r;
   }, [Math.round(secs * 60), mode, char]);
-  const who = char === 'ronin' ? '' : ' as ' + (char === 'aegis' ? 'AEGIS-07' : 'KRAG');
+  const who = char === 'ronin' ? '' : ' as ' + (char === 'aegis' ? 'AEGIS-07' : char === 'reaper' ? 'REAP-R' : 'KRAG');
   if (mode === 'endless') {
     console.log(`  endless from wave 6${who}: ${res.time}s simulated, wave ${res.wave}, ${res.kills} kills, up to ${res.maxEnemies} enemies (${res.types}), style ${res.style}, ${res.calls} draw calls, ${res.progs} shader programs`);
     if (res.kills < 1 && !res.hits) errors.push(`${name}: random play${who} hit nothing`);
   } else if (mode === 'boss') console.log(`  rival fight${who}: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
   else if (mode === 'krag') console.log(`  KRAG fight${who}: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
+  else if (mode === 'reaper') console.log(`  REAP-R fight${who}: ${res.time}s simulated, ${res.boss}, ${res.calls} draw calls, ${res.progs} shader programs`);
   else console.log(`  training hall${who}: ${res.time}s simulated, ${res.calls} draw calls, ${res.progs} shader programs`);
   errors.push(...res.problems.map((m) => `${name}: ${mode}${who}: ${m}`));
   }

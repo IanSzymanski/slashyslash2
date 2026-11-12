@@ -4,7 +4,7 @@
 
 // Style: hits build a meter that ranks you C to SSS. Repeating the same move earns less,
 // and the rank multiplies score and ultimate charge.
-const STYLE_GAIN = { lava: 15, lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, beam: 4, beamFull: 9, round: 1.2, laser: 1.5, burst: 14, strike: 3, detonate: 30, armbreak: 20, punch: 4, smash: 7, shoulder: 8, leap: 9, kragCounter: 14, kragBlast: 12, eruption: 10, fist: 3, vent: 2 };
+const STYLE_GAIN = { lava: 15, lamp: 12, dash: 6, slash: 4, heavy: 7, groundcut: 8, rock: 2, plunge: 10, iaido: 10, chain: 5, tether: 10, reflect: 12, barrel: 10, saw: 1.5, beam: 4, beamFull: 9, round: 1.2, laser: 1.5, burst: 14, strike: 3, detonate: 30, armbreak: 20, punch: 4, smash: 7, shoulder: 8, leap: 9, kragCounter: 14, kragBlast: 12, eruption: 10, fist: 3, vent: 2, whirl: 3, throw: 8, harvest: 3 };
 const STYLE_RANKS = [
   { th: 380, r: 'SSS', c: '#ffffff', mul: 2.5 }, { th: 260, r: 'SS', c: '#ffd070', mul: 2 }, { th: 170, r: 'S', c: '#ffb040', mul: 1.75 },
   { th: 100, r: 'A', c: '#ff5a6a', mul: 1.5 }, { th: 50, r: 'B', c: '#d0a0ff', mul: 1.25 }, { th: 20, r: 'C', c: '#9ab0d0', mul: 1.1 },
@@ -49,8 +49,8 @@ const Game = {
     this.mode = mode;
     this.runs[mode] = (this.runs[mode] || 0) + 1;
     // every mode starts in the crossroads except the 2D street's free roam, Training in its own hall and the
-    // KRAG fight in the Foundry (endless travels between the crossroads and the Foundry through portals)
-    if (!Arena.load(mode === 'street' ? 'street' : mode === 'training' ? 'training' : mode === 'krag' ? 'foundry' : 'crossroads')) Props.reset();
+    // KRAG fight in the Foundry and the REAP-R fight in the Rift (endless travels round all three through portals)
+    if (!Arena.load(mode === 'street' ? 'street' : mode === 'training' ? 'training' : mode === 'krag' ? 'foundry' : mode === 'reaper' ? 'rift' : 'crossroads')) Props.reset();
     Tutorial.active = false; Tutorial.show(null);
     Arena.setBlackout(false);
     this.state = 'playing';
@@ -99,6 +99,7 @@ const Game = {
       if (!this.props.some((p) => p.kind === 'barrel' && dist3(p.pos, s) < 2.7)) this.props.push(new Kind(s));
     }
     Foundry.resetProps();
+    Rift.resetProps();
   },
 
   // ---------- feedback hooks ----------
@@ -220,6 +221,7 @@ const Game = {
     const p = this.player;
     if (!p.ult) p.ultCharge = Math.min(1, p.ultCharge + ((e.heavy ? 3 : 1) / S.gameplay.ultKills) * this.rankMul());
     if (this.has('bloodline') && !p.dead) p.heal(2);
+    if (p.onKill) p.onKill(e, o);
     if (o.cause !== 'fall' && chance(e.heavy ? 1 : 0.12)) this.pickups.push(new Pickup(e.center(), 'hp'));
   },
   onPlayerDeath() {

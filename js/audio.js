@@ -1010,6 +1010,157 @@ const Sound = (() => {
       noise({ dur: 1.0, vol: 0.6, f0: 3000, f1: 200, q: 0.7, rev: 0.6 });
       for (const f of [440, 554, 659]) tone({ type: 'triangle', f0: f, f1: f * 2, dur: 0.6, vol: 0.04, rev: 0.6 });
     },
+    // ---------- the Rift and REAP-R ----------
+    // through a tear: the air sucked in, a reversed swell, then a crack as it shuts
+    warp(p) {
+      const pm = p.pm || 1;
+      noise({ dur: 0.22, vol: 0.4, f0: 400 * pm, f1: 3600 * pm, q: 1.2, a: 0.12 });
+      tone({ type: 'sine', f0: 90 * pm, f1: 420 * pm, dur: 0.2, vol: 0.4, a: 0.1 });
+      tone({ type: 'sawtooth', f0: 1400 * pm, f1: 180, dur: 0.16, vol: 0.05, delay: 0.16, rev: 0.5 });
+      noise({ dur: 0.07, vol: 0.5, type: 'highpass', f0: 3800, delay: 0.17 });
+    },
+    // a tear opening where something is about to come out: a thin rising whine and a rip
+    tearOpen() {
+      tone({ type: 'sawtooth', f0: 320, f1: 1500, dur: 0.3, vol: 0.05, a: 0.05, rev: 0.6 });
+      tone({ type: 'sine', f0: 660, f1: 1980, dur: 0.3, vol: 0.06, a: 0.05, rev: 0.6 });
+      noise({ dur: 0.28, vol: 0.3, type: 'highpass', f0: 2600, a: 0.02 });
+      crackle(0.25, 0.3, { f: 2400 });
+    },
+    // the void tearing at something that fell in
+    voidTear() {
+      tone({ type: 'sine', f0: 300, f1: 40, dur: 0.5, vol: 0.6 });
+      noise({ dur: 0.5, vol: 0.4, f0: 2600, f1: 300, q: 1.5, rev: 0.6 });
+      for (const f of [466, 554, 659]) tone({ type: 'triangle', f0: f, f1: f * 0.5, dur: 0.45, vol: 0.05, rev: 0.7 });
+    },
+    // its scythe winding up: the jet spooling, a breath of air
+    reapWind(p) {
+      const pm = p.pm || 1;
+      tone({ type: 'sawtooth', f0: 180 * pm, f1: 420 * pm, dur: 0.3, vol: 0.05, a: 0.08 });
+      noise({ dur: 0.3, vol: 0.14, f0: 900, f1: 2600, q: 1.5, a: 0.1 });
+    },
+    // the swing: the jet's roar thrown round with the blade, and the air it cuts
+    reapSwing(p) {
+      const h = p.heavy ? 1.3 : 1;
+      noise({ dur: 0.26 * h, vol: 0.5 * h, f0: 3200, f1: 500, q: 0.9 });
+      tone({ type: 'sawtooth', f0: 520, f1: 150, dur: 0.24 * h, vol: 0.08 * h });
+      tone({ type: 'sine', f0: 150, f1: 60, dur: 0.22 * h, vol: 0.4 * h });
+      if (p.heavy) noise({ dur: 0.4, vol: 0.3, type: 'lowpass', f0: 1200, f1: 200, rev: 0.4 });
+    },
+    // the blade landing: a wet metal bite and a hollow ring after it
+    reapHit(p) {
+      const h = p.heavy ? 1.3 : 1;
+      noise({ dur: 0.1, vol: 0.6 * h, type: 'highpass', f0: 2400 });
+      tone({ type: 'sine', f0: 190, f1: 48, dur: 0.3 * h, vol: 0.7 * h });
+      for (const f of [622, 932]) tone({ type: 'triangle', f0: f, f1: f * 0.7, dur: 0.4, vol: 0.05 * h, rev: 0.6 });
+    },
+    // knocked off balance, or dropping to a knee: plates rattling, a groan of metal
+    reapStagger() {
+      for (let i = 0; i < 5; i++) tone({ type: 'square', f0: 700 + Math.random() * 900, dur: 0.03, vol: 0.04, delay: i * 0.05 });
+      tone({ type: 'sawtooth', f0: 160, f1: 70, dur: 0.5, vol: 0.09, rev: 0.4 });
+      noise({ dur: 0.3, vol: 0.3, type: 'lowpass', f0: 1400, f1: 300 });
+    },
+    // the scythe hauled back for the throw: the jet climbing to a scream
+    reapThrowWind() {
+      tone({ type: 'sawtooth', f0: 200, f1: 900, dur: 0.6, vol: 0.07, a: 0.1, rev: 0.3 });
+      noise({ dur: 0.6, vol: 0.25, f0: 800, f1: 4200, q: 1.4, a: 0.2 });
+    },
+    // let go: a crack of air, then the blade's whirr leaving
+    reapThrow() {
+      noise({ dur: 0.12, vol: 0.6, type: 'highpass', f0: 2600 });
+      tone({ type: 'sine', f0: 240, f1: 70, dur: 0.25, vol: 0.5 });
+      for (let i = 0; i < 6; i++) noise({ dur: 0.06, vol: 0.22 - i * 0.03, f0: 1800, q: 2, delay: 0.08 + i * 0.07 });
+    },
+    // back in its hand: a heavy clack and the blade humming
+    reapCatch() {
+      tone({ type: 'sine', f0: 150, f1: 70, dur: 0.16, vol: 0.5 });
+      noise({ dur: 0.08, vol: 0.35, f0: 1500, q: 1.5 });
+      tone({ type: 'triangle', f0: 466, f1: 440, dur: 0.4, vol: 0.05, rev: 0.5 });
+    },
+    // the whirlwind building: the jet from a growl to a shriek over a sub that swells, the air dragged in
+    reapCharge(p) {
+      const d = p.dur || 1.6;
+      tone({ type: 'sine', f0: 38, f1: 90, dur: d, vol: 0.7, a: d * 0.5 });
+      tone({ type: 'sawtooth', f0: 110, f1: 1250, dur: d, vol: 0.07, a: d * 0.3, slide: d });
+      tone({ type: 'sawtooth', f0: 113, f1: 1290, dur: d, vol: 0.05, a: d * 0.3, slide: d, detune: 25 });
+      noise({ dur: d, vol: 0.4, f0: 500, f1: 5200, q: 1.1, a: d * 0.7, rev: 0.4 });
+    },
+    // the moment before it spins: a hard metallic latch and a rising whine
+    whirlLock() {
+      tone({ type: 'square', f0: 1400, f1: 700, dur: 0.07, vol: 0.07 });
+      tone({ type: 'sine', f0: 110, f1: 50, dur: 0.25, vol: 0.6 });
+      tone({ type: 'sawtooth', f0: 500, f1: 1800, dur: 0.22, vol: 0.06, a: 0.05 });
+    },
+    // the whirlwind: a roar that beats as the blade comes round, wind tearing past
+    reapWhirl(p) {
+      const d = p.dur || 1.7, n = Math.round(d / 0.21);
+      noise({ dur: d, vol: 0.5, f0: 1400, f1: 900, q: 0.7, a: 0.08, rev: 0.4 });
+      tone({ type: 'sawtooth', f0: 320, f1: 240, dur: d, vol: 0.08, a: 0.05 });
+      tone({ type: 'sine', f0: 70, f1: 55, dur: d, vol: 0.5, a: 0.05 });
+      for (let i = 0; i < n; i++) noise({ dur: 0.14, vol: 0.4, f0: 2600, f1: 700, q: 1.2, delay: i * 0.21 });
+    },
+    // its hand out at you: a thin cold tone that rises, like a wet finger round a glass
+    reapReach(p) {
+      const d = p.dur || 0.6;
+      for (const f of [932, 1397, 1865]) tone({ type: 'sine', f0: f, f1: f * 1.06, dur: d + 0.2, vol: 0.05, a: d * 0.5, rev: 0.7 });
+      noise({ dur: d, vol: 0.12, type: 'highpass', f0: 5000, a: d * 0.6 });
+    },
+    // the space between you giving: everything dropping away under a rush
+    reapPull() {
+      tone({ type: 'sine', f0: 300, f1: 36, dur: 0.7, vol: 0.8 });
+      noise({ dur: 0.7, vol: 0.5, f0: 300, f1: 3800, q: 0.9, a: 0.3, rev: 0.5 });
+      tone({ type: 'sawtooth', f0: 1865, f1: 233, dur: 0.6, vol: 0.05, rev: 0.6 });
+    },
+    // the thread snapping: a string breaking
+    reapSnap() {
+      tone({ type: 'triangle', f0: 2200, f1: 300, dur: 0.18, vol: 0.12, rev: 0.6 });
+      noise({ dur: 0.05, vol: 0.5, type: 'highpass', f0: 4000 });
+      tone({ type: 'sine', f0: 180, f1: 90, dur: 0.15, vol: 0.3 });
+    },
+    // part of you torn out: a gasp pulled backward, a chord going flat
+    soulTear() {
+      noise({ dur: 0.35, vol: 0.3, f0: 3000, f1: 600, q: 2, a: 0.2, rev: 0.6 });
+      for (const [f, d] of [[880, 0], [698, 0.06], [554, 0.12]]) tone({ type: 'sine', f0: f, f1: f * 0.9, dur: 0.5, vol: 0.07, delay: d, rev: 0.7 });
+      tone({ type: 'sine', f0: 120, f1: 60, dur: 0.3, vol: 0.35 });
+    },
+    // and back: the same chord rising, a breath let out
+    soulBack() {
+      for (const [f, d] of [[554, 0], [698, 0.06], [880, 0.12], [1109, 0.18]]) tone({ type: 'sine', f0: f, f1: f * 1.03, dur: 0.45, vol: 0.07, delay: d, rev: 0.7 });
+      noise({ dur: 0.4, vol: 0.18, type: 'highpass', f0: 3500, a: 0.1, rev: 0.5 });
+    },
+    // reaped: it's gone into the machine, a low bell and a rattle
+    soulReaped() {
+      tone({ type: 'sine', f0: 98, f1: 92, dur: 1.4, vol: 0.7, rev: 0.7 });
+      for (const f of [196, 293, 466]) tone({ type: 'triangle', f0: f, f1: f * 0.98, dur: 1.2, vol: 0.06, rev: 0.7 });
+      noise({ dur: 0.5, vol: 0.2, f0: 2000, f1: 400, q: 2, rev: 0.5 });
+    },
+    // your own heart, near it: two soft thuds, harder the closer it is
+    heartbeat(p) {
+      const k = clamp(p.k || 0.5, 0, 1), v = 0.18 + 0.45 * k;
+      tone({ type: 'sine', f0: 62, f1: 38, dur: 0.14, vol: v });
+      tone({ type: 'sine', f0: 54, f1: 34, dur: 0.16, vol: v * 0.8, delay: 0.17 });
+    },
+    // it arrives: the world's hum dropping out as the tear widens, a rumble under a choir of thin tones
+    reapArrive(p) {
+      const d = p.dur || 1.5;
+      tone({ type: 'sine', f0: 30, f1: 70, dur: d + 0.6, vol: 0.8, a: d * 0.6 });
+      for (const f of [233, 277, 349, 466]) tone({ type: 'sawtooth', f0: f, f1: f * 0.5, dur: d + 0.4, vol: 0.03, a: d * 0.5, rev: 0.8 });
+      noise({ dur: d, vol: 0.35, f0: 3000, f1: 300, q: 1, a: d * 0.8, rev: 0.6 });
+      crackle(d, 0.25, { f: 2200, a: d * 0.4 });
+    },
+    // the blade catching: a rush of flame in a higher, colder key than KRAG's, and the jet lighting
+    reapIgnite() {
+      noise({ dur: 0.6, vol: 0.6, type: 'highpass', f0: 1800, a: 0.02, rev: 0.5 });
+      tone({ type: 'sine', f0: 200, f1: 50, dur: 0.5, vol: 0.7 });
+      for (const f of [466, 698, 932, 1397]) tone({ type: 'triangle', f0: f, f1: f * 1.01, dur: 0.9, vol: 0.05, rev: 0.8 });
+      tone({ type: 'sawtooth', f0: 140, f1: 520, dur: 0.5, vol: 0.06, a: 0.1 });
+    },
+    // the Harvest opening: a great tear, deeper than the others, the air pouring into it
+    reapHarvest() {
+      tone({ type: 'sine', f0: 44, f1: 96, dur: 2.2, vol: 0.8, a: 0.4 });
+      noise({ dur: 2.2, vol: 0.4, f0: 400, f1: 3200, q: 0.9, a: 1.2, rev: 0.6 });
+      for (const f of [233, 311, 466]) tone({ type: 'sawtooth', f0: f, f1: f * 1.5, dur: 2.2, vol: 0.03, a: 0.8, slide: 2, rev: 0.7 });
+      crackle(0.4, 0.4, { f: 2400 });
+    },
     steam() { noise({ dur: 0.8, vol: 0.25, type: 'highpass', f0: 3000, a: 0.05 }); },
     ui() { tone({ type: 'square', f0: 660, dur: 0.04, vol: 0.05 }); },
     uiHover() { tone({ type: 'sine', f0: 990, dur: 0.02, vol: 0.02 }); },
