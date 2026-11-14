@@ -1,0 +1,12 @@
+.git
+.gitignore
+.DS_Store
+.wrangler
+node_modules
+dist
+tools
+README.md
+SYNCED_FROM
+package.json
+package-lock.json
+wrangler.jsonc

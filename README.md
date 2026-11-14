@@ -6,7 +6,9 @@ A third-person 3D version of [SlashySlash](https://github.com/IanSzymanski/slash
 
 ## Running it
 
-Open `index.html` in a browser: on a desktop with a keyboard and mouse, or on a phone or tablet with touch (landscape). No build step or server is needed; Three.js is vendored as a classic script so the page runs from `file://`. WebGL 2 is required.
+Play it at **https://slashyslash3d.iszymanski.workers.dev**. It's hosted on Cloudflare Workers as static assets (`wrangler.jsonc`; `.assetsignore` keeps the tools, README and package files off the site), and every push to `main` redeploys it.
+
+Locally, open `index.html` in a browser: on a desktop with a keyboard and mouse, or on a phone or tablet with touch (landscape). No build step or server is needed; Three.js is vendored as a classic script so the page runs from `file://`. WebGL 2 is required.
 
 If your browser blocks local files, serve the folder instead:
 
