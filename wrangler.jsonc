@@ -1,0 +1,8 @@
+// Cloudflare Workers static-assets deploy: serves index.html, css/, js/ and vendor/ as-is (see .assetsignore).
+{
+  "name": "slashyslash3d",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "."
+  }
+}
